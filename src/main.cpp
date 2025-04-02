@@ -1,190 +1,91 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
 #include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
-AsyncWebServer server(80);
+//////////////////////////////////////////////
+//        RemoteXY include library          //
+//////////////////////////////////////////////
+
+// you can enable debug logging to Serial at 115200
+// #define REMOTEXY__DEBUGLOG
+
+// RemoteXY select connection mode and include library
+#define REMOTEXY_MODE__ESP32CORE_BLE
+#include <BLEDevice.h>
+
+// RemoteXY connection settings
+#define REMOTEXY_BLUETOOTH_NAME "OxebotsPrototype"
+#include <RemoteXY.h>
+
+// RemoteXY GUI configuration
+#pragma pack(push, 1)
+uint8_t RemoteXY_CONF[] =  // 80 bytes
+  {255, 5,   0,   0,  0,   73, 0,  19,  0,   0,  0,  0,  31,  1,   200, 84,
+   1,   1,   5,   0,  2,   86, 5,  25,  13,  0,  64, 26, 31,  31,  79,  78,
+   0,   79,  70,  70, 0,   5,  5,  22,  58,  58, 32, 64, 26,  31,  5,   136,
+   20,  60,  60,  4,  64,  26, 31, 129, 158, 13, 17, 6,  64,  17,  71,  117,
+   105, 100, 101, 0,  129, 26, 15, 16,  6,   64, 17, 77, 111, 118, 101, 0};
+
+// this structure defines all the variables and events of the control interface
+struct
+{
+    // input variables
+    uint8_t switch_01;     // =1 if switch ON and =0 if OFF
+    int8_t joystick_01_x;  // from -100 to 100
+    int8_t joystick_01_y;  // from -100 to 100
+    int8_t joystick_02_x;  // from -100 to 100
+    int8_t joystick_02_y;  // from -100 to 100
+
+    // other variable
+    uint8_t connect_flag;  // =1 if wire connected, else =0
+
+} RemoteXY;
+#pragma pack(pop)
+
+/////////////////////////////////////////////
+//           END RemoteXY include          //
+/////////////////////////////////////////////
 
 // LED Pins
-const int LED_UP = 26;
-const int LED_DOWN = 27;
-const int LED_LEFT = 14;
-const int LED_RIGHT = 12;
-const int LED_CENTER = 13;
 #define BLINK_GPIO (gpio_num_t) CONFIG_BLINK_GPIO
-
-// Synchronization primitives
-SemaphoreHandle_t ledMutex;
-
-// LED states
-volatile bool ledUpState = false;
-volatile bool ledDownState = false;
-volatile bool ledLeftState = false;
-volatile bool ledRightState = false;
-volatile bool ledCenterState = false;
-
-// WiFi credentials
-const char* ssid = "Wokwi-GUEST";
-const char* password = "";
-const int WIFI_CHANNEL = 6;
-
-
-void notFound(AsyncWebServerRequest *request) {
-    request->send(404, "text/plain", "Not found");
-}
-
-String createHtml() {
-    // Local copies of LED states for thread-safe access
-    bool up {false}, down {false}, left {false}, right {false}, center {false};
-
-    if (xSemaphoreTake(ledMutex, portMAX_DELAY) == pdTRUE) {
-        up = ledUpState;
-        down = ledDownState;
-        left = ledLeftState;
-        right = ledRightState;
-        center = ledCenterState;
-        xSemaphoreGive(ledMutex);
-    }
-
-    String response = R"(
-      <!DOCTYPE html><html>
-        <head>
-          <title>ESP32 Joystick Controller</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <style>
-            html { font-family: sans-serif; text-align: center; }
-            body { display: inline-flex; flex-direction: column; }
-            h1 { margin-bottom: 1.2em; }
-            .joystick {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              grid-template-rows: repeat(3, 1fr);
-              gap: 1em;
-              width: 300px;
-              height: 300px;
-              margin: 0 auto;
-            }
-            .btn {
-              background-color: #5B5;
-              border: none;
-              color: #fff;
-              padding: 0.5em 1em;
-              font-size: 2em;
-              text-decoration: none;
-              border-radius: 50%;
-            }
-            .btn.OFF { background-color: #333; }
-            .btn.up { grid-column: 2; grid-row: 1; }
-            .btn.down { grid-column: 2; grid-row: 3; }
-            .btn.left { grid-column: 1; grid-row: 2; }
-            .btn.right { grid-column: 3; grid-row: 2; }
-            .btn.center { grid-column: 2; grid-row: 2; }
-          </style>
-        </head>
-        <body>
-          <h1>ESP32 Joystick Controller</h1>
-          <div class="joystick">
-            <a href="?direction=up" class="btn up UP_STATE">UP_STATE</a>
-            <a href="?direction=left" class="btn left LEFT_STATE">LEFT_STATE</a>
-            <a href="?direction=center" class="btn center CENTER_STATE">CENTER_STATE</a>
-            <a href="?direction=right" class="btn right RIGHT_STATE">RIGHT_STATE</a>
-            <a href="?direction=down" class="btn down DOWN_STATE">DOWN_STATE</a>
-          </div>
-        </body>
-      </html>
-    )";
-
-    response.replace("UP_STATE", up ? "ON" : "OFF");
-    response.replace("DOWN_STATE", down ? "ON" : "OFF");
-    response.replace("LEFT_STATE", left ? "ON" : "OFF");
-    response.replace("RIGHT_STATE", right ? "ON" : "OFF");
-    response.replace("CENTER_STATE", center ? "ON" : "OFF");
-    return response;
-}
-
-void wifiTask(void *pvParameters) {
-    Serial.print("Connecting to WiFi... ");
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password, WIFI_CHANNEL);
-    
-    while (WiFi.waitForConnectResult() != WL_CONNECTED) {
-        Serial.println("Failed! Retrying...");
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    
-    Serial.println(" Connected!");
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-    
-    server.begin();
-    vTaskDelete(NULL);
-}
 
 void heartbeat_task(void * pvParam)
 {
-  gpio_pad_select_gpio(BLINK_GPIO);
-  gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-  while (true) {
-    gpio_set_level(BLINK_GPIO, 0);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    gpio_set_level(BLINK_GPIO, 1);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-  }
+    gpio_pad_select_gpio(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    while (true)
+    {
+        gpio_set_level(BLINK_GPIO, 0);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        gpio_set_level(BLINK_GPIO, 1);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
 }
 
-void setup() {
+void Task_RemoteXY(void * pvParameters)
+{
+    RemoteXY_Init();
+    while (true)
+    {
+        RemoteXY_Handler();
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
+
+void setup()
+{
     Serial.begin(BAUD_RATE);
-    
-    // Initialize LEDs
-    pinMode(LED_UP, OUTPUT);
-    pinMode(LED_DOWN, OUTPUT);
-    pinMode(LED_LEFT, OUTPUT);
-    pinMode(LED_RIGHT, OUTPUT);
-    pinMode(LED_CENTER, OUTPUT);
-    
-    // Create mutex for LED state protection
-    ledMutex = xSemaphoreCreateMutex();
 
-    // Configure server routes
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-        if (request->hasParam("direction")) {
-            String dir = request->getParam("direction")->value();
-            
-            if (xSemaphoreTake(ledMutex, portMAX_DELAY) == pdTRUE) {
-                // Update LED state immediately
-                if (dir == "up") {
-                    ledUpState = !ledUpState;
-                    digitalWrite(LED_UP, ledUpState);
-                } else if (dir == "down") {
-                    ledDownState = !ledDownState;
-                    digitalWrite(LED_DOWN, ledDownState);
-                } else if (dir == "left") {
-                    ledLeftState = !ledLeftState;
-                    digitalWrite(LED_LEFT, ledLeftState);
-                } else if (dir == "right") {
-                    ledRightState = !ledRightState;
-                    digitalWrite(LED_RIGHT, ledRightState);
-                } else if (dir == "center") {
-                    ledCenterState = !ledCenterState;
-                    digitalWrite(LED_CENTER, ledCenterState);
-                }
-                xSemaphoreGive(ledMutex);
-            }
-        }
-        request->send(200, "text/html", createHtml());
-    });
+    // Blinking LED task
+    xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE, nullptr,
+                5, nullptr);
 
-    server.onNotFound(notFound);
-
-    // Create WiFi task with lower priority
-    xTaskCreate(wifiTask, "WiFiTask", 4096, NULL, 1, NULL);
-    xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE, nullptr, 5, nullptr);
-
+    // RemoteXY task
+    xTaskCreate(Task_RemoteXY, "RemoteXY", 20240, NULL, 2, NULL);
 }
 
-void loop() {
-    vTaskDelete(NULL); // FreeRTOS takes over
+void loop()
+{
+    vTaskDelete(NULL);  // FreeRTOS takes over
 }
