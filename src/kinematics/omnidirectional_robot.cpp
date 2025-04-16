@@ -1,7 +1,11 @@
 #include "kinematics/omnidirectional_robot.h"
 
-void OmnidirectionalRobot::initializeKinematicMatrices()
+OmnidirectionalRobot::OmnidirectionalRobot(double r, double d)
+: wheel_radius(r), wheel_distance(d)
 {
+    if (r <= 0 or d <= 0)
+        throw std::invalid_argument("Both parameters must be positive");
+
     constexpr std::array<double, 4> angles = {
       M_PI / 4,      // 45° - 1st wheel angle with respect to robot frame
       3 * M_PI / 4,  // 135° - 2nd wheel angle
@@ -19,14 +23,6 @@ void OmnidirectionalRobot::initializeKinematicMatrices()
 
     // Compute pseudoinverse: H⁺ = (HᵀH)⁻¹Hᵀ
     H_pinv = (H.transpose() * H).inverse() * H.transpose();
-}
-
-OmnidirectionalRobot::OmnidirectionalRobot(double r, double d)
-: wheel_radius(r), wheel_distance(d)
-{
-    if (r <= 0 or d <= 0)
-        throw std::invalid_argument("Both parameters must be positive");
-    initializeKinematicMatrices();
 }
 
 Eigen::Vector4d OmnidirectionalRobot::computeWheelVelocities(double omega_z,

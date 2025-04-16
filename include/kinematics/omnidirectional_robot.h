@@ -22,12 +22,6 @@ class OmnidirectionalRobot
     Eigen::Matrix<double, 3, 4>
       H_pinv;  // Pseudoinverse of H for Forward Kinematics
 
-    /**
-     * @brief Constructs the H matrix with wheel angles and computes its
-     * pseudoinverse (H_pinv) for mapping between wheel and body velocities.
-     */
-    void initializeKinematicMatrices();
-
    public:
     /**
      * @brief Constructor for OmnidirectionalRobot

@@ -1,24 +1,22 @@
 #pragma once
-#include <pins_arduino.h>
 
-// ESP32 Dev kit
-// TODO: Check the pins
+#include <driver/gpio.h>
+
 #ifdef ARDUINO_ESP32_DEV
 
-#define M1_A 2
-#define M1_B 3
-#define M1_C 4
+#define BLINK_GPIO GPIO_NUM_2
 
-#define M2_A 5
-#define M2_B 6
-#define M2_C 7
+// M0
+#define PIN_MOTOR_FRONT_LEFT_PWM GPIO_NUM_27
+#define PIN_MOTOR_FRONT_LEFT_DIR GPIO_NUM_25
+// M1
+#define PIN_MOTOR_BACK_LEFT_PWM GPIO_NUM_14
+#define PIN_MOTOR_BACK_LEFT_DIR GPIO_NUM_26
+// M2
+#define PIN_MOTOR_BACK_RIGHT_PWM GPIO_NUM_12
+#define PIN_MOTOR_BACK_RIGHT_DIR GPIO_NUM_32
+// M3
+#define PIN_MOTOR_FRONT_RIGHT_PWM GPIO_NUM_13
+#define PIN_MOTOR_FRONT_RIGHT_DIR GPIO_NUM_33
 
-#define M3_A 8
-#define M3_B 9
-#define M3_C 10
-
-#define M4_A 11
-#define M4_B 12
-#define M4_C 13
-
-#endif
+#endif  // ARDUINO_ESP32_DEV
