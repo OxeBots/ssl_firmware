@@ -24,7 +24,7 @@ BL48250Driver::BL48250Driver(
     ledc_timer_config(&timer_conf);
 
     // Configure each motor's PWM channel
-    for (int i = 0; i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
         ledc_channel_config_t channel_conf = {.gpio_num = motor_pwm_pins_[i],
                                               .speed_mode = speed_mode_,
@@ -45,7 +45,7 @@ BL48250Driver::BL48250Driver(
 BL48250Driver::~BL48250Driver()
 {
     // Stop all motors
-    for (int i = 0; i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
         ledc_set_duty(speed_mode_, motor_channels_[i], 0);
         ledc_update_duty(speed_mode_, motor_channels_[i]);
@@ -54,7 +54,7 @@ BL48250Driver::~BL48250Driver()
 
 void BL48250Driver::setVelocities(const Eigen::Vector4d & velocities)
 {
-    for (int i = 0; i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i)
     {
         gpio_set_level(motor_dir_pins_[i],
                        velocities[i] < 0 ? MOTOR_BACKWARD : MOTOR_FORWARD);

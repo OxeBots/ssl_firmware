@@ -79,7 +79,7 @@ void heartbeat_task(void * pvParam)
     ledc_channel_config(&channel_config);
 
     // Task no longer needed, delete itself to free CPU resources
-    vTaskDelete(NULL);
+    vTaskDelete(nullptr);
 }
 
 struct RobotCommand
@@ -172,12 +172,12 @@ void setup()
     xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE, nullptr,
                 5, nullptr);
 
-    xTaskCreate(remoteXY_task, "RemoteXY", 20240, NULL, 2, NULL);
+    xTaskCreate(remoteXY_task, "RemoteXY", 20240, nullptr, 2, nullptr);
 
-    xTaskCreate(open_loop_control_task, "Control", 20240, NULL, 2, NULL);
+    xTaskCreate(open_loop_control_task, "Control", 20240, nullptr, 2, nullptr);
 }
 
 void loop()
 {
-    vTaskDelete(NULL);  // FreeRTOS takes over
+    vTaskDelete(nullptr);  // FreeRTOS takes over
 }

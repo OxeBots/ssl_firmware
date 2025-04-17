@@ -1,4 +1,5 @@
-#pragma once
+#ifndef BL48250_MOTOR_DRIVER_H
+#define BL48250_MOTOR_DRIVER_H
 
 #include <ArduinoEigenDense.h>
 #include <driver/gpio.h>
@@ -68,3 +69,5 @@ class BL48250Driver
     BL48250Driver(const BL48250Driver &) = delete;
     BL48250Driver & operator=(const BL48250Driver &) = delete;
 };
+
+#endif  // BL48250_MOTOR_DRIVER_H

@@ -1,4 +1,5 @@
-#pragma once
+#ifndef OMNIDIRECTIONAL_ROBOT_H
+#define OMNIDIRECTIONAL_ROBOT_H
 
 #include <ArduinoEigenDense.h>
 
@@ -56,3 +57,5 @@ class OmnidirectionalRobot
     OmnidirectionalRobot(const OmnidirectionalRobot &) = delete;
     OmnidirectionalRobot & operator=(const OmnidirectionalRobot &) = delete;
 };
+
+#endif  // OMNIDIRECTIONAL_ROBOT_H

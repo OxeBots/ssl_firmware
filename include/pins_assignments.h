@@ -1,4 +1,5 @@
-#pragma once
+#ifndef PINS_ASSIGNMENTS_H
+#define PINS_ASSIGNMENTS_H
 
 #include <driver/gpio.h>
 
@@ -20,3 +21,5 @@
 #define PIN_MOTOR_FRONT_RIGHT_DIR GPIO_NUM_33
 
 #endif  // ARDUINO_ESP32_DEV
+
+#endif // PINS_ASSIGNMENTS_H
