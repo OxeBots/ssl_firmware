@@ -7,20 +7,22 @@
 #include <cmath>
 #include <memory>
 
-#include "kinematics/bl48250_motor_driver.cpp" // Include the implementation file for testing
-#include "kinematics/bl48250_motor_driver.h"
+#include "driver/bl48250.cpp"  // Include the implementation file for testing
+#include "driver/bl48250.h"
 #include "pins_assignments.h"
 
 // Test configuration
-namespace TestConfig
+namespace config
+{
+namespace test
 {
 constexpr std::array<gpio_num_t, 4> MOTOR_PWM_PINS = {
-  PIN_MOTOR_FRONT_LEFT_PWM, PIN_MOTOR_BACK_LEFT_PWM, PIN_MOTOR_BACK_RIGHT_PWM,
-  PIN_MOTOR_FRONT_RIGHT_PWM};
+  config::pin::MOTOR_FRONT_LEFT_PWM, config::pin::MOTOR_BACK_LEFT_PWM,
+  config::pin::MOTOR_BACK_RIGHT_PWM, config::pin::MOTOR_FRONT_RIGHT_PWM};
 
 constexpr std::array<gpio_num_t, 4> MOTOR_DIR_PINS = {
-  PIN_MOTOR_FRONT_LEFT_DIR, PIN_MOTOR_BACK_LEFT_DIR, PIN_MOTOR_BACK_RIGHT_DIR,
-  PIN_MOTOR_FRONT_RIGHT_DIR};
+  config::pin::MOTOR_FRONT_LEFT_DIR, config::pin::MOTOR_BACK_LEFT_DIR,
+  config::pin::MOTOR_BACK_RIGHT_DIR, config::pin::MOTOR_FRONT_RIGHT_DIR};
 
 constexpr std::array<ledc_channel_t, 4> MOTOR_CHANNELS = {
   LEDC_CHANNEL_1, LEDC_CHANNEL_2, LEDC_CHANNEL_3, LEDC_CHANNEL_4};
@@ -28,21 +30,22 @@ constexpr std::array<ledc_channel_t, 4> MOTOR_CHANNELS = {
 constexpr ledc_timer_bit_t DUTY_RESOLUTION = LEDC_TIMER_10_BIT;
 constexpr uint32_t PWM_FREQ = 5000;
 constexpr uint32_t MAX_DUTY = (1 << static_cast<int>(DUTY_RESOLUTION)) - 1;
-}  // namespace TestConfig
+}  // namespace test
+}  // namespace config
 
 // Helper macros
 #define DELAY_MS(ms) vTaskDelay((ms) / portTICK_PERIOD_MS)
 
 // Helper functions
-std::unique_ptr<BL48250Driver> create_driver()
+std::unique_ptr<BL48250> create_driver()
 {
-    std::unique_ptr<BL48250Driver> driver(new BL48250Driver(
-      LEDC_TIMER_0, LEDC_HIGH_SPEED_MODE, TestConfig::DUTY_RESOLUTION,
-      TestConfig::PWM_FREQ, TestConfig::MOTOR_PWM_PINS,
-      TestConfig::MOTOR_DIR_PINS, TestConfig::MOTOR_CHANNELS));
+    std::unique_ptr<BL48250> driver(new BL48250(
+      LEDC_TIMER_0, LEDC_HIGH_SPEED_MODE, config::test::DUTY_RESOLUTION,
+      config::test::PWM_FREQ, config::test::MOTOR_PWM_PINS,
+      config::test::MOTOR_DIR_PINS, config::test::MOTOR_CHANNELS));
 
     // necessary input/output to read the pins in tests
-    for (auto pin : TestConfig::MOTOR_DIR_PINS)
+    for (auto pin : config::test::MOTOR_DIR_PINS)
         gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT);
 
     return driver;
@@ -52,13 +55,13 @@ uint32_t calculate_expected_duty(double velocity)
 {
     const double linear_term = 0.290329861 * std::abs(velocity) - 28.679152042;
     const double clamped = constrain(linear_term, 0.0, 100.0);
-    return static_cast<uint32_t>((clamped / 100.0) * TestConfig::MAX_DUTY);
+    return static_cast<uint32_t>((clamped / 100.0) * config::test::MAX_DUTY);
 }
 
 void assert_motor_direction(size_t motor_idx, int expected,
                             const char * context)
 {
-    const int actual = gpio_get_level(TestConfig::MOTOR_DIR_PINS[motor_idx]);
+    const int actual = gpio_get_level(config::test::MOTOR_DIR_PINS[motor_idx]);
     char msg[128];
     snprintf(msg, sizeof(msg), "Motor %zu: %s (expected %d, got %d)",
              motor_idx, context, expected, actual);
@@ -69,7 +72,7 @@ void assert_motor_duty(size_t motor_idx, uint32_t expected,
                        const char * context)
 {
     const uint32_t actual = ledc_get_duty(
-      LEDC_HIGH_SPEED_MODE, TestConfig::MOTOR_CHANNELS[motor_idx]);
+      LEDC_HIGH_SPEED_MODE, config::test::MOTOR_CHANNELS[motor_idx]);
     char msg[128];
     snprintf(msg, sizeof(msg), "Motor %zu: %s (expected %u, got %u)",
              motor_idx, context, expected, actual);
@@ -86,7 +89,8 @@ void test_setVelocities_positive_values()
     DELAY_MS(10);
 
     for (size_t i = 0; i < 4; ++i)
-        assert_motor_direction(i, MOTOR_FORWARD, "positive velocity");
+        assert_motor_direction(i, config::driver::MOTOR_FORWARD,
+                               "positive velocity");
 
     for (size_t i = 0; i < 4; ++i)
         assert_motor_duty(i, calculate_expected_duty(velocities[i]),
@@ -102,7 +106,8 @@ void test_setVelocities_negative_values()
     DELAY_MS(10);
 
     for (size_t i = 0; i < 4; ++i)
-        assert_motor_direction(i, MOTOR_BACKWARD, "negative velocity");
+        assert_motor_direction(i, config::driver::MOTOR_BACKWARD,
+                               "negative velocity");
 
     for (size_t i = 0; i < 4; ++i)
         assert_motor_duty(i, calculate_expected_duty(velocities[i]),
@@ -118,15 +123,17 @@ void test_setVelocities_out_of_range_values()
 
     DELAY_MS(10);
 
-    assert_motor_direction(0, MOTOR_FORWARD, "velocity 50.0");
-    assert_motor_direction(1, MOTOR_FORWARD, "velocity 0.0");
-    assert_motor_direction(2, MOTOR_BACKWARD, "velocity -50.0");
-    assert_motor_direction(3, MOTOR_FORWARD, "over max velocity");
+    assert_motor_direction(0, config::driver::MOTOR_FORWARD, "velocity 50.0");
+    assert_motor_direction(1, config::driver::MOTOR_FORWARD, "velocity 0.0");
+    assert_motor_direction(2, config::driver::MOTOR_BACKWARD,
+                           "velocity -50.0");
+    assert_motor_direction(3, config::driver::MOTOR_FORWARD,
+                           "over max velocity");
 
     assert_motor_duty(0, calculate_expected_duty(50.0), "velocity 50.0");
     assert_motor_duty(1, calculate_expected_duty(0.0), "velocity 0.0");
     assert_motor_duty(2, calculate_expected_duty(-50.0), "velocity -50.0");
-    assert_motor_duty(3, TestConfig::MAX_DUTY, "over max velocity");
+    assert_motor_duty(3, config::test::MAX_DUTY, "over max velocity");
 }
 
 void test_setVelocities_zero_input_stop_motors()
@@ -138,7 +145,8 @@ void test_setVelocities_zero_input_stop_motors()
 
     for (size_t i = 0; i < 4; ++i)
     {
-        assert_motor_direction(i, MOTOR_FORWARD, "zero velocity");
+        assert_motor_direction(i, config::driver::MOTOR_FORWARD,
+                               "zero velocity");
         assert_motor_duty(i, 0, "zero velocity duty");
     }
 }

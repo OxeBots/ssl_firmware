@@ -5,10 +5,12 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "kinematics/omnidirectional_robot.cpp" // Include the implementation file for testing
+#include "kinematics/omnidirectional_robot.cpp"  // Include the implementation file for testing
 #include "kinematics/omnidirectional_robot.h"
 
-namespace TestConfig
+namespace config
+{
+namespace test
 {
 constexpr double RADIUS = 0.1;
 constexpr double WHEEL_DISTANCE = 0.2;
@@ -16,12 +18,13 @@ constexpr double EPSILON = 1e-6;
 const double SQRT2_2 = std::sqrt(2) / 2;
 constexpr double ROTATION_FACTOR = -WHEEL_DISTANCE / RADIUS;
 const double TRANSLATION_FACTOR = SQRT2_2 / RADIUS;
-}  // namespace TestConfig
+}  // namespace test
+}  // namespace config
 
 // Helper functions
 void assert_vector_equal(const Eigen::VectorXd & expected,
                          const Eigen::VectorXd & actual, const char * context,
-                         double epsilon = TestConfig::EPSILON)
+                         double epsilon = config::test::EPSILON)
 {
     TEST_ASSERT_EQUAL_MESSAGE(expected.size(), actual.size(),
                               "Vector size mismatch");
@@ -67,10 +70,11 @@ void test_constructor_invalid_params()
 
 void test_pure_rotation()
 {
-    OmnidirectionalRobot robot(TestConfig::RADIUS, TestConfig::WHEEL_DISTANCE);
+    OmnidirectionalRobot robot(config::test::RADIUS,
+                               config::test::WHEEL_DISTANCE);
 
     const Eigen::Vector4d expected =
-      Eigen::Vector4d::Constant(TestConfig::ROTATION_FACTOR);
+      Eigen::Vector4d::Constant(config::test::ROTATION_FACTOR);
 
     const Eigen::Vector4d actual = robot.computeWheelVelocities(1.0, 0, 0);
 
@@ -79,11 +83,12 @@ void test_pure_rotation()
 
 void test_pure_translation_x()
 {
-    OmnidirectionalRobot robot(TestConfig::RADIUS, TestConfig::WHEEL_DISTANCE);
+    OmnidirectionalRobot robot(config::test::RADIUS,
+                               config::test::WHEEL_DISTANCE);
 
     const Eigen::Vector4d expected(
-      TestConfig::TRANSLATION_FACTOR, -TestConfig::TRANSLATION_FACTOR,
-      -TestConfig::TRANSLATION_FACTOR, TestConfig::TRANSLATION_FACTOR);
+      config::test::TRANSLATION_FACTOR, -config::test::TRANSLATION_FACTOR,
+      -config::test::TRANSLATION_FACTOR, config::test::TRANSLATION_FACTOR);
 
     const Eigen::Vector4d actual = robot.computeWheelVelocities(0, 1.0, 0);
 
@@ -92,11 +97,12 @@ void test_pure_translation_x()
 
 void test_pure_translation_y()
 {
-    OmnidirectionalRobot robot(TestConfig::RADIUS, TestConfig::WHEEL_DISTANCE);
+    OmnidirectionalRobot robot(config::test::RADIUS,
+                               config::test::WHEEL_DISTANCE);
 
     const Eigen::Vector4d expected(
-      TestConfig::TRANSLATION_FACTOR, TestConfig::TRANSLATION_FACTOR,
-      -TestConfig::TRANSLATION_FACTOR, -TestConfig::TRANSLATION_FACTOR);
+      config::test::TRANSLATION_FACTOR, config::test::TRANSLATION_FACTOR,
+      -config::test::TRANSLATION_FACTOR, -config::test::TRANSLATION_FACTOR);
 
     const Eigen::Vector4d actual = robot.computeWheelVelocities(0, 0, 1.0);
 
@@ -105,7 +111,8 @@ void test_pure_translation_y()
 
 void test_kinematics_round_trip()
 {
-    OmnidirectionalRobot robot(TestConfig::RADIUS, TestConfig::WHEEL_DISTANCE);
+    OmnidirectionalRobot robot(config::test::RADIUS,
+                               config::test::WHEEL_DISTANCE);
 
     const Eigen::Vector3d original(0.5, 1.2, -0.8);
 
@@ -120,7 +127,8 @@ void test_kinematics_round_trip()
 
 void test_zero_input_zero_output()
 {
-    OmnidirectionalRobot robot(TestConfig::RADIUS, TestConfig::WHEEL_DISTANCE);
+    OmnidirectionalRobot robot(config::test::RADIUS,
+                               config::test::WHEEL_DISTANCE);
 
     const Eigen::Vector4d wheel_zeros = robot.computeWheelVelocities(0, 0, 0);
 

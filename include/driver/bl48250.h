@@ -1,5 +1,5 @@
-#ifndef BL48250_MOTOR_DRIVER_H
-#define BL48250_MOTOR_DRIVER_H
+#ifndef DRIVER_BL48250_H
+#define DRIVER_BL48250_H
 
 #include <ArduinoEigenDense.h>
 #include <driver/gpio.h>
@@ -9,18 +9,25 @@
 #include <array>
 #include <cmath>
 
-#define BL48250_MAX_VEL_RPM 3820.0
-#define BL48250_MAX_VEL_RAD (BL48250_MAX_VEL_RPM * 2.0 * M_PI / 60.0)  // rad/s
-#define BL48250_MIN_VEL 0.0
-#define MOTOR_FORWARD 1
-#define MOTOR_BACKWARD 0
+namespace config
+{
+namespace driver
+{
+constexpr double BL48250_MAX_VEL_RPM = 3820.0;
+constexpr double BL48250_MAX_VEL_RAD =
+  (BL48250_MAX_VEL_RPM * 2.0 * M_PI / 60.0);  // rad/s
+constexpr double BL48250_MIN_VEL = 0.0;
+constexpr uint8_t MOTOR_FORWARD = 1;
+constexpr uint8_t MOTOR_BACKWARD = 0;
+}  // namespace driver
+}  // namespace config
 
 /**
- * @class BL48250Driver
+ * @class BL48250
  * @brief Send the needed signals to the 4 BL48250 motors of the
  * omnidirectional robot to move it.
  */
-class BL48250Driver
+class BL48250
 {
    private:
     ledc_timer_t timer_;
@@ -32,9 +39,12 @@ class BL48250Driver
     std::array<ledc_channel_t, 4> motor_channels_;
     uint32_t max_duty_;
 
+    std::array<uint8_t, 4> directions_;
+    std::array<uint32_t, 4> duty_cycles_;
+
    public:
     /**
-     * @brief Construct a new BL48250Driver object
+     * @brief Construct a new BL48250 object
      * @param timer LEDC timer to use for all PWM channels
      * @param speed_mode LEDC speed mode (LEDC_LOW_SPEED_MODE or
      * LEDC_HIGH_SPEED_MODE)
@@ -46,17 +56,17 @@ class BL48250Driver
      * per motor)
      * @param motor_channels Array of 4 LEDC channels (one per motor)
      */
-    BL48250Driver(ledc_timer_t timer, ledc_mode_t speed_mode,
-                  ledc_timer_bit_t duty_resolution, uint32_t pwm_freq,
-                  const std::array<gpio_num_t, 4> & motor_pwm_pins,
-                  const std::array<gpio_num_t, 4> & motor_dir_pins,
-                  const std::array<ledc_channel_t, 4> & motor_channels);
+    BL48250(ledc_timer_t timer, ledc_mode_t speed_mode,
+            ledc_timer_bit_t duty_resolution, uint32_t pwm_freq,
+            const std::array<gpio_num_t, 4> & motor_pwm_pins,
+            const std::array<gpio_num_t, 4> & motor_dir_pins,
+            const std::array<ledc_channel_t, 4> & motor_channels);
 
     /**
-     * @brief Destroy the BL48250Driver object
+     * @brief Destroy the BL48250 object
      * @details Stops all motors by setting their duty cycle to 0
      */
-    ~BL48250Driver();
+    ~BL48250();
 
     /**
      * @brief Set velocities for all 4 motors simultaneously
@@ -65,9 +75,16 @@ class BL48250Driver
      * BL48250_MAX_VEL_RAD] converted to rad/s
      */
     void setVelocities(const Eigen::Vector4d & velocities);
+    
+    /**
+     * @brief Print the current driver state via the serial interface.
+     * @details Outputs configuration parameters and real-time motor states
+     * (direction, duty cycle) for debugging purposes.
+     */
+    void debugPrint() const;
 
-    BL48250Driver(const BL48250Driver &) = delete;
-    BL48250Driver & operator=(const BL48250Driver &) = delete;
+    BL48250(const BL48250 &) = delete;
+    BL48250 & operator=(const BL48250 &) = delete;
 };
 
-#endif  // BL48250_MOTOR_DRIVER_H
+#endif  // DRIVER_BL48250_H

@@ -3,17 +3,16 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+#include "driver/bl48250.h"
 #include "driver/ledc.h"
-#include "kinematics/bl48250_motor_driver.h"
 #include "kinematics/omnidirectional_robot.h"
 #include "pins_assignments.h"
+
+// RemoteXY should be removed in the future when the radio module is ready
 
 //////////////////////////////////////////////
 //        RemoteXY include library          //
 //////////////////////////////////////////////
-
-// you can enable debug logging to Serial at 115200
-// #define REMOTEXY__DEBUGLOG
 
 // RemoteXY select connection mode and include library
 #define REMOTEXY_MODE__ESP32CORE_BLE
@@ -69,7 +68,7 @@ void heartbeat_task(void * pvParam)
 
     // Configure LEDC channel with 50% duty cycle
     ledc_channel_config_t channel_config = {
-      .gpio_num = BLINK_GPIO,
+      .gpio_num = config::pin::BLINK,
       .speed_mode = LEDC_LOW_SPEED_MODE,
       .channel = LEDC_CHANNEL_0,
       .timer_sel = LEDC_TIMER_0,
@@ -95,11 +94,16 @@ struct RobotCommand
  */
 RobotCommand joy_to_command()
 {
-    RobotCommand command;
+    RobotCommand command{0.0, 0.0, 0.0};
 
-    command.x_velocity = RemoteXY.joystick_02_x * BL48250_MAX_VEL_RAD / 2000.0;
-    command.y_velocity = RemoteXY.joystick_02_y * BL48250_MAX_VEL_RAD / 2000.0;
-    command.angle = 0;
+    if (RemoteXY.switch_01)
+    {
+        command.x_velocity = -RemoteXY.joystick_02_x *
+                             config::driver::BL48250_MAX_VEL_RAD / 4000.0;
+        command.y_velocity = -RemoteXY.joystick_02_y *
+                             config::driver::BL48250_MAX_VEL_RAD / 4000.0;
+        command.angle = 0;
+    }
 
     return command;
 }
@@ -128,27 +132,23 @@ void remoteXY_task(void * pvParameters)
  */
 void open_loop_control_task(void * pvParam)
 {
-    // wheel radius = 32.5 mm
-    constexpr double WHEEL_RADIUS = 0.0325;  // in meters
-    // wheel distance = 96 mm
-    constexpr double WHEEL_DISTANCE = 0.096;  // in meters
-
-    OmnidirectionalRobot robot(WHEEL_RADIUS, WHEEL_DISTANCE);
+    OmnidirectionalRobot robot(config::kinematic::OMNI_WHEEL_RADIUS,
+                               config::kinematic::OMNI_WHEEL_DISTANCE);
 
     constexpr std::array<gpio_num_t, 4> motor_pwm_pins = {
-      PIN_MOTOR_FRONT_LEFT_PWM, PIN_MOTOR_BACK_LEFT_PWM,
-      PIN_MOTOR_BACK_RIGHT_PWM, PIN_MOTOR_FRONT_RIGHT_PWM};
+      config::pin::MOTOR_FRONT_LEFT_PWM, config::pin::MOTOR_BACK_LEFT_PWM,
+      config::pin::MOTOR_BACK_RIGHT_PWM, config::pin::MOTOR_FRONT_RIGHT_PWM};
 
     constexpr std::array<gpio_num_t, 4> motor_dir_pins = {
-      PIN_MOTOR_FRONT_LEFT_DIR, PIN_MOTOR_BACK_LEFT_DIR,
-      PIN_MOTOR_BACK_RIGHT_DIR, PIN_MOTOR_FRONT_RIGHT_DIR};
+      config::pin::MOTOR_FRONT_LEFT_DIR, config::pin::MOTOR_BACK_LEFT_DIR,
+      config::pin::MOTOR_BACK_RIGHT_DIR, config::pin::MOTOR_FRONT_RIGHT_DIR};
 
     constexpr std::array<ledc_channel_t, 4> motor_channels = {
       LEDC_CHANNEL_1, LEDC_CHANNEL_2, LEDC_CHANNEL_3, LEDC_CHANNEL_4};
 
-    BL48250Driver motor_driver(LEDC_TIMER_1, LEDC_HIGH_SPEED_MODE,
-                               LEDC_TIMER_12_BIT, 10000, motor_pwm_pins,
-                               motor_dir_pins, motor_channels);
+    BL48250 motor_driver(LEDC_TIMER_1, LEDC_HIGH_SPEED_MODE, LEDC_TIMER_12_BIT,
+                         10000, motor_pwm_pins, motor_dir_pins,
+                         motor_channels);
 
     RobotCommand command;
 
@@ -160,6 +160,7 @@ void open_loop_control_task(void * pvParam)
           command.angle, command.x_velocity, command.y_velocity);
 
         motor_driver.setVelocities(wheel_velocities);
+        // motor_driver.debugPrint();
 
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }

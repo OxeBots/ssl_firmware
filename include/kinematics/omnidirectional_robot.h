@@ -1,10 +1,29 @@
-#ifndef OMNIDIRECTIONAL_ROBOT_H
-#define OMNIDIRECTIONAL_ROBOT_H
+#ifndef KINEMATICS_OMNIDIRECTIONAL_ROBOT_H
+#define KINEMATICS_OMNIDIRECTIONAL_ROBOT_H
 
 #include <ArduinoEigenDense.h>
 
 #include <cmath>
 #include <stdexcept>
+
+namespace config
+{
+namespace kinematic
+{
+constexpr double OMNI_WHEEL_RADIUS =
+  0.0325;  // Wheel radius in meters (32.5 mm)
+constexpr double OMNI_WHEEL_DISTANCE =
+  0.096;  // Distance from center to wheels in meters (96 mm)
+
+constexpr std::array<double, 4> WHEELS_ANGLE_OFFSET = {
+  M_PI / 4,      // 45° - 1st wheel angle with respect to robot frame
+  3 * M_PI / 4,  // 135° - 2nd wheel angle
+  5 * M_PI / 4,  // 225° - 3rd wheel angle
+  7 * M_PI / 4   // 315° - 4th wheel angle
+};
+
+}  // namespace kinematic
+}  // namespace config
 
 /**
  * @brief See
@@ -58,4 +77,4 @@ class OmnidirectionalRobot
     OmnidirectionalRobot & operator=(const OmnidirectionalRobot &) = delete;
 };
 
-#endif  // OMNIDIRECTIONAL_ROBOT_H
+#endif  // KINEMATICS_OMNIDIRECTIONAL_ROBOT_H
