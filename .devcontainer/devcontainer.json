@@ -17,7 +17,8 @@
                 "ms-vscode.cpptools",
                 "platformio.platformio-ide",
                 "pbkit.vscode-pbkit",
-                "jbenden.c-cpp-flylint"
+                "jbenden.c-cpp-flylint",
+                "jeff-hykin.better-cpp-syntax"
             ]
         }
     },
@@ -25,8 +26,7 @@
         8008
     ],
     "mounts": [
-        "source=/dev/,target=/dev/,type=bind,consistency=consistent",
-        "source=${localEnv:HOME}${localEnv:USERPROFILE}/.bash_history,target=/home/vscode/.bash_history,type=bind"
+        "source=/dev/,target=/dev/,type=bind,consistency=consistent"
     ],
     "runArgs": [
         "--privileged",
