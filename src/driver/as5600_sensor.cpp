@@ -21,13 +21,17 @@ double AS5600_Sensor::convert_to_angle(int raw_value)
     int voltage = 0;
     if (m_do_calibration)
     {
-        adc_cali_raw_to_voltage(m_cali_handle, raw_value, &voltage);
+        // adc_cali_raw_to_voltage(m_cali_handle, raw_value, &voltage);
+        voltage = raw_value * 3300 / 4096;
     }
     else
     {
         voltage = raw_value * 3300 / 4096;
     }
 
+    // Apply voltage clamping to prevent out-of-range values
     voltage = (voltage < 500) ? 500 : (voltage > 4500) ? 4500 : voltage;
+
+    // Convert to angle with linear interpolation
     return (voltage - 500) * (360.0 / 4000.0);
 }

@@ -6,7 +6,7 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "hal/adc_types.h"
 // include PI
-#
+#include <math.h>
 
 namespace config
 {
@@ -15,7 +15,7 @@ namespace driver
 //  0.087890625;
 constexpr float AS5600_RAW_TO_DEGREES = 360.0 / 4096;
 //  0.00153398078788564122971808758949;
-constexpr float AS5600_RAW_TO_RADIANS = PI * 2.0 / 4096;
+constexpr float AS5600_RAW_TO_RADIANS = M_PI * 2.0 / 4096;
 //  4.06901041666666e-6
 constexpr float AS5600_RAW_TO_RPM = 1.0 / 4096 / 60;
 }  // namespace driver

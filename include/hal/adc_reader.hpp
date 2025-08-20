@@ -108,6 +108,7 @@ class ADC_Reader
       m_adc_data;  ///< Stores the latest ADC data, mapping channel to raw
                    ///< value.
     bool m_initialized;  ///< Flag to prevent multiple initializations.
+    static constexpr size_t ADC_BUFFER_SIZE = 512;
 
     /**
      * @brief ADC interrupt service routine (ISR) called when a conversion is

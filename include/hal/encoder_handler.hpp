@@ -28,9 +28,11 @@ class EncoderHandler
     struct EncoderData
     {
         AS5600_Sensor sensor;
-        std::array<std::pair<int64_t, double>, 10> buffer;
+        std::array<std::pair<int64_t, double>, 20> buffer;
         size_t buffer_index = 0;
         bool buffer_full = false;
+        double last_angle = 0.0;
+        int revolution_count = 0;
         portMUX_TYPE spinlock = portMUX_INITIALIZER_UNLOCKED;
     };
 

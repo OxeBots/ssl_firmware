@@ -29,8 +29,8 @@ esp_err_t ADC_Reader::init(const std::vector<adc_channel_t> & channels)
 
     // Configure the ADC continuous mode handle.
     adc_continuous_handle_cfg_t handle_config = {
-      .max_store_buf_size =
-        static_cast<uint32_t>(channels.size() * SOC_ADC_DIGI_RESULT_BYTES * 16),
+      .max_store_buf_size = static_cast<uint32_t>(
+        channels.size() * SOC_ADC_DIGI_RESULT_BYTES * 16),
       .conv_frame_size =
         static_cast<uint32_t>(channels.size() * SOC_ADC_DIGI_RESULT_BYTES),
       .flags = {.flush_pool = true},
@@ -38,7 +38,8 @@ esp_err_t ADC_Reader::init(const std::vector<adc_channel_t> & channels)
 
     ESP_ERROR_CHECK(adc_continuous_new_handle(&handle_config, &m_adc_handle));
 
-    // Due to hardware limitations, only ADC1 can be used reliably within DMA mode
+    // Due to hardware limitations, only ADC1 can be used reliably within DMA
+    // mode
     std::vector<adc_digi_pattern_config_t> pattern_config(channels.size());
     for (size_t i = 0; i < channels.size(); ++i)
     {
@@ -53,7 +54,7 @@ esp_err_t ADC_Reader::init(const std::vector<adc_channel_t> & channels)
     adc_continuous_config_t adc_config = {
       .pattern_num = (uint32_t)channels.size(),
       .adc_pattern = pattern_config.data(),
-      .sample_freq_hz = SOC_ADC_SAMPLE_FREQ_THRES_LOW * channels.size(),
+      .sample_freq_hz = 20000,
       .conv_mode = ADC_CONV_SINGLE_UNIT_1,
       .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
     };
@@ -67,7 +68,8 @@ esp_err_t ADC_Reader::init(const std::vector<adc_channel_t> & channels)
     ESP_ERROR_CHECK(
       adc_continuous_register_event_callbacks(m_adc_handle, &cb_config, this));
 
-    xTaskCreate(s_adc_task_wrapper, "Task_ADC_Reader", 4096, this, 5, &m_task_handle);
+    xTaskCreate(s_adc_task_wrapper, "Task_ADC_Reader", 4096, this, 15,
+                &m_task_handle);
 
     m_initialized = true;
     ESP_ERROR_CHECK(adc_continuous_start(m_adc_handle));
@@ -92,22 +94,30 @@ void ADC_Reader::s_adc_task_wrapper(void * param)
 
 void ADC_Reader::adc_task()
 {
-    uint8_t buf[SOC_ADC_DIGI_RESULT_BYTES * 4];
+    // Use larger buffer to handle higher data rates
+    uint8_t buf[SOC_ADC_DIGI_RESULT_BYTES * ADC_BUFFER_SIZE];
     uint32_t rxLen = 0;
 
     while (true)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        while (adc_continuous_read(m_adc_handle, buf, sizeof(buf), &rxLen,
-                                   0) == ESP_OK)
+        // Process all available data in the buffer
+        esp_err_t ret;
+        do
         {
-            for (uint32_t i = 0; i < rxLen; i += SOC_ADC_DIGI_RESULT_BYTES)
+            ret =
+              adc_continuous_read(m_adc_handle, buf, sizeof(buf), &rxLen, 0);
+            if (ret == ESP_OK)
             {
-                auto * p = reinterpret_cast<adc_digi_output_data_t *>(&buf[i]);
-                m_adc_data[static_cast<adc_channel_t>(p->type1.channel)] =
-                  p->type1.data;
+                for (uint32_t i = 0; i < rxLen; i += SOC_ADC_DIGI_RESULT_BYTES)
+                {
+                    auto * p =
+                      reinterpret_cast<adc_digi_output_data_t *>(&buf[i]);
+                    m_adc_data[static_cast<adc_channel_t>(p->type1.channel)] =
+                      p->type1.data;
+                }
             }
-        }
+        } while (ret == ESP_OK);
     }
 }

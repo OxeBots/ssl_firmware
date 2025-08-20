@@ -35,27 +35,47 @@ void EncoderHandler::s_encoder_task_wrapper(void * param)
 
 void EncoderHandler::encoder_task()
 {
-    constexpr TickType_t delay_ticks = pdMS_TO_TICKS(10);
+    constexpr TickType_t delay_ticks = pdMS_TO_TICKS(10);  // Faster scheduling
     auto & adc_reader = ADC_Reader::get_instance();
+    size_t current_encoder = 0;
 
     while (true)
     {
         vTaskDelay(delay_ticks);
 
-        for (auto & enc : m_encoders)
+        if (m_encoders.empty()) continue;
+
+        auto & enc = m_encoders[current_encoder];
+        current_encoder = (current_encoder + 1) % m_encoders.size();
+
+        // Process only one encoder per iteration
+        int raw = adc_reader.get_raw_data(enc.sensor.get_channel());
+        if (raw == -1) continue;
+
+        double angle = enc.sensor.convert_to_angle(raw);
+        int64_t now = esp_timer_get_time();
+
+        // Handle angle unwrapping and revolution counting
+        double delta = angle - enc.last_angle;
+        if (delta > 180.0)
         {
-            int raw = adc_reader.get_raw_data(enc.sensor.get_channel());
-            if (raw == -1) continue;
-
-            double angle = enc.sensor.convert_to_angle(raw);
-            int64_t now = esp_timer_get_time();
-
-            portENTER_CRITICAL(&enc.spinlock);
-            enc.buffer[enc.buffer_index] = {now, angle};
-            enc.buffer_index = (enc.buffer_index + 1) % enc.buffer.size();
-            if (enc.buffer_index == 0) enc.buffer_full = true;
-            portEXIT_CRITICAL(&enc.spinlock);
+            enc.revolution_count--;
+            delta -= 360.0;
         }
+        else if (delta < -180.0)
+        {
+            enc.revolution_count++;
+            delta += 360.0;
+        }
+
+        double unwrapped_angle = angle + (360.0 * enc.revolution_count);
+        enc.last_angle = angle;
+
+        portENTER_CRITICAL(&enc.spinlock);
+        enc.buffer[enc.buffer_index] = {now, unwrapped_angle};
+        enc.buffer_index = (enc.buffer_index + 1) % enc.buffer.size();
+        if (enc.buffer_index == 0) enc.buffer_full = true;
+        portEXIT_CRITICAL(&enc.spinlock);
     }
 }
 
@@ -68,29 +88,23 @@ double EncoderHandler::calculate_rpm(EncoderData & enc)
     portEXIT_CRITICAL(&enc.spinlock);
 
     if (!full && index < 2) return 0.0;
-    size_t count = full ? buffer.size() : index;
-    if (count < 10) return 0.0;
 
-    std::vector<std::pair<int64_t, double>> sorted;
-    sorted.reserve(count);
-    for (size_t i = 0; i < count; ++i)
-    {
-        sorted.push_back(buffer[(index + i) % buffer.size()]);
-    }
+    const size_t count = full ? buffer.size() : index;
+    if (count < 10) return 0.0;  // Require minimum 10 samples
 
-    double total_angle_change = 0.0;
-    for (size_t i = 0; i < count - 1; ++i)
-    {
-        double delta = sorted[i + 1].second - sorted[i].second;
-        if (delta > 180.0)
-            delta -= 360.0;
-        else if (delta < -180.0)
-            delta += 360.0;
-        total_angle_change += delta;
-    }
+    // Find oldest and newest samples
+    size_t oldest_idx = full ? index : 0;
+    size_t newest_idx = (index == 0) ? buffer.size() - 1 : index - 1;
 
-    double total_time_sec = (sorted.back().first - sorted.front().first) / 1e6;
-    if (total_time_sec < 1e-6) return 0.0;
+    double angle_start = buffer[oldest_idx].second;
+    double angle_end = buffer[newest_idx].second;
+    int64_t time_start = buffer[oldest_idx].first;
+    int64_t time_end = buffer[newest_idx].first;
+
+    double total_angle_change = angle_end - angle_start;
+    double total_time_sec = (time_end - time_start) / 1e6;
+
+    if (total_time_sec < 0.001) return 0.0;  // Prevent division by zero
 
     return (total_angle_change / 360.0) * (60.0 / total_time_sec);
 }
