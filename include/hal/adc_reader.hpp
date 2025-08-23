@@ -104,7 +104,7 @@ class ADC_Reader
     adc_continuous_handle_t
       m_adc_handle;  ///< Handle for the ADC continuous mode driver.
     TaskHandle_t m_task_handle;  ///< Handle for the FreeRTOS ADC reader task.
-    std::unordered_map<adc_channel_t, int>
+    std::unordered_map<adc_channel_t, uint32_t>
       m_adc_data;  ///< Stores the latest ADC data, mapping channel to raw
                    ///< value.
     bool m_initialized;  ///< Flag to prevent multiple initializations.
