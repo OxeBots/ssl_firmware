@@ -7,7 +7,8 @@
 #include <numeric>
 
 #include "driver/ledc.h"
-#include "hal/adc_reader.hpp"
+#include "esp_log.h"
+#include "driver/wheel_state_estimator.hpp"  // Use the new header
 #include "pins_assignments.h"
 
 void heartbeat_task(void * pvParam)
@@ -41,8 +42,11 @@ extern "C" void app_main(void)
       config::pin::MOTOR_FRONT_LEFT_ENC, config::pin::MOTOR_BACK_LEFT_ENC,
       config::pin::MOTOR_BACK_RIGHT_ENC, config::pin::MOTOR_FRONT_RIGHT_ENC};
 
-    ADC_Reader & adc_reader = ADC_Reader::get_instance();
-    adc_reader.init(channels);
+    // Use the new class name and a more descriptive variable name
+    WheelStateEstimator & estimator = WheelStateEstimator::get_instance();
+    estimator.init(channels);
+    estimator.init_i2c(I2C_NUM_0, GPIO_NUM_21, GPIO_NUM_22);
+    estimator.setOutputStage(AS5600_OUTPUT_STAGE_ANALOG_REDUCED);
 
     xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2,
                 nullptr, 5, nullptr);
@@ -54,10 +58,11 @@ extern "C" void app_main(void)
         {
             if (ch == config::pin::MOTOR_FRONT_LEFT_ENC)
             {
-                float angle_deg = adc_reader.get_filtered_angle_deg(ch);
-                float rpm = adc_reader.get_filtered_rpm(ch);
+                // Use the new get_instance() and method calls
+                float angle_deg = estimator.get_filtered_angle_deg(ch);
+                float rpm = estimator.get_filtered_rpm(ch);
                 float accel_rps2 =
-                  adc_reader.get_filtered_acceleration_rps2(ch);
+                  estimator.get_filtered_acceleration_rps2(ch);
 
                 ESP_LOGI(
                   "MAIN",
