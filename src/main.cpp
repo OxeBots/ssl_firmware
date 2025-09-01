@@ -7,8 +7,8 @@
 #include <numeric>
 
 #include "driver/ledc.h"
+#include "driver/wheel_state_estimator.hpp"
 #include "esp_log.h"
-#include "driver/wheel_state_estimator.hpp"  // Use the new header
 #include "pins_assignments.h"
 
 void heartbeat_task(void * pvParam)
@@ -42,11 +42,38 @@ extern "C" void app_main(void)
       config::pin::MOTOR_FRONT_LEFT_ENC, config::pin::MOTOR_BACK_LEFT_ENC,
       config::pin::MOTOR_BACK_RIGHT_ENC, config::pin::MOTOR_FRONT_RIGHT_ENC};
 
-    // Use the new class name and a more descriptive variable name
     WheelStateEstimator & estimator = WheelStateEstimator::get_instance();
     estimator.init(channels);
     estimator.init_i2c(I2C_NUM_0, GPIO_NUM_21, GPIO_NUM_22);
+
+    // --- SENSOR CONFIGURATION ---
+    ESP_LOGI("MAIN", "Configuring AS5600 sensor...");
+    // set Output pin to reduced mode (10% - 90% of VCC) to be in linear region
+    // of ESP32 ADC
     estimator.setOutputStage(AS5600_OUTPUT_STAGE_ANALOG_REDUCED);
+    // Set filters for maximum speed:
+    estimator.setSlowFilter(AS5600_SLOW_FILTER_2X);
+    estimator.setFastFilter(AS5600_FAST_FILTER_THRESH_6LSB);
+
+    // --- CALIBRATION STEP ---
+    for (auto ch : channels)
+    {
+        ESP_LOGI("MAIN", "Calibrating channel %d.", ch);
+        if (ch == config::pin::MOTOR_FRONT_LEFT_ENC)
+        {
+            ESP_ERROR_CHECK(estimator.calibrate_channel(ch));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    ESP_LOGI("MAIN", "All channels calibrated.");
+    // --- BURN SETTINGS (USE WITH CAUTION!) ---
+    // Uncomment the following line ONLY ONCE to permanently save the settings
+    // above. After running it once, you should comment it out again.
+    // ESP_LOGW("MAIN", "Permanently burning settings to sensor...");
+    // estimator.burn_settings();
+    // ESP_LOGI("MAIN", "Burn command sent. Please power-cycle the device.");
+    // while(1) { vTaskDelay(pdMS_TO_TICKS(1000)); } // Halt after burning
 
     xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2,
                 nullptr, 5, nullptr);
@@ -58,7 +85,6 @@ extern "C" void app_main(void)
         {
             if (ch == config::pin::MOTOR_FRONT_LEFT_ENC)
             {
-                // Use the new get_instance() and method calls
                 float angle_deg = estimator.get_filtered_angle_deg(ch);
                 float rpm = estimator.get_filtered_rpm(ch);
                 float accel_rps2 =

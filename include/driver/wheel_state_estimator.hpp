@@ -66,14 +66,6 @@ typedef enum
  * @class WheelStateEstimator
  * @brief Manages ADC readings from analog encoders and provides
  * Kalman-filtered estimates for angle, velocity (RPM), and acceleration.
- *
- * This class implements a singleton pattern to provide a single point of
- * access for ADC-based state estimation. It uses the ESP-IDF's continuous ADC
- * driver to sample analog encoders, performs oversampling to reduce noise, and
- * then feeds the averaged measurements into an Extended Kalman Filter (EKF)
- * for each channel. The EKF tracks the rotational state (angle, angular
- * velocity, angular acceleration), providing a smoothed and physically
- * consistent estimate that is more robust than raw sensor readings.
  */
 class WheelStateEstimator
 {
@@ -81,8 +73,6 @@ class WheelStateEstimator
     /** @brief The number of raw ADC samples to average for each measurement.
      */
     static constexpr size_t OVERSAMPLE_COUNT = 16;
-    /** @brief Conversion factor from a 12-bit raw ADC value to radians. */
-    static constexpr float RAW_TO_RAD = (2.0f * M_PI) / 4096.0f;
     /** @brief Conversion factor from radians per second to revolutions per
      * minute. */
     static constexpr float RAD_S_TO_RPM = 60.0f / (2.0f * M_PI);
@@ -113,8 +103,8 @@ class WheelStateEstimator
 
     /**
      * @brief Initializes the ADC continuous driver and the Kalman filters for
-     * the specified channels.
-     * @param channels A vector of ADC channels to read from.
+     * the specified ADC channels connected to AS5600 encoders.
+     * @param channels A vector of ADC channels connected to AS5600 encoders.
      * @return ESP_OK on success, otherwise an error code.
      */
     esp_err_t init(const std::vector<adc_channel_t> & channels);
@@ -128,6 +118,16 @@ class WheelStateEstimator
      */
     esp_err_t init_i2c(i2c_port_t i2c_port, gpio_num_t sda_pin,
                        gpio_num_t scl_pin);
+
+    /**
+     * @brief Calibrates the analog range for a specific channel linked to an
+     * AS5600 encoder.
+     * @note During this 2-second period, you MUST slowly rotate the sensor
+     * through its full 360-degree range to capture the min and max ADC values.
+     * @param channel The ADC channel to calibrate.
+     * @return ESP_OK on success.
+     */
+    esp_err_t calibrate_channel(adc_channel_t channel);
 
     // --- Filtered State Getters ---
 
@@ -171,9 +171,42 @@ class WheelStateEstimator
      */
     int64_t get_measurement_duration_us(adc_channel_t channel);
 
+    // --- AS5600 Configuration ---
+    /**
+     * @brief Set the output stage configuration for the AS5600, the options
+     * are:
+     * - AS5600_OUTPUT_STAGE_ANALOG_FULL
+     * - AS5600_OUTPUT_STAGE_ANALOG_REDUCED
+     * - AS5600_OUTPUT_STAGE_DIGITAL_PWM
+     * @param stage The desired output stage configuration.
+     * @return ESP_OK on success, otherwise an error code.
+     */
     esp_err_t setOutputStage(as5600_output_stage_t stage);
+
+    /**
+     * @brief Set the slow filter configuration for the AS5600 connected, this
+     * filter is used to smooth out the output signal after rapid changes.
+     * @param filter The desired slow filter configuration.
+     * @return ESP_OK on success, otherwise an error code.
+     */
     esp_err_t setSlowFilter(as5600_slow_filter_t filter);
+
+    /**
+     * @brief Set the fast filter configuration for the AS5600 connected, this
+     * filter is used to modify the output stage while in motion.
+     * @param threshold The desired fast filter threshold configuration.
+     * @return ESP_OK on success, otherwise an error code.
+     */
     esp_err_t setFastFilter(as5600_fast_filter_thresh_t threshold);
+
+    /**
+     * @brief Permanently burns the current configuration to the AS5600's OTP
+     * memory.
+     * @warning This is a PERMANENT operation and can only be done a maximum of
+     * 3 times. Use with extreme caution.
+     * @return ESP_OK on successful burn command.
+     */
+    esp_err_t burn_settings();
 
    private:
     /** @brief Private constructor to enforce singleton pattern. */
@@ -212,6 +245,10 @@ class WheelStateEstimator
     std::array<Measurement, ADC1_CHANNEL_MAX> m_current_measurements;
     std::array<std::unique_ptr<KalmanState>, ADC1_CHANNEL_MAX> m_kalman_states;
     std::array<bool, ADC1_CHANNEL_MAX> m_active_channels;
+
+    // --- Calibration Data ---
+    std::array<uint16_t, ADC1_CHANNEL_MAX> m_min_adc_values;
+    std::array<uint16_t, ADC1_CHANNEL_MAX> m_max_adc_values;
 
     // --- Private Methods ---
 

@@ -38,6 +38,8 @@ def update_flylint_include_config(project_dir):
             include_paths.extend(config.get("includePath", []))
             break
 
+    include_paths = [path for path in include_paths if path]
+
     try:
         with open(settings_path, 'r+') as f:
             try:

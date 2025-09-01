@@ -49,33 +49,33 @@ void EncoderHandler::encoder_task()
         current_encoder = (current_encoder + 1) % m_encoders.size();
 
         // Process only one encoder per iteration
-        int raw = adc_reader.get_raw_data(enc.sensor.get_channel());
-        if (raw == -1) continue;
+        // int raw = adc_reader.get_raw_data(enc.sensor.get_channel());
+        // if (raw == -1) continue;
 
-        double angle = enc.sensor.convert_to_angle(raw);
+        // double angle = enc.sensor.convert_to_angle(raw);
         int64_t now = esp_timer_get_time();
 
         // Handle angle unwrapping and revolution counting
-        double delta = angle - enc.last_angle;
-        if (delta > 180.0)
-        {
-            enc.revolution_count--;
-            delta -= 360.0;
-        }
-        else if (delta < -180.0)
-        {
-            enc.revolution_count++;
-            delta += 360.0;
-        }
+        // double delta = angle - enc.last_angle;
+        // if (delta > 180.0)
+        // {
+        //     enc.revolution_count--;
+        //     delta -= 360.0;
+        // }
+        // else if (delta < -180.0)
+        // {
+        //     enc.revolution_count++;
+        //     delta += 360.0;
+        // }
 
-        double unwrapped_angle = angle + (360.0 * enc.revolution_count);
-        enc.last_angle = angle;
+        // double unwrapped_angle = angle + (360.0 * enc.revolution_count);
+        // enc.last_angle = angle;
 
-        portENTER_CRITICAL(&enc.spinlock);
-        enc.buffer[enc.buffer_index] = {now, unwrapped_angle};
-        enc.buffer_index = (enc.buffer_index + 1) % enc.buffer.size();
-        if (enc.buffer_index == 0) enc.buffer_full = true;
-        portEXIT_CRITICAL(&enc.spinlock);
+        // portENTER_CRITICAL(&enc.spinlock);
+        // enc.buffer[enc.buffer_index] = {now, unwrapped_angle};
+        // enc.buffer_index = (enc.buffer_index + 1) % enc.buffer.size();
+        // if (enc.buffer_index == 0) enc.buffer_full = true;
+        // portEXIT_CRITICAL(&enc.spinlock);
     }
 }
 

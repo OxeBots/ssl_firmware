@@ -1,5 +1,6 @@
 #include "driver/wheel_state_estimator.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
@@ -10,6 +11,7 @@
 // AS5600 Register Addresses
 #define AS5600_REG_CONF_H 0x07
 #define AS5600_REG_RAWANGLE_H 0x0C
+#define AS5600_REG_BURN 0xFF
 #define AS5600_ADDR 0x36
 
 #define ADC_GET_CHANNEL(p_data) ((p_data)->type1.channel)
@@ -17,9 +19,9 @@
 
 // --- EKF Implementation Details ---
 
-// EKF types and state definition are fully contained in the .cpp file
-static constexpr int STATE_DIM =
-  3;  // State vector [angle, velocity, acceleration]
+// EKF types and state definition are fully contained in the .cpp file State
+// vector [angle, velocity, acceleration]
+static constexpr int STATE_DIM = 3;
 static constexpr int MEAS_DIM = 1;     // Measurement vector [angle]
 static constexpr int CONTROL_DIM = 1;  // Control vector [dt]
 
@@ -134,6 +136,8 @@ WheelStateEstimator::WheelStateEstimator()
   m_i2c_dev_handle(NULL)
 {
     m_active_channels.fill(false);
+    m_min_adc_values.fill(4095);
+    m_max_adc_values.fill(0);
 }
 
 WheelStateEstimator::~WheelStateEstimator()
@@ -209,10 +213,53 @@ esp_err_t WheelStateEstimator::init(
     return ESP_OK;
 }
 
+esp_err_t WheelStateEstimator::calibrate_channel(adc_channel_t channel)
+{
+    if (static_cast<int>(channel) >= ADC1_CHANNEL_MAX ||
+        !m_active_channels[channel])
+        return ESP_ERR_INVALID_ARG;
+
+    ESP_LOGI("CALIBRATION",
+             "Starting calibration for channel %d. Rotate sensor through "
+             "full 360 degrees now...",
+             channel);
+
+    uint16_t min_val = 4095;
+    uint16_t max_val = 0;
+    int64_t start_time = esp_timer_get_time();
+
+    while (esp_timer_get_time() - start_time < 2000000)
+    {  // Calibrate for 2 seconds
+        uint16_t current_val = get_value(channel);
+
+        if (current_val < min_val) min_val = current_val;
+        if (current_val > max_val) max_val = current_val;
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    m_min_adc_values[channel] = min_val;
+    m_max_adc_values[channel] = max_val;
+
+    ESP_LOGI("CALIBRATION", "Channel %d calibrated. Min: %d, Max: %d", channel,
+             min_val, max_val);
+
+    // Sanity check
+    if (max_val - min_val < 1000)
+    {
+        ESP_LOGE("CALIBRATION",
+                 "Error: ADC range for channel %d is very small. Check "
+                 "sensor connection.",
+                 channel);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t WheelStateEstimator::init_i2c(i2c_port_t i2c_port,
                                         gpio_num_t sda_pin, gpio_num_t scl_pin)
 {
-    if (!m_initialized) return ESP_ERR_INVALID_STATE;
     if (m_i2c_initialized) return ESP_ERR_INVALID_STATE;
 
     i2c_master_bus_config_t i2c_mst_config = {
@@ -230,7 +277,7 @@ esp_err_t WheelStateEstimator::init_i2c(i2c_port_t i2c_port,
     i2c_device_config_t dev_cfg = {
       .dev_addr_length = I2C_ADDR_BIT_LEN_7,
       .device_address = AS5600_ADDR,
-      .scl_speed_hz = 100000,  // 100 kHz (std mode)
+      .scl_speed_hz = 100000,
     };
 
     ret =
@@ -265,7 +312,6 @@ float WheelStateEstimator::get_filtered_rpm(adc_channel_t channel)
         m_active_channels[channel])
     {
         const auto & state = m_kalman_states[channel]->filter.state_vector;
-        // Apply a deadband to filter out noise when stationary
         return std::abs(state[1] * RAD_S_TO_RPM) <= 60.0f
                  ? 0.0f
                  : state[1] * RAD_S_TO_RPM;
@@ -280,7 +326,7 @@ float WheelStateEstimator::get_filtered_acceleration_rps2(
         m_active_channels[channel])
     {
         const auto & state = m_kalman_states[channel]->filter.state_vector;
-        return state[2] / (2.0f * M_PI);  // convert rad/s^2 to rev/s^2
+        return state[2] / (2.0f * M_PI);
     }
     return 0.0f;
 }
@@ -360,6 +406,21 @@ void WheelStateEstimator::adc_task()
                         uint16_t avg_val = sum / OVERSAMPLE_COUNT;
                         m_current_measurements[chan_num].value = avg_val;
 
+                        // --- ADC to Angle Conversion with CALIBRATED Scaling
+                        // ---
+                        uint16_t min_adc = m_min_adc_values[chan_num];
+                        uint16_t max_adc = m_max_adc_values[chan_num];
+                        float scaled_val = 0.0f;
+
+                        if (max_adc > min_adc)
+                        {
+                            uint16_t clamped_adc =
+                              std::max(min_adc, std::min(max_adc, avg_val));
+                            scaled_val =
+                              (float)(clamped_adc - min_adc) *
+                              (4095.0f / (float)(max_adc - min_adc));
+                        }
+
                         // --- KALMAN FILTER STEP ---
                         KalmanState & k_state = *m_kalman_states[chan_num];
                         int64_t now = esp_timer_get_time();
@@ -368,7 +429,8 @@ void WheelStateEstimator::adc_task()
                         {
                             // First measurement: initialize the filter state
                             float initial_angle =
-                              (avg_val & 0x0FFF) * RAW_TO_RAD;
+                              (static_cast<uint16_t>(scaled_val) & 0x0FFF) *
+                              (2.0f * M_PI / 4096.0f);
                             k_state.state_vec = vt::make_numeric_vector(
                               {initial_angle, 0.0, 0.0});
                             k_state.last_update_us = now;
@@ -384,10 +446,9 @@ void WheelStateEstimator::adc_task()
 
                             // --- Update Step ---
                             float measured_angle =
-                              (avg_val & 0x0FFF) * RAW_TO_RAD;
+                              (static_cast<uint16_t>(scaled_val) & 0x0FFF) *
+                              (2.0f * M_PI / 4096.0f);
 
-                            // Correct for angle wraparound (e.g., from 2PI to
-                            // 0) This is crucial for circular quantities.
                             auto const & predicted_state =
                               k_state.filter.state_vector;
                             float predicted_angle = predicted_state[0];
@@ -408,13 +469,15 @@ void WheelStateEstimator::adc_task()
     }
 }
 
+// --- I2C Methods ---
 esp_err_t WheelStateEstimator::setOutputStage(as5600_output_stage_t stage)
 {
+    if (!m_i2c_initialized) return ESP_ERR_INVALID_STATE;
     uint16_t config;
     esp_err_t ret = read_config_register(&config);
     if (ret != ESP_OK) return ret;
 
-    config &= ~0x0030;  // Clear OUTS bits
+    config &= ~0x0030;
     config |= (stage << 4);
 
     return write_config_register(config);
@@ -422,11 +485,12 @@ esp_err_t WheelStateEstimator::setOutputStage(as5600_output_stage_t stage)
 
 esp_err_t WheelStateEstimator::setSlowFilter(as5600_slow_filter_t filter)
 {
+    if (!m_i2c_initialized) return ESP_ERR_INVALID_STATE;
     uint16_t config;
     esp_err_t ret = read_config_register(&config);
     if (ret != ESP_OK) return ret;
 
-    config &= ~0x0300;  // Clear SF bits
+    config &= ~0x0300;
     config |= (filter << 8);
 
     return write_config_register(config);
@@ -435,24 +499,34 @@ esp_err_t WheelStateEstimator::setSlowFilter(as5600_slow_filter_t filter)
 esp_err_t WheelStateEstimator::setFastFilter(
   as5600_fast_filter_thresh_t threshold)
 {
+    if (!m_i2c_initialized) return ESP_ERR_INVALID_STATE;
     uint16_t config;
     esp_err_t ret = read_config_register(&config);
     if (ret != ESP_OK) return ret;
 
-    config &= ~0x1C00;  // Clear FTH bits
+    config &= ~0x1C00;
     config |= (threshold << 10);
 
     return write_config_register(config);
+}
+
+esp_err_t WheelStateEstimator::burn_settings()
+{
+    if (!m_i2c_initialized) return ESP_ERR_INVALID_STATE;
+    ESP_LOGW("WheelStateEstimator",
+             "Burning settings to AS5600 OTP memory. This is permanent!");
+    uint8_t cmd = 0x40;
+    esp_err_t ret = write_register(AS5600_REG_BURN, &cmd, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    return ret;
 }
 
 esp_err_t WheelStateEstimator::read_config_register(uint16_t * config)
 {
     uint8_t buffer[2];
     esp_err_t ret = read_register(AS5600_REG_CONF_H, buffer, 2);
-    if (ret == ESP_OK)
-    {
-        *config = (buffer[0] << 8) | buffer[1];
-    }
+    if (ret == ESP_OK) *config = (buffer[0] << 8) | buffer[1];
+
     return ret;
 }
 
