@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdio.h>
+
 #include <numeric>
 
 #include "driver/ledc.h"
@@ -56,17 +58,12 @@ extern "C" void app_main(void)
     estimator.setFastFilter(AS5600_FAST_FILTER_THRESH_6LSB);
 
     // --- CALIBRATION STEP ---
-    for (auto ch : channels)
-    {
-        ESP_LOGI("MAIN", "Calibrating channel %d.", ch);
-        if (ch == config::pin::MOTOR_FRONT_LEFT_ENC)
-        {
-            ESP_ERROR_CHECK(estimator.calibrate_channel(ch));
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    // This will iterate through all active channels. Be ready to rotate each
+    // sensor.
+    ESP_LOGI("MAIN", "Starting sensor range calibration...");
+    ESP_ERROR_CHECK(estimator.calibrate_all_ranges(2000));
     ESP_LOGI("MAIN", "All channels calibrated.");
+
     // --- BURN SETTINGS (USE WITH CAUTION!) ---
     // Uncomment the following line ONLY ONCE to permanently save the settings
     // above. After running it once, you should comment it out again.
@@ -80,22 +77,25 @@ extern "C" void app_main(void)
 
     while (true)
     {
-        // Log the filtered state for each channel
-        for (auto ch : channels)
+        // Log data for Arduino Serial Plotter.
+        // Format:
+        // angle_ch0,rpm_ch0,angle_ch1,rpm_ch1,angle_ch2,rpm_ch2,angle_ch3,rpm_ch3
+        for (size_t i = 0; i < channels.size(); ++i)
         {
+            auto ch = channels[i];
             if (ch == config::pin::MOTOR_FRONT_LEFT_ENC)
             {
                 float angle_deg = estimator.get_filtered_angle_deg(ch);
                 float rpm = estimator.get_filtered_rpm(ch);
-                float accel_rps2 =
-                  estimator.get_filtered_acceleration_rps2(ch);
 
-                ESP_LOGI(
-                  "MAIN",
-                  "Ch %d | Angle: %7.2f deg | RPM: %8.2f | Accel: %8.2f rps^2",
-                  ch, angle_deg, rpm, accel_rps2);
+                // Print value pair for the current channel
+                printf("%.2f,%.2f", angle_deg, rpm);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        // Print a newline to signal the end of the data packet for the plotter
+        printf("\n");
+
+        vTaskDelay(pdMS_TO_TICKS(
+          100));  // Use a smaller delay for better plot resolution
     }
 }

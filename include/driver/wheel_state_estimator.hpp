@@ -32,6 +32,12 @@
 #include "hal/adc_types.h"
 #include "soc/soc_caps.h"
 
+// AS5600 Register Addresses
+#define AS5600_REG_CONF_H 0x07
+#define AS5600_REG_RAWANGLE_H 0x0C
+#define AS5600_REG_BURN 0xFF
+#define AS5600_ADDR 0x36
+
 /** @brief Output stage settings for the AS5600 sensor. */
 typedef enum
 {
@@ -61,6 +67,22 @@ typedef enum
     AS5600_FAST_FILTER_THRESH_24LSB = 0x06,
     AS5600_FAST_FILTER_THRESH_10LSB = 0x07
 } as5600_fast_filter_thresh_t;
+
+// ADC config
+#define ADC_ATTENUATION ADC_ATTEN_DB_0  // 0 - 1100 mV
+#define ADC_BITWIDTH ADC_BITWIDTH_12    // 0 - ADC_MAX_VALUE
+#define ADC_MAX_VALUE ((2 << ADC_BITWIDTH) - 1)
+#define ADC_UNIT ADC_UNIT_1  // ESP32 has two available units
+#define ADC_GET_CHANNEL(p_data) ((p_data)->type1.channel)
+#define ADC_GET_DATA(p_data) ((p_data)->type1.data)
+
+// --- EKF Implementation Details ---
+
+// EKF types and state definition are fully contained in the .cpp file State vector [angle,
+// velocity, acceleration]
+static constexpr int STATE_DIM = 3;
+static constexpr int MEAS_DIM = 1;     // Measurement vector [angle]
+static constexpr int CONTROL_DIM = 1;  // Control vector [dt]
 
 /**
  * @class WheelStateEstimator
@@ -102,8 +124,8 @@ class WheelStateEstimator
     }
 
     /**
-     * @brief Initializes the ADC continuous driver and the Kalman filters for
-     * the specified ADC channels connected to AS5600 encoders.
+     * @brief Initializes the ADC continuous driver, sets up ESP-IDF ADC
+     * calibration for each channel, and starts the Kalman filters.
      * @param channels A vector of ADC channels connected to AS5600 encoders.
      * @return ESP_OK on success, otherwise an error code.
      */
@@ -116,18 +138,28 @@ class WheelStateEstimator
      * @param scl_pin The GPIO pin for SCL.
      * @return ESP_OK on success, otherwise an error code.
      */
-    esp_err_t init_i2c(i2c_port_t i2c_port, gpio_num_t sda_pin,
-                       gpio_num_t scl_pin);
+    esp_err_t init_i2c(i2c_port_t i2c_port, gpio_num_t sda_pin, gpio_num_t scl_pin);
 
     /**
-     * @brief Calibrates the analog range for a specific channel linked to an
-     * AS5600 encoder.
-     * @note During this 2-second period, you MUST slowly rotate the sensor
-     * through its full 360-degree range to capture the min and max ADC values.
+     * @brief Calibrates the analog operational range for a specific channel.
+     * @note During this period, you MUST slowly rotate the sensor through its
+     * full 360-degree range to capture the min and max calibrated voltage
+     * values.
      * @param channel The ADC channel to calibrate.
+     * @param duration_ms The time in milliseconds to perform the calibration.
      * @return ESP_OK on success.
      */
-    esp_err_t calibrate_channel(adc_channel_t channel);
+    esp_err_t calibrate_range(adc_channel_t channel, uint32_t duration_ms = 5000);
+
+    /**
+     * @brief Calibrates the analog operational range for all active channels.
+     * @note Rotates through each active channel, performing the range
+     * calibration.
+     * @param duration_ms_per_channel The time in milliseconds to calibrate
+     * each channel.
+     * @return ESP_OK on success, ESP_FAIL if any channel fails.
+     */
+    esp_err_t calibrate_all_ranges(uint32_t duration_ms_per_channel = 5000);
 
     // --- Filtered State Getters ---
 
@@ -155,7 +187,7 @@ class WheelStateEstimator
      */
     float get_filtered_acceleration_rps2(adc_channel_t channel);
 
-    // --- Raw Data Getters (for debugging) ---
+    // --- Raw & Calibrated Data Getters ---
 
     /**
      * @brief Get the most recent raw (but averaged) ADC value.
@@ -163,6 +195,15 @@ class WheelStateEstimator
      * @return The 12-bit ADC value after oversampling and averaging.
      */
     uint32_t get_value(adc_channel_t channel);
+
+    /**
+     * @brief Get the calibrated voltage for a channel using ESP-IDF's
+     * calibration scheme.
+     * @param channel The ADC channel to read from.
+     * @return The voltage in millivolts (mV). Returns 0 if channel is not
+     * active or not calibrated.
+     */
+    int get_voltage_mv(adc_channel_t channel);
 
     /**
      * @brief Get the duration of the last oversampling window.
@@ -241,43 +282,25 @@ class WheelStateEstimator
         size_t count = 0;
     };
 
-    std::array<SamplingState, ADC1_CHANNEL_MAX> m_sampling_states;
-    std::array<Measurement, ADC1_CHANNEL_MAX> m_current_measurements;
-    std::array<std::unique_ptr<KalmanState>, ADC1_CHANNEL_MAX> m_kalman_states;
-    std::array<bool, ADC1_CHANNEL_MAX> m_active_channels;
+    std::array<SamplingState, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_sampling_states;
+    std::array<Measurement, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_current_measurements;
+    std::array<std::unique_ptr<KalmanState>, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_kalman_states;
+    std::array<bool, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_active_channels;
 
-    // --- Calibration Data ---
-    std::array<uint16_t, ADC1_CHANNEL_MAX> m_min_adc_values;
-    std::array<uint16_t, ADC1_CHANNEL_MAX> m_max_adc_values;
+    // --- ADC Calibration Data ---
+    std::array<adc_cali_handle_t, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_cali_handles;
+    std::array<bool, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_calibrated;
+    std::array<int, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_min_voltage_mv;
+    std::array<int, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_max_voltage_mv;
 
     // --- Private Methods ---
-
-    // --- AS5600 Configuration ---
     esp_err_t read_register(uint8_t reg_addr, uint8_t * data, size_t len);
     esp_err_t write_register(uint8_t reg_addr, uint8_t * data, size_t len);
     esp_err_t read_config_register(uint16_t * config);
     esp_err_t write_config_register(uint16_t config);
 
-    /**
-     * @brief ISR callback for the ADC continuous driver.
-     * @note This function is called from an interrupt context. It only
-     * notifies the processing task and returns immediately.
-     */
-    static bool IRAM_ATTR
-    s_adc_callback(adc_continuous_handle_t handle,
-                   const adc_continuous_evt_data_t * edata, void * user_data);
-
-    /**
-     * @brief A C-style wrapper to launch the C++ member function as a FreeRTOS
-     * task.
-     */
+    static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t * edata, void * user_data);
     static void s_adc_task_wrapper(void * param);
-
-    /**
-     * @brief The main FreeRTOS task for processing ADC data.
-     * @note This task waits for notifications from the ISR, reads the ADC
-     * data, performs oversampling, and runs the Kalman filter update step.
-     */
     void adc_task();
 };
 
