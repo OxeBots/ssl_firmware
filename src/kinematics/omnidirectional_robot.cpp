@@ -1,15 +1,10 @@
-#include "kinematics/omnidirectional_robot.h"
+#include "kinematics/omnidirectional_robot.hpp"
 
 using namespace config::kinematic;
 
-OmnidirectionalRobot::OmnidirectionalRobot(
-  double r = OMNI_WHEEL_RADIUS,
-  double d = OMNI_WHEEL_DISTANCE)
-: wheel_radius(r), wheel_distance(d)
+OmnidirectionalRobot::OmnidirectionalRobot(double const r = OMNI_WHEEL_RADIUS, double const d = OMNI_WHEEL_DISTANCE)
+: wheel_radius(abs(r)), wheel_distance(abs(d))
 {
-    if (r <= 0 or d <= 0)
-        throw std::invalid_argument("Both parameters must be positive");
-
     // Construct H matrix
     for (size_t i = 0; i < 4; ++i)
     {
@@ -22,15 +17,12 @@ OmnidirectionalRobot::OmnidirectionalRobot(
     H_pinv = (H.transpose() * H).inverse() * H.transpose();
 }
 
-Eigen::Vector4d OmnidirectionalRobot::computeWheelVelocities(double omega_z,
-                                                             double vx,
-                                                             double vy) const
+vt::numeric_vector<4> OmnidirectionalRobot::computeWheelVelocities(const vt::numeric_vector<3> & body_velocities) const
 {
-    return (H * Eigen::Vector3d(omega_z, vx, vy)) / wheel_radius;
+    return (H * body_velocities) / wheel_radius;
 }
 
-Eigen::Vector3d OmnidirectionalRobot::computeBodyVelocities(
-  const Eigen::Vector4d & wheel_velocities) const
+vt::numeric_vector<3> OmnidirectionalRobot::computeBodyVelocities(const vt::numeric_vector<4> & wheel_velocities) const
 {
     return H_pinv * wheel_velocities * wheel_radius;
 }

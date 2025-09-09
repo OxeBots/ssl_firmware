@@ -3,8 +3,8 @@ from os.path import join as pjoin
 
 def update_flylint_include_config(project_dir):
     """
-    Reads include paths from .vscode/c_cpp_properties.json and updates
-    .vscode/settings.json for the c-cpp-flylint extension.
+    Reads include paths from .vscode/c_cpp_properties.json and updates .vscode/settings.json for the
+    c-cpp-flylint extension.
 
     Args:
         project_dir (str): The root directory of the PlatformIO project.
@@ -37,6 +37,8 @@ def update_flylint_include_config(project_dir):
         if config.get("name") == "PlatformIO":
             include_paths.extend(config.get("includePath", []))
             break
+
+    include_paths = [path for path in include_paths if path]
 
     try:
         with open(settings_path, 'r+') as f:
