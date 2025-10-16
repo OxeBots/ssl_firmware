@@ -38,8 +38,8 @@ constexpr gpio_num_t KICKER_EN = GPIO_NUM_1;
 constexpr gpio_num_t KICKER_PWM = GPIO_NUM_3;
 
 // IMU
-constexpr gpio_num_t IMU_SDA = GPIO_NUM_21;
-constexpr gpio_num_t IMU_SCL = GPIO_NUM_22;
+constexpr gpio_num_t I2C_SDA = GPIO_NUM_21;
+constexpr gpio_num_t I2C_SCL = GPIO_NUM_22;
 
 // NRF24L01 radio module
 constexpr gpio_num_t NRF_CE = GPIO_NUM_15;

@@ -1,12 +1,13 @@
 /**
  * @file as5600_i2c.hpp
- * @brief I2C driver for the AS5600_I2C magnetic rotary encoder.
+ * @brief I2C driver for the AS5600 magnetic rotary encoder.
  */
 #ifndef DRIVER_AS5600_I2C_HPP
 #define DRIVER_AS5600_I2C_HPP
 
-#include <driver/i2c_master.h>
 #include <esp_err.h>
+
+#include "driver/i2c_wrapper.hpp"
 
 class AS5600_I2C
 {
@@ -37,47 +38,19 @@ class AS5600_I2C
     };
 
     AS5600_I2C();
-    ~AS5600_I2C();
+    ~AS5600_I2C() = default;
 
     /**
-     * @brief Initializes the I2C master bus and adds the AS5600_I2C device.
-     * @param i2c_port I2C port number.
-     * @param sda_pin GPIO for SDA.
-     * @param scl_pin GPIO for SCL.
-     * @return ESP_OK on success.
+     * @brief Initializes the AS5600 device using a shared I2C_Wrapper
+     * @param i2c_wrapper Reference to a pre-initialized I2C_Wrapper
+     * @return ESP_OK on success
      */
-    esp_err_t init(i2c_port_t i2c_port, gpio_num_t sda_pin, gpio_num_t scl_pin);
+    esp_err_t init(I2C_Wrapper &i2c_wrapper);
 
     // --- Configuration Methods ---
-    /**
-     * @brief Sets the output stage of the AS5600_I2C.
-     * @param stage The desired output stage. ANALOG_FULL (0 - VCC), ANALOG_REDUCED (0.1VCC -
-     * 0.9VCC), DIGITAL_PWM (0 - VCC PWM).
-     * @return ESP_OK on success.
-     */
     esp_err_t set_output_stage(OutputStage stage);
-
-    /**
-     * @brief Sets the slow filter setting.
-     * @param filter The desired slow filter setting. Higher values mean more filtering.
-     * @return ESP_OK on success.
-     */
     esp_err_t set_slow_filter(SlowFilter filter);
-
-    /**
-     * @brief Sets the fast filter threshold.
-     * @param threshold The desired threshold. Higher values means that it will take a larger change
-     * to trigger the fast filter.
-     * @return ESP_OK on success.
-     */
     esp_err_t set_fast_filter(FastFilter threshold);
-
-    /**
-     * @brief Permanently burns the current configuration to OTP memory.
-     * @warning This is a permanent operation that cannot be undone. The AS5600_I2C only supports
-     * three burn operations in its lifetime.
-     * @return ESP_OK on success.
-     */
     esp_err_t burn_settings();
 
    private:
@@ -93,16 +66,15 @@ class AS5600_I2C
         BURN = 0x40
     };
 
-    // --- I2C handles ---
-    bool m_initialized = false;
-    i2c_master_bus_handle_t m_bus_handle = nullptr;
-    i2c_master_dev_handle_t m_dev_handle = nullptr;
+    static constexpr uint8_t AS5600_ADDR = 0x36;
 
-    // --- Low-level I2C helpers ---
-    esp_err_t read_register(Register reg_addr, uint8_t * data, size_t len);
-    esp_err_t write_register(Register reg_addr, uint8_t * data, size_t len);
+    I2C_Wrapper* m_i2c_wrapper = nullptr;
+    bool m_initialized = false;
+
     esp_err_t read_config_register(uint16_t * config);
     esp_err_t write_config_register(uint16_t config);
+    esp_err_t read_register(Register reg_addr, uint8_t * data, size_t len);
+    esp_err_t write_register(Register reg_addr, uint8_t * data, size_t len);
 };
 
 #endif  // DRIVER_AS5600_I2C_HPP
