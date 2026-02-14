@@ -18,7 +18,8 @@
                 "platformio.platformio-ide",
                 "pbkit.vscode-pbkit",
                 "jbenden.c-cpp-flylint",
-                "jeff-hykin.better-cpp-syntax"
+                "jeff-hykin.better-cpp-syntax",
+                "nordic-semiconductor.nrf-kconfig"
             ]
         }
     },
@@ -31,7 +32,7 @@
     "runArgs": [
         "--privileged",
         "--ipc=host"
-   ],
-    "features": { },
+    ],
+    "features": {},
     "postAttachCommand": "sudo service udev restart"
 }
