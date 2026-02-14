@@ -1,4 +1,4 @@
-#include "kinematics/wheel_odometry.hpp"
+#include "wheel_odom.h"
 
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -43,7 +43,7 @@ esp_err_t WheelOdometry::init(const std::vector<adc_channel_t> & channels, adc_a
 
     m_enc_channels.reserve(channels.size());
 
-    // Create a AS5600_analog object for each specified ADC channel
+    // Create a AS5600 object for each specified ADC channel
     for (const auto & ch : channels)
     {
         if (static_cast<int>(ch) >= SOC_ADC_CHANNEL_NUM(ADC_UNIT))
@@ -67,7 +67,7 @@ esp_err_t WheelOdometry::init(const std::vector<adc_channel_t> & channels, adc_a
         else
             ESP_LOGE(TAG, "ADC voltage calibration failed for channel %d with error %d", ch, ret);
 
-        auto encoder = std::make_unique<AS5600_analog>(ch, handle, is_calibrated, ADC_UNIT, ADC_BITWIDTH);
+        auto encoder = std::make_unique<AS5600>(ch, handle, is_calibrated, ADC_UNIT, ADC_BITWIDTH);
         m_enc_channels.emplace_back(EncoderChannel{ch, std::move(encoder), handle});
         m_channel_lookup[ch] = &m_enc_channels.back();
         ESP_LOGI(TAG, "Created AS5600 for channel %d", ch);

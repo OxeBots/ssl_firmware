@@ -1,9 +1,9 @@
 /**
- * @file wheel_odometry.hpp
+ * @file wheel_odom.h
  * @brief High-level manager for multiple AS5600 encoders.
  */
-#ifndef KINEMATICS_WHEEL_ODOMETRY_HPP
-#define KINEMATICS_WHEEL_ODOMETRY_HPP
+#ifndef KINEMATICS_WHEEL_ODOM_H
+#define KINEMATICS_WHEEL_ODOM_H
 
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_adc/adc_continuous.h>
@@ -16,7 +16,7 @@
 #include <memory>
 #include <vector>
 
-#include "driver/as5600_analog.hpp"
+#include "AS5600.h"
 
 class WheelOdometry
 {
@@ -29,7 +29,7 @@ class WheelOdometry
     struct EncoderChannel
     {
         adc_channel_t channel_num;
-        std::unique_ptr<AS5600_analog> encoder;
+        std::unique_ptr<AS5600> encoder;
         adc_cali_handle_t cali_handle;
     };
 
@@ -80,4 +80,4 @@ class WheelOdometry
     std::vector<float> get_filtered_acceleration_rps2();
 };
 
-#endif  // KINEMATICS_WHEEL_ODOMETRY_HPP
+#endif  // KINEMATICS_WHEEL_ODOM_H

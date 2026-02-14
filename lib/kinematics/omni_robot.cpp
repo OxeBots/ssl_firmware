@@ -1,4 +1,4 @@
-#include "kinematics/omnidirectional_robot.hpp"
+#include "omni_robot.h"
 
 using namespace config::kinematic;
 

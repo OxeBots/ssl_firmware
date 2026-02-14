@@ -1,15 +1,15 @@
 /**
- * @file wheel_kalman_filter.hpp
+ * @file wheel_ekf.h
  * @brief A dedicated class for the wheel's state estimation using an EKF.
  * This class is pure math and has no hardware dependencies.
  */
-#ifndef DRIVER_WHEEL_KALMAN_FILTER_HPP
-#define DRIVER_WHEEL_KALMAN_FILTER_HPP
+#ifndef KINEMATICS_WHEEL_EKF_H
+#define KINEMATICS_WHEEL_EKF_H
+
+#include <helper_func.h>
 
 #include <cstdint>
 #include <memory>
-
-#include "helper_func.h"
 
 class WheelKalmanFilter
 {
@@ -33,4 +33,4 @@ class WheelKalmanFilter
     std::unique_ptr<KalmanState> m_state;
 };
 
-#endif  // DRIVER_WHEEL_KALMAN_FILTER_HPP
+#endif  // KINEMATICS_WHEEL_EKF_H

@@ -4,5 +4,3 @@
 .vscode/settings.json
 .vscode/launch.json
 .vscode/ipch
-.pio
-sdkconfig.esp32dev

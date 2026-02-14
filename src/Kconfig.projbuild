@@ -1,0 +1,163 @@
+menu "Oxebots Robot GPIO Configuration"
+
+    config GPIO_RANGE_MAX
+        int "Maximum GPIO number for the target board"
+        default 39 if IDF_TARGET_ESP32
+        default 48 if IDF_TARGET_ESP32S3
+
+    menu "System"
+        config BLINK_GPIO
+            int "Blink LED GPIO"
+            range 0 GPIO_RANGE_MAX
+            default 2 if IDF_TARGET_ESP32
+            help
+                GPIO number for the onboard or status LED.
+    endmenu
+
+    menu "IMU (I2C)"
+        config IMU_SDA_GPIO
+            int "I2C SDA GPIO"
+            range 0 GPIO_RANGE_MAX
+            default 21 if IDF_TARGET_ESP32
+            help
+                GPIO for I2C Serial Data line.
+
+        config IMU_SCL_GPIO
+            int "I2C SCL GPIO"
+            range 0 GPIO_RANGE_MAX
+            default 22 if IDF_TARGET_ESP32
+            help
+                GPIO for I2C Serial Clock line.
+    endmenu
+
+    menu "Motors"
+        menu "Front Left (M1)"
+            config MOTOR_FL_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 33 if IDF_TARGET_ESP32
+                help
+                    Output pin for Front Left motor (M1) direction.
+            
+            config MOTOR_FL_PWM_GPIO
+                int "PWM GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 32 if IDF_TARGET_ESP32
+                help
+                    Output pin for Front Left motor (M1) speed (PWM).
+
+            config MOTOR_FL_ENC_CHANNEL
+                int "Encoder ADC Channel (ADC1)"
+                range 0 9
+                default 0 if IDF_TARGET_ESP32
+                help
+                    ADC1 Channel Number for Front Left motor (M1).
+                    Available ADC1 channels on ESP32:
+                        Channel 0 -> GPIO 36 (VP)
+                        Channel 1 -> UNUSABLE (GPIO 37)
+                        Channel 2 -> UNUSABLE (GPIO 38)
+                        Channel 3 -> GPIO 39 (VN)
+                        Channel 4 -> GPIO 32
+                        Channel 5 -> GPIO 33
+                        Channel 6 -> GPIO 34
+                        Channel 7 -> GPIO 35
+        endmenu
+
+        menu "Back Left (M2)"
+            config MOTOR_BL_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 25 if IDF_TARGET_ESP32
+                help
+                    Output pin for Back Left motor (M2) direction.
+            
+            config MOTOR_BL_PWM_GPIO
+                int "PWM GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 26 if IDF_TARGET_ESP32
+                help
+                    Output pin for Back Left motor (M2) speed (PWM).
+
+            config MOTOR_BL_ENC_CHANNEL
+                int "Encoder ADC Channel (ADC1)"
+                range 0 7
+                default 3 if IDF_TARGET_ESP32
+                help
+                    ADC1 Channel Number for Back Left motor (M2).
+                    Available ADC1 channels on ESP32:
+                        Channel 0 -> GPIO 36 (VP)
+                        Channel 1 -> UNUSABLE (GPIO 37)
+                        Channel 2 -> UNUSABLE (GPIO 38)
+                        Channel 3 -> GPIO 39 (VN)
+                        Channel 4 -> GPIO 32
+                        Channel 5 -> GPIO 33
+                        Channel 6 -> GPIO 34
+                        Channel 7 -> GPIO 35
+        endmenu
+
+        menu "Back Right (M3)"
+            config MOTOR_BR_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 27 if IDF_TARGET_ESP32
+                help
+                    Output pin for Back Right motor (M3) direction.
+            config MOTOR_BR_PWM_GPIO
+                int "PWM GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 14 if IDF_TARGET_ESP32
+                help
+                    Output pin for Back Right motor (M3) speed (PWM).
+
+            config MOTOR_BR_ENC_CHANNEL
+                int "Encoder ADC Channel (ADC1)"
+                range 0 7
+                default 6 if IDF_TARGET_ESP32
+                help
+                    ADC1 Channel Number for Back Right motor (M3).
+                    Available ADC1 channels on ESP32:
+                        Channel 0 -> GPIO 36 (VP)
+                        Channel 1 -> UNUSABLE (GPIO 37)
+                        Channel 2 -> UNUSABLE (GPIO 38)
+                        Channel 3 -> GPIO 39 (VN)
+                        Channel 4 -> GPIO 32
+                        Channel 5 -> GPIO 33
+                        Channel 6 -> GPIO 34
+                        Channel 7 -> GPIO 35
+        endmenu
+
+        menu "Front Right (M4)"
+            config MOTOR_FR_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 17 if IDF_TARGET_ESP32
+                help
+                    Output pin for Front Right motor (M4) direction.
+            
+            config MOTOR_FR_PWM_GPIO
+                int "PWM GPIO"
+                range 0 GPIO_RANGE_MAX
+                default 16 if IDF_TARGET_ESP32
+                help
+                    Output pin for Front Right motor (M4) speed (PWM).
+
+            config MOTOR_FR_ENC_CHANNEL
+                int "Encoder ADC Channel (ADC1)"
+                range 0 7
+                default 7 if IDF_TARGET_ESP32
+                help
+                    ADC1 Channel Number for Front Right motor (M4).
+                    Available ADC1 channels on ESP32:
+                        Channel 0 -> GPIO 36 (VP)
+                        Channel 1 -> UNUSABLE (GPIO 37)
+                        Channel 2 -> UNUSABLE (GPIO 38)
+                        Channel 3 -> GPIO 39 (VN)
+                        Channel 4 -> GPIO 32
+                        Channel 5 -> GPIO 33
+                        Channel 6 -> GPIO 34
+                        Channel 7 -> GPIO 35
+        endmenu
+
+    endmenu
+
+endmenu

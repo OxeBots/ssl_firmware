@@ -1,11 +1,11 @@
 /**
- * @file omnidirectional_robot.hpp
- * @brief Defines the kinematics for an omnidirectional robot with four Ominidirectional wheels.
+ * @file omni_robot.h
+ * @brief Defines the kinematics for an omnidirectional robot with four omnidirectional wheels.
  * This class is pure math and has no hardware dependencies.
  */
 
-#ifndef KINEMATICS_OMNIDIRECTIONAL_ROBOT_H
-#define KINEMATICS_OMNIDIRECTIONAL_ROBOT_H
+#ifndef KINEMATICS_OMNI_ROBOT_H
+#define KINEMATICS_OMNI_ROBOT_H
 
 #include <numeric_matrix.h>
 #include <numeric_vector.h>
@@ -76,4 +76,4 @@ class OmnidirectionalRobot
     OmnidirectionalRobot & operator=(const OmnidirectionalRobot &) = delete;
 };
 
-#endif  // KINEMATICS_OMNIDIRECTIONAL_ROBOT_H
+#endif  // KINEMATICS_OMNI_ROBOT_H
