@@ -41,7 +41,7 @@ void heartbeat_task(void * pvParam)
 
 extern "C" void app_main(void)
 {
-    const std::vector<adc_channel_t> wheel_adc_channels = {
+    const std::array<adc_channel_t, 4> wheel_adc_channels = {
       static_cast<adc_channel_t>(CONFIG_MOTOR_FL_ENC_CHANNEL), static_cast<adc_channel_t>(CONFIG_MOTOR_BL_ENC_CHANNEL),
       static_cast<adc_channel_t>(CONFIG_MOTOR_BR_ENC_CHANNEL), static_cast<adc_channel_t>(CONFIG_MOTOR_FR_ENC_CHANNEL)};
 
@@ -80,12 +80,12 @@ extern "C" void app_main(void)
     // }
 
     // --- CALIBRATION STEP ---
-    ESP_LOGI(TAG, "Starting sensor range calibration...");
+    // ESP_LOGI(TAG, "Starting sensor range calibration...");
 
-    if (w_odom.calibrate_wheel_encoders(2000) == ESP_OK)
-        ESP_LOGI(TAG, "All channels calibrated.");
-    else
-        ESP_LOGE(TAG, "Failed to calibrate all channels.");
+    // if (w_odom.calibrate_wheel_encoders(2000) == ESP_OK)
+    //     ESP_LOGI(TAG, "All channels calibrated.");
+    // else
+    //     ESP_LOGE(TAG, "Failed to calibrate all channels.");
 
     xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
 
@@ -93,18 +93,18 @@ extern "C" void app_main(void)
     while (true)
     {
         // Get the latest filtered data from the wheel odometry
-        std::vector<float> angles_rad = w_odom.get_filtered_angle_rad();
-        std::vector<float> angles_deg = w_odom.get_filtered_angle_deg();
-        std::vector<float> rpms = w_odom.get_filtered_rpm();
-        std::vector<float> accels = w_odom.get_filtered_acceleration_rps2();
+        const std::array<float, NUM_ENC_CHANNELS> angles_rad = w_odom.get_filtered_angle_rad();
+        const std::array<float, NUM_ENC_CHANNELS> angles_deg = w_odom.get_filtered_angle_deg();
+        const std::array<float, NUM_ENC_CHANNELS> rpms = w_odom.get_filtered_rpm();
+        const std::array<float, NUM_ENC_CHANNELS> accels = w_odom.get_filtered_acceleration_rps2();
 
         // Log the data for each wheel
-        for (int i = 0; i < angles_rad.size(); ++i)
+        for (int i = 0; i < NUM_ENC_CHANNELS; ++i)
         {
             ESP_LOGI(TAG,
                      "Wheel %d -> Angle: %.2f rad (%.2f deg), RPM: %.2f, "
                      "Accel: %.2f rps^2",
-                     i, angles_rad[i], angles_deg[i], rpms[i], accels[i]);
+                     i + 1, angles_rad[i], angles_deg[i], rpms[i], accels[i]);
         }
 
         vTaskDelay(pdMS_TO_TICKS(100));

@@ -1,9 +1,5 @@
 #include "wheel_odom.h"
 
-#include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-
 static const char * TAG = "WheelOdometry";
 
 // --- Singleton Implementation ---
@@ -36,28 +32,25 @@ WheelOdometry::~WheelOdometry()
 
 // --- Public Methods ---
 
-esp_err_t WheelOdometry::init(const std::vector<adc_channel_t> & channels, adc_atten_t attenuation)
+esp_err_t WheelOdometry::init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels, adc_atten_t attenuation)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
 
-    m_enc_channels.reserve(channels.size());
-
     // Create a AS5600 object for each specified ADC channel
-    for (const auto & ch : channels)
+    for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
+        const adc_channel_t ch = channels[i];
         if (static_cast<int>(ch) >= SOC_ADC_CHANNEL_NUM(ADC_UNIT))
         {
             ESP_LOGW(TAG, "Skipping invalid ADC channel: %d", ch);
             continue;
         }
 
-        adc_cali_line_fitting_config_t cali_config = {
-          .unit_id = ADC_UNIT,
-          .atten = attenuation,
-          .bitwidth = ADC_BITWIDTH,
-          .default_vref = ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF
-        };
+        adc_cali_line_fitting_config_t cali_config = {.unit_id = ADC_UNIT,
+                                                      .atten = attenuation,
+                                                      .bitwidth = ADC_BITWIDTH,
+                                                      .default_vref = ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF};
         adc_cali_handle_t handle = nullptr;
         esp_err_t ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
         bool is_calibrated = (ret == ESP_OK);
@@ -68,8 +61,8 @@ esp_err_t WheelOdometry::init(const std::vector<adc_channel_t> & channels, adc_a
             ESP_LOGE(TAG, "ADC voltage calibration failed for channel %d with error %d", ch, ret);
 
         auto encoder = std::make_unique<AS5600>(ch, handle, is_calibrated, ADC_UNIT, ADC_BITWIDTH);
-        m_enc_channels.emplace_back(EncoderChannel{ch, std::move(encoder), handle});
-        m_channel_lookup[ch] = &m_enc_channels.back();
+        m_enc_channels[i] = EncoderChannel{std::move(encoder), handle};
+        m_channel_lookup[ch] = &m_enc_channels[i];
         ESP_LOGI(TAG, "Created AS5600 for channel %d", ch);
     }
 
@@ -112,76 +105,74 @@ esp_err_t WheelOdometry::init(const std::vector<adc_channel_t> & channels, adc_a
     ESP_ERROR_CHECK(adc_continuous_start(m_adc_handle));
     m_initialized = true;
 
-    ESP_LOGI(TAG, "Wheel Odometry initialized with %d channels.", m_enc_channels.size());
+    ESP_LOGI(TAG, "Wheel Odometry initialized using ADC channels:");
+    for (size_t i = 0; i < SOC_ADC_CHANNEL_NUM(ADC_UNIT); i++)
+        if (m_channel_lookup[i])
+            ESP_LOGI(TAG, "  - Channel %d", i);
+
     return ESP_OK;
 }
 
 esp_err_t WheelOdometry::calibrate_wheel_encoders(uint32_t duration_ms)
 {
     // Iterate over the vector of active channels
-    for (auto const & channel_data : m_enc_channels)
+    for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
+        const auto & channel_data = m_enc_channels[i];
         if (channel_data.encoder->calibrate_range(duration_ms) != ESP_OK)
         {
-            ESP_LOGE(TAG, "Calibration failed for channel: %d", channel_data.channel_num);
+            ESP_LOGE(TAG, "Calibration failed for channel: %d", i);
             return ESP_FAIL;
         }
     }
     return ESP_OK;
 }
 
-std::vector<float> WheelOdometry::get_filtered_angle_rad()
+std::array<float, NUM_ENC_CHANNELS> WheelOdometry::get_filtered_angle_rad()
 {
-    std::vector<float> angles;
+    std::array<float, NUM_ENC_CHANNELS> angles;
 
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        angles.reserve(m_enc_channels.size());
-        std::transform(m_enc_channels.cbegin(), m_enc_channels.cend(), std::back_inserter(angles),
-                       [](const auto & channel_data) { return channel_data.encoder->get_angle_rad(); });
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) angles[i] = m_enc_channels[i].encoder->get_angle_rad();
 
         xSemaphoreGive(m_data_mutex);
     }
     return angles;
 }
 
-std::vector<float> WheelOdometry::get_filtered_angle_deg()
+std::array<float, NUM_ENC_CHANNELS> WheelOdometry::get_filtered_angle_deg()
 {
-    std::vector<float> angles;
+    std::array<float, NUM_ENC_CHANNELS> angles;
 
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        angles.reserve(m_enc_channels.size());
-        std::transform(m_enc_channels.cbegin(), m_enc_channels.cend(), std::back_inserter(angles),
-                       [](const auto & channel_data) { return channel_data.encoder->get_angle_deg(); });
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) angles[i] = m_enc_channels[i].encoder->get_angle_deg();
 
         xSemaphoreGive(m_data_mutex);
     }
     return angles;
 }
 
-std::vector<float> WheelOdometry::get_filtered_rpm()
+std::array<float, NUM_ENC_CHANNELS> WheelOdometry::get_filtered_rpm()
 {
-    std::vector<float> rpms;
+    std::array<float, NUM_ENC_CHANNELS> rpms;
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        rpms.reserve(m_enc_channels.size());
-        std::transform(m_enc_channels.cbegin(), m_enc_channels.cend(), std::back_inserter(rpms),
-                       [](const auto & channel_data) { return channel_data.encoder->get_rpm(); });
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) rpms[i] = m_enc_channels[i].encoder->get_rpm();
 
         xSemaphoreGive(m_data_mutex);
     }
     return rpms;
 }
 
-std::vector<float> WheelOdometry::get_filtered_acceleration_rps2()
+std::array<float, NUM_ENC_CHANNELS> WheelOdometry::get_filtered_acceleration_rps2()
 {
-    std::vector<float> accelerations;
+    std::array<float, NUM_ENC_CHANNELS> accelerations;
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        accelerations.reserve(m_enc_channels.size());
-        std::transform(m_enc_channels.cbegin(), m_enc_channels.cend(), std::back_inserter(accelerations),
-                       [](const auto & channel_data) { return channel_data.encoder->get_acceleration_rps2(); });
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
+            accelerations[i] = m_enc_channels[i].encoder->get_acceleration_rps2();
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -229,9 +220,7 @@ void WheelOdometry::adc_task()
                     uint16_t data = p->type1.data;
 
                     if (chan_num < SOC_ADC_CHANNEL_NUM(ADC_UNIT) && m_channel_lookup[chan_num])
-                    {
                         m_channel_lookup[chan_num]->encoder->process_new_reading(data);
-                    }
                 }
                 xSemaphoreGive(m_data_mutex);
             }

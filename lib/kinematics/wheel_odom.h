@@ -7,6 +7,7 @@
 
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_adc/adc_continuous.h>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -18,17 +19,16 @@
 
 #include "AS5600.h"
 
+static constexpr adc_unit_t ADC_UNIT = ADC_UNIT_1;
+static constexpr uint8_t NUM_ENC_CHANNELS = 4;
+static constexpr size_t ADC_BUFFER_SIZE = 512;
+static constexpr adc_bitwidth_t ADC_BITWIDTH = ADC_BITWIDTH_12;
+
 class WheelOdometry
 {
    private:
-    static constexpr adc_unit_t ADC_UNIT = ADC_UNIT_1;
-    static constexpr uint8_t NUM_ENC_CHANNELS = 4;
-    static constexpr size_t ADC_BUFFER_SIZE = 512;
-    static constexpr adc_bitwidth_t ADC_BITWIDTH = ADC_BITWIDTH_12;
-
     struct EncoderChannel
     {
-        adc_channel_t channel_num;
         std::unique_ptr<AS5600> encoder;
         adc_cali_handle_t cali_handle;
     };
@@ -47,9 +47,8 @@ class WheelOdometry
     adc_continuous_handle_t m_adc_handle;
     TaskHandle_t m_task_handle;
 
-    std::vector<EncoderChannel> m_enc_channels;
+    std::array<EncoderChannel, NUM_ENC_CHANNELS> m_enc_channels;
     std::array<const EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
-
     SemaphoreHandle_t m_data_mutex;
 
    public:
@@ -64,7 +63,8 @@ class WheelOdometry
      * @param channels Vector of ADC channels to initialize.
      * @return ESP_OK on success.
      */
-    esp_err_t init(const std::vector<adc_channel_t> & channels, adc_atten_t attenuation = ADC_ATTEN_DB_12);
+    esp_err_t init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
+                   adc_atten_t attenuation = ADC_ATTEN_DB_12);
 
     /**
      * @brief Calibrates the operational voltage range for all wheel encoders.
@@ -74,10 +74,10 @@ class WheelOdometry
     esp_err_t calibrate_wheel_encoders(uint32_t duration_ms = 5000);
 
     // --- Getters for filtered state ---
-    std::vector<float> get_filtered_angle_rad();
-    std::vector<float> get_filtered_angle_deg();
-    std::vector<float> get_filtered_rpm();
-    std::vector<float> get_filtered_acceleration_rps2();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_deg();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_rpm();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_acceleration_rps2();
 };
 
 #endif  // KINEMATICS_WHEEL_ODOM_H
