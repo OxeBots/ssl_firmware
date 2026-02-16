@@ -19,7 +19,8 @@
                 "pbkit.vscode-pbkit",
                 "jbenden.c-cpp-flylint",
                 "jeff-hykin.better-cpp-syntax",
-                "nordic-semiconductor.nrf-kconfig"
+                "nordic-semiconductor.nrf-kconfig",
+                "alexnesnes.teleplot"
             ]
         }
     },

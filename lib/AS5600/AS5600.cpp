@@ -90,9 +90,8 @@ esp_err_t AS5600::burn_settings()
     ESP_LOGW(TAG, "Burning settings to AS5600 OTP memory. This is permanent!");
     uint8_t cmd = static_cast<uint8_t>(Cmd::BURN);
     if (!I2Cdev::writeByte(AS5600_ADDR, static_cast<uint8_t>(Register::BURN), cmd))
-    {
         return ESP_FAIL;
-    }
+
     vTaskDelay(pdMS_TO_TICKS(10));  // Wait for burn to complete
     return ESP_OK;
 }
@@ -103,9 +102,8 @@ esp_err_t AS5600::get_i2c_raw_angle(uint16_t * angle)
         return ESP_ERR_INVALID_STATE;
 
     if (I2Cdev::readWord(AS5600_ADDR, static_cast<uint8_t>(Register::RAW_ANGLE_H), angle) != 0)
-    {
         return ESP_FAIL;
-    }
+
     // AS5600 returns 12 bits
     *angle &= 0x0FFF;
     return ESP_OK;
@@ -140,7 +138,7 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
         float measured_angle_rad = 0.0f;
         if (m_max_voltage_mv > m_min_voltage_mv)
         {
-            int clamped_mv = std::clamp(current_voltage_mv, m_min_voltage_mv, m_max_voltage_mv);
+            int clamped_mv = std::clamp(current_voltage_mv, (int)m_min_voltage_mv, (int)m_max_voltage_mv);
             float ratio = static_cast<float>(clamped_mv - m_min_voltage_mv) / (m_max_voltage_mv - m_min_voltage_mv);
             measured_angle_rad = ratio * 2.0f * PI;
         }
@@ -238,4 +236,55 @@ esp_err_t AS5600::write_config_register(uint16_t config)
         return ESP_FAIL;
 
     return ESP_OK;
+}
+
+esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
+{
+    if (min_mv >= max_mv)
+    {
+        ESP_LOGE(TAG, "Invalid calibration range: min_mv (%d) must be less than max_mv (%d)", min_mv, max_mv);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((min_mv < 0 || min_mv > 3300) || (max_mv < 0 || max_mv > 3300))
+    {
+        ESP_LOGE(TAG,
+                 "Invalid calibration range: min_mv and max_mv must be non-negative and <= 3300 mV. Received "
+                 "min_mv=%d, max_mv=%d",
+                 min_mv, max_mv);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    m_min_voltage_mv = min_mv;
+    m_max_voltage_mv = max_mv;
+
+    return ESP_OK;
+}
+
+void AS5600::reset_calibration_min_max()
+{
+    // Set min to a value higher than any possible reading (3.3V = 3300mV)
+    m_min_voltage_mv = 5000;
+    // Set max to a value lower than any possible reading
+    m_max_voltage_mv = 0;
+}
+
+void AS5600::start_calibration_mode()
+{
+    m_is_calibrating = true;
+}
+
+void AS5600::stop_calibration_mode()
+{
+    m_is_calibrating = false;
+}
+
+int AS5600::get_calib_min() const
+{
+    return m_min_voltage_mv;
+}
+
+int AS5600::get_calib_max() const
+{
+    return m_max_voltage_mv;
 }

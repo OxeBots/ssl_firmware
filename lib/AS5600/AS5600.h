@@ -47,6 +47,8 @@ class AS5600
         THRESH_10LSB = 0x07
     };
 
+    static constexpr uint8_t AS5600_ADDR = 0x36;
+
     /**
      * @brief Constructor for AS5600.
      * @param channel ADC channel for analog reading.
@@ -93,6 +95,29 @@ class AS5600
      */
     esp_err_t calibrate_range(uint32_t duration_ms);
 
+    /**
+     * @brief Sets the calibration range for voltage-to-angle conversion.
+     * @param min_mv Minimum voltage in millivolts corresponding to 0 degrees.
+     * @param max_mv Maximum voltage in millivolts corresponding to 360 degrees.
+     */
+    esp_err_t set_calibration_range(int min_mv = 0, int max_mv = 3300);
+
+    /**
+     * @brief Resets the internal min/max trackers to their inverse extremes.
+     * Call this before starting a new calibration motion.
+     */
+    void reset_calibration_min_max();
+
+    /**
+     * @brief Enables the "learning" mode where new ADC readings expand the min/max range.
+     */
+    void start_calibration_mode();
+
+    /**
+     * @brief Disables the learning mode.
+     */
+    void stop_calibration_mode();
+
     // --- Getters ---
     float get_angle_rad() const;
     float get_angle_deg() const;
@@ -100,6 +125,8 @@ class AS5600
     float get_acceleration_rps2() const;
     int get_last_voltage_mv() const;
     uint16_t get_last_raw_value() const;
+    int get_calib_min() const;
+    int get_calib_max() const;
 
    private:
     // I2C Registers and Commands
@@ -115,7 +142,6 @@ class AS5600
         BURN = 0x40
     };
 
-    static constexpr uint8_t AS5600_ADDR = 0x36;
     bool m_i2c_initialized = false;
 
     esp_err_t read_config_register(uint16_t * config);
@@ -140,9 +166,9 @@ class AS5600
     // ADC Calibration
     adc_cali_handle_t m_cali_handle = nullptr;
     bool m_is_voltage_calibrated = false;
-    bool m_is_calibrating = false;
-    int m_min_voltage_mv = 5000;
-    int m_max_voltage_mv = 0;
+    volatile bool m_is_calibrating = false;
+    volatile int m_min_voltage_mv = 5000;
+    volatile int m_max_voltage_mv = 0;
 
     SamplingState m_sampling_state;
     uint16_t m_last_avg_value = 0;

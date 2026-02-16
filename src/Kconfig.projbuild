@@ -1,6 +1,6 @@
 menu "Oxebots Robot GPIO Configuration"
 
-    config GPIO_RANGE_MAX
+    config GPIO_MAX_INDEX
         int "Maximum GPIO number for the target board"
         default 39 if IDF_TARGET_ESP32
         default 48 if IDF_TARGET_ESP32S3
@@ -8,23 +8,23 @@ menu "Oxebots Robot GPIO Configuration"
     menu "System"
         config BLINK_GPIO
             int "Blink LED GPIO"
-            range 0 GPIO_RANGE_MAX
+            range 0 GPIO_MAX_INDEX
             default 2 if IDF_TARGET_ESP32
             help
                 GPIO number for the onboard or status LED.
     endmenu
 
-    menu "IMU (I2C)"
-        config IMU_SDA_GPIO
+    menu "I2C"
+        config SDA_GPIO
             int "I2C SDA GPIO"
-            range 0 GPIO_RANGE_MAX
+            range 0 GPIO_MAX_INDEX
             default 21 if IDF_TARGET_ESP32
             help
                 GPIO for I2C Serial Data line.
 
-        config IMU_SCL_GPIO
+        config SCL_GPIO
             int "I2C SCL GPIO"
-            range 0 GPIO_RANGE_MAX
+            range 0 GPIO_MAX_INDEX
             default 22 if IDF_TARGET_ESP32
             help
                 GPIO for I2C Serial Clock line.
@@ -34,14 +34,14 @@ menu "Oxebots Robot GPIO Configuration"
         menu "Front Left (M1)"
             config MOTOR_FL_DIR_GPIO
                 int "Direction GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 33 if IDF_TARGET_ESP32
                 help
                     Output pin for Front Left motor (M1) direction.
             
             config MOTOR_FL_PWM_GPIO
                 int "PWM GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 32 if IDF_TARGET_ESP32
                 help
                     Output pin for Front Left motor (M1) speed (PWM).
@@ -66,14 +66,14 @@ menu "Oxebots Robot GPIO Configuration"
         menu "Back Left (M2)"
             config MOTOR_BL_DIR_GPIO
                 int "Direction GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 25 if IDF_TARGET_ESP32
                 help
                     Output pin for Back Left motor (M2) direction.
             
             config MOTOR_BL_PWM_GPIO
                 int "PWM GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 26 if IDF_TARGET_ESP32
                 help
                     Output pin for Back Left motor (M2) speed (PWM).
@@ -81,7 +81,7 @@ menu "Oxebots Robot GPIO Configuration"
             config MOTOR_BL_ENC_CHANNEL
                 int "Encoder ADC Channel (ADC1)"
                 range 0 7
-                default 3 if IDF_TARGET_ESP32
+                default 7 if IDF_TARGET_ESP32
                 help
                     ADC1 Channel Number for Back Left motor (M2).
                     Available ADC1 channels on ESP32:
@@ -98,13 +98,13 @@ menu "Oxebots Robot GPIO Configuration"
         menu "Back Right (M3)"
             config MOTOR_BR_DIR_GPIO
                 int "Direction GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 27 if IDF_TARGET_ESP32
                 help
                     Output pin for Back Right motor (M3) direction.
             config MOTOR_BR_PWM_GPIO
                 int "PWM GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 14 if IDF_TARGET_ESP32
                 help
                     Output pin for Back Right motor (M3) speed (PWM).
@@ -129,14 +129,14 @@ menu "Oxebots Robot GPIO Configuration"
         menu "Front Right (M4)"
             config MOTOR_FR_DIR_GPIO
                 int "Direction GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 17 if IDF_TARGET_ESP32
                 help
                     Output pin for Front Right motor (M4) direction.
             
             config MOTOR_FR_PWM_GPIO
                 int "PWM GPIO"
-                range 0 GPIO_RANGE_MAX
+                range 0 GPIO_MAX_INDEX
                 default 16 if IDF_TARGET_ESP32
                 help
                     Output pin for Front Right motor (M4) speed (PWM).
@@ -144,7 +144,7 @@ menu "Oxebots Robot GPIO Configuration"
             config MOTOR_FR_ENC_CHANNEL
                 int "Encoder ADC Channel (ADC1)"
                 range 0 7
-                default 7 if IDF_TARGET_ESP32
+                default 3 if IDF_TARGET_ESP32
                 help
                     ADC1 Channel Number for Front Right motor (M4).
                     Available ADC1 channels on ESP32:
