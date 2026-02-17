@@ -118,8 +118,9 @@ void WheelStateEstimator::suspend()
 {
     if (m_initialized)
     {
-        adc_continuous_stop(m_adc_handle);
+        // Suspend the task FIRST so it stops asking for data
         vTaskSuspend(m_task_handle);
+        adc_continuous_stop(m_adc_handle);
     }
 }
 
@@ -127,8 +128,10 @@ void WheelStateEstimator::resume()
 {
     if (m_initialized)
     {
-        vTaskResume(m_task_handle);
+        // Start the hardware FIRST so data is ready for the task when it resumes
         adc_continuous_start(m_adc_handle);
+        xTaskNotifyStateClear(m_task_handle);
+        vTaskResume(m_task_handle);
     }
 }
 
@@ -235,54 +238,6 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
     resume();
 
     return (success_count == NUM_ENC_CHANNELS) ? ESP_OK : ESP_FAIL;
-}
-
-esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings)
-{
-    if (channel_idx >= NUM_ENC_CHANNELS)
-        return ESP_ERR_INVALID_ARG;
-
-    ESP_LOGW(TAG, "Configuring Ch %d. Ensure ONLY this sensor is connected to I2C!", channel_idx);
-    suspend();  // Stop ADC Task
-
-    esp_err_t ret = ESP_FAIL;
-    auto * enc = m_enc_channels[channel_idx].encoder.get();
-
-    if (enc && enc->init_i2c() == ESP_OK)
-    {
-        bool success = true;
-        // Apply settings
-        if (enc->set_output_stage(settings.output_stage) != ESP_OK)
-            success = false;
-        if (enc->set_slow_filter(settings.slow_filter) != ESP_OK)
-            success = false;
-        if (enc->set_fast_filter(settings.fast_filter) != ESP_OK)
-            success = false;
-
-        // VERIFICATION STEP
-        if (success && settings.verify_write)
-        {
-            // This requires adding get_config_register to AS5600 or similar
-            // For now assuming success if ACKs were received.
-        }
-
-        if (success)
-        {
-            ESP_LOGI(TAG, "I2C Config Success.");
-            if (settings.burn_settings)
-            {
-                ESP_LOGW(TAG, "Burning OTP...");
-                ret = enc->burn_settings();
-            }
-            else
-                ret = ESP_OK;
-        }
-    }
-    else
-        ESP_LOGE(TAG, "Sensor not found on I2C.");
-
-    resume();  // Resume ADC Task
-    return ret;
 }
 
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad()
@@ -454,4 +409,113 @@ esp_err_t WheelStateEstimator::load_calibration_from_nvs(size_t channel_idx, int
         ESP_LOGW(TAG, "Calibration data not found for Ch %zu", channel_idx);
 
     return err;
+}
+
+esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings)
+{
+    if (channel_idx >= NUM_ENC_CHANNELS)
+        return ESP_ERR_INVALID_ARG;
+
+    ESP_LOGW(TAG, "Configuring Ch %d. Ensure ONLY this sensor is connected to I2C!", channel_idx);
+
+    // Suspend ADC to prevent I2C/Flash conflicts
+    suspend();
+
+    esp_err_t ret = ESP_ERR_NOT_FOUND;
+    auto * enc = m_enc_channels[channel_idx].encoder.get();
+
+    if (enc && enc->init_i2c() == ESP_OK)
+    {
+        // Write Settings
+        ret = apply_i2c_settings(enc, settings);
+
+        // Verify Settings
+        if (ret == ESP_OK)
+        {
+            // Small delay for register settling
+            vTaskDelay(pdMS_TO_TICKS(10));
+            ret = verify_i2c_settings(enc, settings);
+        }
+        else
+            ESP_LOGE(TAG, "I2C Config failed to write settings on Ch %d", channel_idx);
+
+        // Burn to OTP (if requested and verified)
+        if (ret == ESP_OK)
+        {
+            ESP_LOGI(TAG, "I2C Config & Verification Success.");
+            ret = process_otp_burn(enc, settings);
+        }
+        else
+            ESP_LOGE(TAG, "I2C Config Failed during settings verification on Ch %d", channel_idx);
+    }
+    else
+        ESP_LOGE(TAG, "Sensor not found on I2C bus (Address 0x%02X).", AS5600::AS5600_ADDR);
+
+    // Resume ADC Task
+    resume();
+    return ret;
+}
+
+// --- Helper Implementations ---
+
+esp_err_t WheelStateEstimator::apply_i2c_settings(AS5600 * enc, const AS5600Settings & settings)
+{        
+    if (enc->set_output_stage(settings.output_stage) != ESP_OK)
+        return ESP_FAIL;
+    if (enc->set_slow_filter(settings.slow_filter) != ESP_OK)
+        return ESP_FAIL;
+    if (enc->set_fast_filter(settings.fast_filter) != ESP_OK)
+        return ESP_FAIL;
+    return ESP_OK;
+}
+
+esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Settings & settings)
+{
+    AS5600::OutputStage read_stage;
+    AS5600::SlowFilter read_slow;
+    AS5600::FastFilter read_fast;
+
+    if (enc->read_configuration(&read_stage, &read_slow, &read_fast) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Verify Failed: Could not read back configuration register.");
+        return ESP_FAIL;
+    }
+
+    bool match = true;
+    if (read_stage != settings.output_stage)
+    {
+        ESP_LOGE(TAG, "Verify Failed: Output Stage mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.output_stage,
+                 (uint8_t)read_stage);
+        match = false;
+    }
+    if (read_slow != settings.slow_filter)
+    {
+        ESP_LOGE(TAG, "Verify Failed: Slow Filter mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.slow_filter,
+                 (uint8_t)read_slow);
+        match = false;
+    }
+    if (read_fast != settings.fast_filter)
+    {
+        ESP_LOGE(TAG, "Verify Failed: Fast Filter mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.fast_filter,
+                 (uint8_t)read_fast);
+        match = false;
+    }
+
+    return match ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+esp_err_t WheelStateEstimator::process_otp_burn(AS5600 * enc, const AS5600Settings & settings)
+{
+    if (!settings.burn_settings)
+        return ESP_OK;
+
+    ESP_LOGW(TAG, "BURNING SETTINGS TO OTP MEMORY...");
+    esp_err_t ret = enc->burn_settings();
+
+    if (ret == ESP_OK)
+        ESP_LOGI(TAG, "Burn Successful.");
+    else
+        ESP_LOGE(TAG, "Burn Failed!");
+
+    return ret;
 }

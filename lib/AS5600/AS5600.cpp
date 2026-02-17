@@ -1,12 +1,5 @@
 #include "AS5600.h"
 
-#include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-
-#include <algorithm>
-#include <numeric>
-
 static const char * TAG = "AS5600";
 
 AS5600::AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltage_calibrated, adc_unit_t unit,
@@ -23,7 +16,7 @@ esp_err_t AS5600::init_i2c()
 
     // Test communication by reading a register
     uint16_t test_conf;
-    if (read_config_register(&test_conf) != 0)
+    if (read_config_register(&test_conf) != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to communicate with AS5600 sensor via I2C.");
         return ESP_FAIL;
@@ -238,6 +231,32 @@ esp_err_t AS5600::write_config_register(uint16_t config)
     return ESP_OK;
 }
 
+esp_err_t AS5600::read_configuration(OutputStage * stage, SlowFilter * slow, FastFilter * fast)
+{
+    if (!m_i2c_initialized)
+        return ESP_ERR_INVALID_STATE;
+
+    uint16_t config_val;
+    esp_err_t ret = read_config_register(&config_val);
+    if (ret != ESP_OK)
+        return ret;
+
+    // Bit manipulation based on datasheet (Register 0x07)
+    // Bits 5:4 = Output Stage
+    if (stage)
+        *stage = static_cast<OutputStage>((config_val >> 4) & 0x03);
+
+    // Bits 9:8 = Slow Filter
+    if (slow)
+        *slow = static_cast<SlowFilter>((config_val >> 8) & 0x03);
+
+    // Bits 12:10 = Fast Filter
+    if (fast)
+        *fast = static_cast<FastFilter>((config_val >> 10) & 0x07);
+
+    return ESP_OK;
+}
+
 esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
 {
     if (min_mv >= max_mv)
@@ -263,9 +282,7 @@ esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
 
 void AS5600::reset_calibration_min_max()
 {
-    // Set min to a value higher than any possible reading (3.3V = 3300mV)
     m_min_voltage_mv = 5000;
-    // Set max to a value lower than any possible reading
     m_max_voltage_mv = 0;
 }
 

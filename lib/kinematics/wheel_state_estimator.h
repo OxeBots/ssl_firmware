@@ -38,11 +38,13 @@ struct CalibrationData
 
 struct AS5600Settings
 {
-    AS5600::OutputStage output_stage = AS5600::OutputStage::ANALOG_FULL;  // 0-3.3V
-    AS5600::SlowFilter slow_filter = AS5600::SlowFilter::FILTER_2X;
-    AS5600::FastFilter fast_filter = AS5600::FastFilter::THRESH_6LSB;
-    bool burn_settings = false;  // Dangerous! Keep false by default
-    bool verify_write = true;    // NEW: Verify after write
+    AS5600::OutputStage output_stage =
+      AS5600::OutputStage::ANALOG_REDUCED;  // 0.1 VCC to 0.9 VCC to be in the ESP ADC linear response range
+    AS5600::SlowFilter slow_filter =
+      AS5600::SlowFilter::FILTER_2X;  // Fast response to slow changes, which is good for wheel encoders
+    AS5600::FastFilter fast_filter = AS5600::FastFilter::THRESH_6LSB;  // Fast filter to catch sudden spikes,
+                                                                       // which can happen with noisy readings
+    bool burn_settings = false;                                        // Dangerous! Keep false by default
 };
 
 class WheelStateEstimator
@@ -57,22 +59,104 @@ class WheelStateEstimator
     WheelStateEstimator();
     ~WheelStateEstimator();
 
-    // --- Private Methods ---
+    /**
+     * @brief Main task loop that processes continuous ADC readings.
+     *
+     * Waits for notifications from the ADC ISR, reads the raw data buffer,
+     * and dispatches readings to the appropriate AS5600 encoder instances
+     * for filtering and state estimation.
+     */
     void adc_task();
+
+    /**
+     * @brief Static wrapper to launch the ADC task from FreeRTOS.
+     * @param param Pointer to the WheelStateEstimator singleton instance.
+     */
     static void s_adc_task_wrapper(void * param);
+
+    /**
+     * @brief ISR callback for ADC conversion complete events.
+     *
+     * Executed from IRAM context when the ADC buffer is filled. Notifies the
+     * `adc_task` to wake up and process the data.
+     *
+     * @param handle ADC continuous driver handle.
+     * @param edata Event data containing the conversion results.
+     * @param user_data Pointer to the WheelStateEstimator instance.
+     * @return true if a high-priority task (the ADC task) was woken up.
+     */
     static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t * edata,
                                          void * user_data);
 
+    /**
+     * @brief Saves the voltage calibration range for a specific channel to NVS (Non Volatile Storage).
+     *
+     * Stores the minimum and maximum voltage values associated with a full rotation.
+     *
+     * @param channel_idx Index of the encoder channel (0-3).
+     * @param min Minimum voltage measured (mV).
+     * @param max Maximum voltage measured (mV).
+     * @return ESP_OK on success, or an error code from the NVS API.
+     */
     esp_err_t save_calibration_to_nvs(size_t channel_idx, int min, int max);
+
+    /**
+     * @brief Loads the voltage calibration range for a specific channel from NVS (Non Volatile Storage).
+     *
+     * @param channel_idx Index of the encoder channel (0-3).
+     * @param[out] min Pointer to store the retrieved minimum voltage (mV).
+     * @param[out] max Pointer to store the retrieved maximum voltage (mV).
+     * @return ESP_OK if data was found and loaded, ESP_ERR_NVS_NOT_FOUND if missing.
+     */
     esp_err_t load_calibration_from_nvs(size_t channel_idx, int * min, int * max);
+
+    /**
+     * @brief Writes configuration settings to the AS5600 via I2C.
+     *
+     * Applies the output stage, slow filter, and fast filter settings to the sensor.
+     *
+     * @param enc Pointer to the AS5600 encoder instance.
+     * @param settings The configuration parameters to apply.
+     * @return ESP_OK on success, or ESP_FAIL if any I2C write operation fails.
+     */
+    esp_err_t apply_i2c_settings(AS5600 * enc, const AS5600Settings & settings);
+
+    /**
+     * @brief Reads back AS5600 registers to verify they match the desired settings.
+     *
+     * Ensures that the I2C write operations were successful and the sensor state
+     * matches the configuration object.
+     *
+     * @param enc Pointer to the AS5600 encoder instance.
+     * @param settings The configuration parameters expected.
+     * @return ESP_OK if the readback values match the settings, ESP_FAIL otherwise.
+     */
+    esp_err_t verify_i2c_settings(AS5600 * enc, const AS5600Settings & settings);
+
+    /**
+     * @brief Permanently burns configuration settings into the AS5600 OTP memory.
+     *
+     * @warning This operation is irreversible. The AS5600 supports burning settings
+     * only a limited number of times (typically 3).
+     *
+     * @param enc Pointer to the AS5600 encoder instance.
+     * @param settings Configuration object containing the `burn_settings` flag.
+     * @return ESP_OK on success (or if burn was not requested), ESP_FAIL on error.
+     */
+    esp_err_t process_otp_burn(AS5600 * enc, const AS5600Settings & settings);
 
     // --- Member Variables ---
     bool m_initialized = false;
     adc_continuous_handle_t m_adc_handle;
     TaskHandle_t m_task_handle;
 
+    // Store EncoderChannel objects for each wheel index (0-3)
     std::array<EncoderChannel, NUM_ENC_CHANNELS> m_enc_channels;
+
+    // Lookup table to map ADC channel numbers to EncoderChannel pointers for quick access in ISR
     std::array<const EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
+
+    // Mutex to protect shared access to encoder data between ADC task and main task
     SemaphoreHandle_t m_data_mutex;
 
     const char * nvs_namespace = "wheel_calib";
@@ -93,7 +177,7 @@ class WheelStateEstimator
                    adc_atten_t attenuation = ADC_ATTEN_DB_12);
 
     /**
-     * @brief Pauses the ADC task to allow for maintenance/I2C operations.
+     * @brief Pauses the ADC task to allow for configuration/I2C operations.
      */
     void suspend();
 

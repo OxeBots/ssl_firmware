@@ -3,7 +3,7 @@
       {
          "type": "chart",
          "gridPos": {
-            "h": 6,
+            "h": 5,
             "w": 6,
             "x": 0,
             "y": 0
@@ -17,7 +17,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_1_rad",
-                  "_id": "data-serie-16",
+                  "_id": "data-serie-30",
                   "stroke": "rgba(231,76,60,1)",
                   "fill": "rgba(231,76,60,0.1)"
                },
@@ -31,7 +31,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_2_rad",
-                  "_id": "data-serie-17",
+                  "_id": "data-serie-31",
                   "stroke": "rgba(52,152,219,1)",
                   "fill": "rgba(52,152,219,0.1)"
                },
@@ -45,7 +45,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_3_rad",
-                  "_id": "data-serie-18",
+                  "_id": "data-serie-32",
                   "stroke": "rgba(46,204,113,1)",
                   "fill": "rgba(46,204,113,0.1)"
                },
@@ -59,7 +59,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_4_rad",
-                  "_id": "data-serie-19",
+                  "_id": "data-serie-33",
                   "stroke": "rgba(155,89,182,1)",
                   "fill": "rgba(155,89,182,0.1)"
                },
@@ -70,7 +70,7 @@
       {
          "type": "chart",
          "gridPos": {
-            "h": 6,
+            "h": 5,
             "w": 6,
             "x": 0,
             "y": 0
@@ -84,7 +84,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_1_deg",
-                  "_id": "data-serie-20",
+                  "_id": "data-serie-34",
                   "stroke": "rgba(231,76,60,1)",
                   "fill": "rgba(231,76,60,0.1)"
                },
@@ -98,7 +98,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_2_deg",
-                  "_id": "data-serie-21",
+                  "_id": "data-serie-35",
                   "stroke": "rgba(52,152,219,1)",
                   "fill": "rgba(52,152,219,0.1)"
                },
@@ -112,7 +112,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_3_deg",
-                  "_id": "data-serie-22",
+                  "_id": "data-serie-36",
                   "stroke": "rgba(46,204,113,1)",
                   "fill": "rgba(46,204,113,0.1)"
                },
@@ -126,7 +126,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_4_deg",
-                  "_id": "data-serie-23",
+                  "_id": "data-serie-37",
                   "stroke": "rgba(155,89,182,1)",
                   "fill": "rgba(155,89,182,0.1)"
                },
@@ -137,7 +137,7 @@
       {
          "type": "chart",
          "gridPos": {
-            "h": 6,
+            "h": 5,
             "w": 6,
             "x": 0,
             "y": 0
@@ -151,7 +151,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_1_rpm",
-                  "_id": "data-serie-24",
+                  "_id": "data-serie-38",
                   "stroke": "rgba(231,76,60,1)",
                   "fill": "rgba(231,76,60,0.1)"
                },
@@ -165,7 +165,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_2_rpm",
-                  "_id": "data-serie-25",
+                  "_id": "data-serie-39",
                   "stroke": "rgba(52,152,219,1)",
                   "fill": "rgba(52,152,219,0.1)"
                },
@@ -179,7 +179,7 @@
                "formula": "",
                "options": {
                   "_serie": "w_3_rpm",
-                  "_id": "data-serie-26",
+                  "_id": "data-serie-40",
                   "stroke": "rgba(46,204,113,1)",
                   "fill": "rgba(46,204,113,0.1)"
                },
@@ -193,9 +193,255 @@
                "formula": "",
                "options": {
                   "_serie": "w_4_rpm",
-                  "_id": "data-serie-27",
+                  "_id": "data-serie-41",
                   "stroke": "rgba(155,89,182,1)",
                   "fill": "rgba(155,89,182,0.1)"
+               },
+               "type": "number"
+            }
+         ]
+      },
+      {
+         "type": "chart",
+         "gridPos": {
+            "h": 5,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "series": [
+            {
+               "name": "w_1_acc",
+               "sourceNames": [
+                  "w_1_acc"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "w_1_acc",
+                  "_id": "data-serie-42",
+                  "stroke": "rgba(231,76,60,1)",
+                  "fill": "rgba(231,76,60,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "w_2_acc",
+               "sourceNames": [
+                  "w_2_acc"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "w_2_acc",
+                  "_id": "data-serie-43",
+                  "stroke": "rgba(52,152,219,1)",
+                  "fill": "rgba(52,152,219,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "w_3_acc",
+               "sourceNames": [
+                  "w_3_acc"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "w_3_acc",
+                  "_id": "data-serie-44",
+                  "stroke": "rgba(46,204,113,1)",
+                  "fill": "rgba(46,204,113,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "w_4_acc",
+               "sourceNames": [
+                  "w_4_acc"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "w_4_acc",
+                  "_id": "data-serie-45",
+                  "stroke": "rgba(155,89,182,1)",
+                  "fill": "rgba(155,89,182,0.1)"
+               },
+               "type": "number"
+            }
+         ]
+      },
+      {
+         "type": "widget3D",
+         "gridPos": {
+            "h": 12,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "series": [
+            {
+               "name": "IMU",
+               "sourceNames": [
+                  "IMU"
+               ],
+               "formula": "",
+               "options": {},
+               "type": "3D"
+            }
+         ]
+      },
+      {
+         "type": "chart",
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "series": [
+            {
+               "name": "a.x",
+               "sourceNames": [
+                  "a.x"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "a.x",
+                  "_id": "data-serie-53",
+                  "stroke": "rgba(231,76,60,1)",
+                  "fill": "rgba(231,76,60,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "a.z",
+               "sourceNames": [
+                  "a.z"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "a.z",
+                  "_id": "data-serie-54",
+                  "stroke": "rgba(52,152,219,1)",
+                  "fill": "rgba(52,152,219,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "a.y",
+               "sourceNames": [
+                  "a.y"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "a.y",
+                  "_id": "data-serie-55",
+                  "stroke": "rgba(46,204,113,1)",
+                  "fill": "rgba(46,204,113,0.1)"
+               },
+               "type": "number"
+            }
+         ]
+      },
+      {
+         "type": "chart",
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "series": [
+            {
+               "name": "g.x",
+               "sourceNames": [
+                  "g.x"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "g.x",
+                  "_id": "data-serie-56",
+                  "stroke": "rgba(231,76,60,1)",
+                  "fill": "rgba(231,76,60,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "g.z",
+               "sourceNames": [
+                  "g.z"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "g.z",
+                  "_id": "data-serie-57",
+                  "stroke": "rgba(52,152,219,1)",
+                  "fill": "rgba(52,152,219,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "g.y",
+               "sourceNames": [
+                  "g.y"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "g.y",
+                  "_id": "data-serie-58",
+                  "stroke": "rgba(46,204,113,1)",
+                  "fill": "rgba(46,204,113,0.1)"
+               },
+               "type": "number"
+            }
+         ]
+      },
+      {
+         "type": "chart",
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "series": [
+            {
+               "name": "m.x",
+               "sourceNames": [
+                  "m.x"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "m.x",
+                  "_id": "data-serie-59",
+                  "stroke": "rgba(231,76,60,1)",
+                  "fill": "rgba(231,76,60,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "m.z",
+               "sourceNames": [
+                  "m.z"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "m.z",
+                  "_id": "data-serie-60",
+                  "stroke": "rgba(52,152,219,1)",
+                  "fill": "rgba(52,152,219,0.1)"
+               },
+               "type": "number"
+            },
+            {
+               "name": "m.y",
+               "sourceNames": [
+                  "m.y"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "m.y",
+                  "_id": "data-serie-61",
+                  "stroke": "rgba(46,204,113,1)",
+                  "fill": "rgba(46,204,113,0.1)"
                },
                "type": "number"
             }
@@ -211,58 +457,69 @@
          },
          "series": [
             {
-               "name": "w_1_acc",
+               "name": "m.a",
                "sourceNames": [
-                  "w_1_acc"
+                  "m.a"
                ],
                "formula": "",
                "options": {
-                  "_serie": "w_1_acc",
-                  "_id": "data-serie-28",
+                  "_serie": "m.a",
+                  "_id": "data-serie-62",
+                  "stroke": "rgba(231,76,60,1)",
+                  "fill": "rgba(231,76,60,0.1)"
+               },
+               "type": "number"
+            }
+         ]
+      },
+      {
+         "type": "chart",
+         "gridPos": {
+            "h": 6,
+            "w": 6,
+            "x": 0,
+            "y": 0
+         },
+         "series": [
+            {
+               "name": "pose.roll",
+               "sourceNames": [
+                  "pose.roll"
+               ],
+               "formula": "",
+               "options": {
+                  "_serie": "pose.roll",
+                  "_id": "data-serie-63",
                   "stroke": "rgba(231,76,60,1)",
                   "fill": "rgba(231,76,60,0.1)"
                },
                "type": "number"
             },
             {
-               "name": "w_2_acc",
+               "name": "pose.yaw",
                "sourceNames": [
-                  "w_2_acc"
+                  "pose.yaw"
                ],
                "formula": "",
                "options": {
-                  "_serie": "w_2_acc",
-                  "_id": "data-serie-29",
+                  "_serie": "pose.yaw",
+                  "_id": "data-serie-64",
                   "stroke": "rgba(52,152,219,1)",
                   "fill": "rgba(52,152,219,0.1)"
                },
                "type": "number"
             },
             {
-               "name": "w_3_acc",
+               "name": "pose.pitch",
                "sourceNames": [
-                  "w_3_acc"
+                  "pose.pitch"
                ],
                "formula": "",
                "options": {
-                  "_serie": "w_3_acc",
-                  "_id": "data-serie-30",
+                  "_serie": "pose.pitch",
+                  "_id": "data-serie-65",
                   "stroke": "rgba(46,204,113,1)",
                   "fill": "rgba(46,204,113,0.1)"
-               },
-               "type": "number"
-            },
-            {
-               "name": "w_4_acc",
-               "sourceNames": [
-                  "w_4_acc"
-               ],
-               "formula": "",
-               "options": {
-                  "_serie": "w_4_acc",
-                  "_id": "data-serie-31",
-                  "stroke": "rgba(155,89,182,1)",
-                  "fill": "rgba(155,89,182,0.1)"
                },
                "type": "number"
             }

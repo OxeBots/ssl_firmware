@@ -8,11 +8,16 @@
 #include <esp_adc/adc_cali.h>
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_err.h>
+#include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <standard_constants.h>
 #include <stdint.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
+#include <numeric>
 
 #include "I2Cdev.h"
 #include "helper_func.h"
@@ -72,6 +77,15 @@ class AS5600
     esp_err_t set_slow_filter(SlowFilter filter);
     esp_err_t set_fast_filter(FastFilter threshold);
     esp_err_t burn_settings();
+
+    /**
+     * @brief Reads the current configuration from the sensor.
+     * @param stage [out] Current output stage setting.
+     * @param slow [out] Current slow filter setting.
+     * @param fast [out] Current fast filter setting.
+     * @return ESP_OK on success.
+     */
+    esp_err_t read_configuration(OutputStage * stage, SlowFilter * slow, FastFilter * fast);
 
     /**
      * @brief Get the raw angle from the sensor via I2C.

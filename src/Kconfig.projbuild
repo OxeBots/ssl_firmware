@@ -28,6 +28,13 @@ menu "Oxebots Robot GPIO Configuration"
             default 22 if IDF_TARGET_ESP32
             help
                 GPIO for I2C Serial Clock line.
+
+        config I2C_PORT_NUM
+            int "I2C Port Number"
+            range 0 1
+            default 0 if IDF_TARGET_ESP32
+            help
+                I2C Port number to use (0 or 1 on ESP32).
     endmenu
 
     menu "Motors"

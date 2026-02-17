@@ -224,9 +224,13 @@ int8_t I2Cdev::readWord(uint8_t devAddr, uint8_t regAddr, uint16_t * data, uint1
 {
     uint8_t msb[2] = {0, 0};
     // Note: I2Cdev usually assumes Big Endian words from sensors unless specified
-    readBytes(devAddr, regAddr, 2, msb);
-    *data = (int16_t)((msb[0] << 8) | msb[1]);
-    return 0;
+    if (readBytes(devAddr, regAddr, 2, msb, timeout) == 2)
+    {
+        *data = (int16_t)((msb[0] << 8) | msb[1]);
+        return 0;  // Success
+    }
+
+    return -1;  // Failure
 }
 
 /** Write single bit in an 8-bit device register.

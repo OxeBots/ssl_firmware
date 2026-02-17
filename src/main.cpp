@@ -7,8 +7,8 @@
 #include <numeric>
 #include <vector>
 
-#include "AS5600.h"
 #include "BL48250.h"
+#include "IMUGY85.h"
 #include "mirf.h"
 #include "omni_robot.h"
 #include "wheel_state_estimator.h"
@@ -16,7 +16,80 @@
 static const char * TAG = "MAIN";
 
 i2c_master_bus_handle_t bus_handle;
-#define I2C_PORT_NUM I2C_NUM_0
+
+// Tasks Configuration
+#define IMU_TASK_RATE_HZ 100
+#define SERIAL_PRINT_RATE_HZ 20
+
+IMUGY85 imu;
+SemaphoreHandle_t data_mutex;
+
+// Shared Data Container
+struct SharedData
+{
+    double ax, ay, az;
+    double gx, gy, gz;
+    double mx, my, mz;
+    double roll, pitch, yaw;
+    double azimuth;
+    char mag_dir[4];
+} imu_data;
+
+void setup_i2c()
+{
+    i2c_master_bus_config_t i2c_mst_config = {.i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
+                                              .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
+                                              .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
+                                              .clk_source = I2C_CLK_SRC_DEFAULT,
+                                              .glitch_ignore_cnt = 7,
+                                              .intr_priority = 0,
+                                              .trans_queue_depth = 0,
+                                              .flags = {.enable_internal_pullup = 1, .allow_pd = 0}};
+
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
+    I2Cdev::init(bus_handle);
+    ESP_LOGI(TAG, "I2C Initialized");
+}
+
+void setup_nvs()
+{
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+}
+
+void imu_update_task(void * pvParameters)
+{
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(1000 / IMU_TASK_RATE_HZ);
+    xLastWakeTime = xTaskGetTickCount();
+
+    while (true)
+    {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+        imu.update();
+
+        if (xSemaphoreTake(data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
+        {
+            imu.getAcceleration(&imu_data.ax, &imu_data.ay, &imu_data.az);
+            imu.getGyro(&imu_data.gx, &imu_data.gy, &imu_data.gz);
+            imu.getMagnetometer(&imu_data.mx, &imu_data.my, &imu_data.mz);
+
+            imu_data.roll = imu.getRoll();
+            imu_data.pitch = imu.getPitch();
+            imu_data.yaw = imu.getYaw();
+            imu_data.azimuth = imu.mag.getAzimuth();
+            imu.mag.getDirection(imu_data.mag_dir, imu_data.azimuth);
+
+            xSemaphoreGive(data_mutex);
+        }
+    }
+}
 
 void heartbeat_task(void * pvParam)
 {
@@ -43,53 +116,38 @@ void heartbeat_task(void * pvParam)
     vTaskDelete(nullptr);
 }
 
-void setup_i2c()
-{
-    i2c_master_bus_config_t i2c_mst_config = {.i2c_port = I2C_PORT_NUM,
-                                              .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
-                                              .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
-                                              .clk_source = I2C_CLK_SRC_DEFAULT,
-                                              .glitch_ignore_cnt = 7,
-                                              .intr_priority = 0,
-                                              .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = 1, .allow_pd = 0}};
-
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
-    I2Cdev::init(bus_handle);
-    ESP_LOGI(TAG, "I2C Initialized");
-}
-
 extern "C" void app_main(void)
 {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
+    ESP_LOGI(TAG, "Starting Oxebots SSL Firmware...");
+    setup_nvs();
     setup_i2c();
+
+    data_mutex = xSemaphoreCreateMutex();
 
     const std::array<adc_channel_t, 4> wheel_adc_channels = {
       static_cast<adc_channel_t>(CONFIG_MOTOR_FL_ENC_CHANNEL), static_cast<adc_channel_t>(CONFIG_MOTOR_BL_ENC_CHANNEL),
       static_cast<adc_channel_t>(CONFIG_MOTOR_BR_ENC_CHANNEL), static_cast<adc_channel_t>(CONFIG_MOTOR_FR_ENC_CHANNEL)};
 
     WheelStateEstimator & w_state_estimator = WheelStateEstimator::get_instance();
+
+    ESP_LOGI(TAG, "Initializing Wheel State Estimator...");
     ESP_ERROR_CHECK(w_state_estimator.init(wheel_adc_channels, ADC_ATTEN_DB_12));
 
-    // --- CALIBRATION STEP ---
-    // ESP_LOGI(TAG, "Starting sensor range calibration...");
-
-    // if (w_state_estimator.calibrate_wheel_encoders_range(2000) == ESP_OK)
-    //     ESP_LOGI(TAG, "All channels calibrated.");
-    // else
-    //     ESP_LOGE(TAG, "Failed to calibrate all channels.");
+    ESP_LOGI(TAG, "Initializing IMU...");
+    imu.init();
+    struct SharedData local_data;
 
     xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
+    xTaskCreate(imu_update_task, "IMU Update", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
 
+    // --- CALIBRATION STEP ---
+    ESP_LOGI(TAG, "Starting sensor range calibration...");
+
+    w_state_estimator.configure_encoder_i2c(0);  // one-time config to ensure all AS5600 is in the correct mode
     w_state_estimator.load_or_calibrate(5000);
+    // w_state_estimator.force_calibration(10000, false);
 
-    // Main loop
+    // Main log loop
     while (true)
     {
         // Get the latest filtered data from the wheel state estimator
@@ -107,6 +165,46 @@ extern "C" void app_main(void)
             printf(">w_%d_acc:%f\n", i + 1, accels[i]);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        if (xSemaphoreTake(data_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+        {
+            local_data = imu_data;
+            xSemaphoreGive(data_mutex);
+        }
+
+        // Print in Teleplot format (like the example)
+        // Note: Teleplot example prints Yaw, Pitch, Roll in degrees.
+        // We match that format exactly.
+
+        printf(">a.x:%.2f\n", local_data.ay);
+        printf(">a.y:%.2f\n", -local_data.ax);
+        printf(">a.z:%.2f\n", local_data.az);
+        printf(">g.x:%.2f\n", local_data.gx);
+        printf(">g.y:%.2f\n", local_data.gy);
+        printf(">g.z:%.2f\n", local_data.gz);
+        printf(">m.x:%.2f\n", local_data.mx);
+        printf(">m.y:%.2f\n", local_data.my);
+        printf(">m.z:%.2f\n", local_data.mz);
+        printf(">m.a:%.2f\n", local_data.azimuth);
+        printf("Mag dir: %s\n", local_data.mag_dir);
+
+        printf(">pose.roll:%.2f\n", local_data.roll);
+        printf(">pose.pitch:%.2f\n", local_data.pitch);
+        printf(">pose.yaw:%.2f\n", local_data.yaw);
+
+        // 3D Teleplot Visualization
+        // Format: >3D|IMU:R:{roll_rad}:{pitch_rad}:{yaw_rad}:...
+        // Note: Adafruit example uses Pitch:Yaw:-Roll ordering for the cube visualization
+        // Adjust signs here if the 3D cube moves opposite to the board.
+        float rad_roll = local_data.roll * M_PI / 180.0f;
+        float rad_pitch = local_data.pitch * M_PI / 180.0f;
+        float rad_yaw = local_data.yaw * M_PI / 180.0f;
+
+        printf(">3D|IMU:R:%.4f:%.4f:%.4f:S:cube:W:3:H:1.5:D:4:C:grey|g\n",
+               rad_roll,   // X Rotation
+               rad_pitch,  // Y Rotation
+               -rad_yaw    // Z Rotation
+        );
+
+        vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));
     }
 }
