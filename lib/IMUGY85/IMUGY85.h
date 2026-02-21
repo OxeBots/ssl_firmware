@@ -1,14 +1,11 @@
 /**
  * @file IMUGY85.h
  * @brief Driver for the GY-85 9-DOF IMU sensor board using Fusion AHRS.
- * @details This library fuses data from the ADXL345 accelerometer, ITG3200 gyroscope, and QMC5883L
- * magnetometer using the Fusion AHRS library to provide stable orientation estimates (Roll, Pitch,
- * Yaw).
  */
-
 #ifndef _IMUGY85_H_
 #define _IMUGY85_H_
 
+#include <esp_log.h>
 #include <esp_timer.h>
 #include <math.h>
 #include <stdint.h>
@@ -27,25 +24,24 @@
 #define degrees(x) ((x) * 180.0f / M_PI)
 #define radians(x) ((x) * M_PI / 180.0f)
 
-// Estimated sample rate for initialization (Hz)
 #define IMU_SAMPLE_RATE 100
 
 /**
  * @brief Class for GY-85 9DOF IMU.
  *
  * This class interfaces with the ADXL345 accelerometer, ITG3200 gyroscope, and QMC5883L magnetometer
- * on the GY-85 board. It implements the Fusion AHRS filter to fuse sensor data and calculate
+ * on the GY-85 board. It uses the Fusion AHRS filter to fuse sensor data and calculate
  * orientation (Pitch, Roll, Yaw).
  */
 class IMUGY85
 {
-/**
+    /**
      * @brief Gyroscope Full Scale Range options.
      * @note The ITG-3200 supports only +/- 2000 dps.
      */
     enum Gscale
     {
-        GFS_2000DPS = ITG3200_FULLSCALE_2000  ///< +/- 2000 degrees per second
+        GFS_2000DPS = ITG3200_FULLSCALE_2000
     };
 
     /**
@@ -53,72 +49,54 @@ class IMUGY85
      */
     enum Ascale
     {
-        AFS_2G = 0,  ///< +/- 2G
-        AFS_4G,      ///< +/- 4G
-        AFS_8G,      ///< +/- 8G
-        AFS_16G      ///< +/- 16G
+        AFS_2G = 0,
+        AFS_4G,
+        AFS_8G,
+        AFS_16G
     };
 
-    /**
-     * @brief Magnetometer Scale/Resolution options.
-     */
-    enum mScale
-    {
-        M_RNG_2G = QMC5883L_RNG_2G,  // +/- 2 Gauss
-        M_RNG_8G = QMC5883L_RNG_8G   // +/- 8 Gauss
-    };
+    uint8_t m_g_scale = GFS_2000DPS;
+    uint8_t m_a_scale = AFS_16G;
+    bool m_a_full_res = true;
 
-    uint8_t Gscale = GFS_2000DPS;  ///< Current Gyro scale setting
-    uint8_t Ascale = AFS_16G;      ///< Current Accel scale setting
-    uint8_t Mscale = M_RNG_8G;   ///< Current Mag scale setting (16-bit default)
-    bool AfullRes = true;          ///< Full Resolution mode for Accel
-    float aRes, gRes, mRes;        ///< Calculated resolutions per LSB for the sensors
-    uint8_t currentMagMode = QMC5883L_MODE_CONTINUOUS;
-    uint8_t currentMagODR  = QMC5883L_ODR_200HZ;
-    uint8_t currentMagRNG  = QMC5883L_RNG_8G;
-    uint8_t currentMagOSR  = QMC5883L_OSR_512;
+    float m_a_res, m_g_res, m_m_res;
 
+    int16_t m_accel_count[3];
+    int16_t m_gyro_count[3];
+    int16_t m_mag_count[3];
 
-    int16_t accelCount[3];  ///< Raw accelerometer sensor output (X, Y, Z)
-    int16_t gyroCount[3];   ///< Raw gyroscope sensor output (X, Y, Z)
-    int16_t magCount[3];    ///< Raw magnetometer sensor output (X, Y, Z)
-
-    // Fusion Objects
-    bool useMagnetometerFusion = false;  // Default to FALSE (6-DOF) like MPU6050
-    FusionOffset offset;
-    FusionAhrs ahrs;
-    FusionAhrsSettings settings;
+    bool m_use_magnetometer_fusion = false;
+    FusionOffset m_offset;
+    FusionAhrs m_ahrs;
+    FusionAhrsSettings m_settings;
 
     // Fusion Calibration Data
-    FusionMatrix gyroscopeMisalignment;
-    FusionVector gyroscopeSensitivity;
-    FusionVector gyroscopeOffset;
-    FusionMatrix accelerometerMisalignment;
-    FusionVector accelerometerSensitivity;
-    FusionVector accelerometerOffset;
-    FusionMatrix softIronMatrix;
-    FusionVector hardIronOffset;
+    FusionMatrix m_gyro_misalignment;
+    FusionVector m_gyro_sensitivity;
+    FusionVector m_gyro_offset;
+    FusionMatrix m_accel_misalignment;
+    FusionVector m_accel_sensitivity;
+    FusionVector m_accel_offset;
+    FusionMatrix m_soft_iron_matrix;
+    FusionVector m_hard_iron_offset;
 
-    double dt = 0.0f;        ///< Integration interval for filter (seconds)
-    int64_t lastUpdate = 0;  ///< Last update time in microseconds
-    int64_t Now = 0;         ///< Current time in microseconds
+    double m_dt = 0.0f;         ///< Integration interval for filter (seconds)
+    int64_t m_last_update = 0;  ///< Last update time in microseconds
+    int64_t m_now = 0;          ///< Current time in microseconds
 
-    float ax, ay, az;  ///< Latest accelerometer values (g)
-    float gx, gy, gz;  ///< Latest gyroscope values (deg/s)
-    float mx, my, mz;  ///< Latest magnetometer values (mG)
+    float m_ax, m_ay, m_az;  ///< Latest accelerometer values (g)
+    float m_gx, m_gy, m_gz;  ///< Latest gyroscope values (deg/s)
+    float m_mx, m_my, m_mz;  ///< Latest magnetometer values (mG)
 
-    double pitch = 0;  ///< Calculated Pitch angle (degrees)
-    double roll = 0;   ///< Calculated Roll angle (degrees)
-    double yaw = 0;    ///< Calculated Yaw angle (degrees)
+    double m_pitch = 0;  ///< Calculated Pitch angle (degrees)
+    double m_roll = 0;   ///< Calculated Roll angle (degrees)
+    double m_yaw = 0;    ///< Calculated Yaw angle (degrees)
 
    public:
-    ADXL345 accel;  ///< Accelerometer driver instance
-    ITG3200 gyro;   ///< Gyroscope driver instance
-    QMC5883L mag;   ///< Magnetometer driver instance
+    ADXL345 accel;
+    ITG3200 gyro;
+    QMC5883L mag;
 
-    /**
-     * @brief Constructor for IMUGY85.
-     */
     IMUGY85();
 
     /**
@@ -135,90 +113,38 @@ class IMUGY85
      */
     void update();
 
-    /**
-     * @brief Enable or Disable magnetometer fusion.
-     * Set to false to behave like an MPU6050 (6-DOF).
-     * Set to true only if Magnetometer is fully calibrated.
-     */
-    void setFusionMode(bool useMag);
+    // Getters
+    double get_roll() const;
+    double get_pitch() const;
+    double get_yaw() const;
+
+    void get_acceleration(double * a1, double * a2, double * a3) const;
+    void get_gyro(double * m1, double * m2, double * m3) const;
+    void get_magnetometer(double * m1, double * m2, double * m3) const;
+
+    // Calibration setters for external calibration
+    void set_gyroscope_calibration(FusionMatrix misalignment, FusionVector sensitivity, FusionVector offset_vec);
+    void set_accelerometer_calibration(FusionMatrix misalignment, FusionVector sensitivity, FusionVector offset_vec);
+    void set_magnetometer_calibration(FusionMatrix soft_iron, FusionVector hard_iron);
 
     /**
-     * @brief Get the calculated Roll angle.
-     * @return Roll angle in degrees.
+     * @brief Loads magnetometer calibration from NVS, or starts calibration if missing.
+     * @param seconds Duration in seconds for the calibration routine.
+     * @return ESP_OK on success, ESP_FAIL on failure.
      */
-    double getRoll();
+    esp_err_t load_or_calibrate_mag(uint32_t seconds = 10);
 
     /**
-     * @brief Get the calculated Pitch angle.
-     * @return Pitch angle in degrees.
+     * @brief Force a new magnetometer calibration sequence.
+     * @param seconds Duration in seconds.
+     * @return ESP_OK on success.
      */
-    double getPitch();
-
-    /**
-     * @brief Get the calculated Yaw angle.
-     * @return Yaw angle in degrees (0-360).
-     */
-    double getYaw();
-
-    /**
-     * @brief Get current acceleration values (in g's).
-     * @param a1 Pointer to store X acceleration.
-     * @param a2 Pointer to store Y acceleration.
-     * @param a3 Pointer to store Z acceleration.
-     */
-    void getAcceleration(double * a1, double * a2, double * a3);
-
-    /**
-     * @brief Get current gyroscope values (in deg/s).
-     * @param m1 Pointer to store X gyro rate.
-     * @param m2 Pointer to store Y gyro rate.
-     * @param m3 Pointer to store Z gyro rate.
-     */
-    void getGyro(double * m1, double * m2, double * m3);
-
-    /**
-     * @brief Get current magnetometer values (in mG).
-     * @param m1 Pointer to store X mag.
-     * @param m2 Pointer to store Y mag.
-     * @param m3 Pointer to store Z mag.
-     */
-    void getMagnetometer(double * m1, double * m2, double * m3);
-
-    void setGyroscopeCalibration(FusionMatrix misalignment, FusionVector sensitivity, FusionVector offset_vec)
-    {
-        gyroscopeMisalignment = misalignment;
-        gyroscopeSensitivity = sensitivity;
-        gyroscopeOffset = offset_vec;
-    }
-
-    void setAccelerometerCalibration(FusionMatrix misalignment, FusionVector sensitivity, FusionVector offset_vec)
-    {
-        accelerometerMisalignment = misalignment;
-        accelerometerSensitivity = sensitivity;
-        accelerometerOffset = offset_vec;
-    }
-
-    void setMagnetometerCalibration(FusionMatrix softIron, FusionVector hardIron)
-    {
-        softIronMatrix = softIron;
-        hardIronOffset = hardIron;
-    }
+    esp_err_t calibrate_magnetometer(uint32_t seconds = 10);
 
    private:
-    /**
-     * @brief Calculate accelerometer resolution based on current Ascale.
-     */
-    void getAres();
-
-    /**
-     * @brief Calculate gyroscope resolution based on current Gscale.
-     */
-    void getGres();
-
-    /**
-     * @brief Calculate magnetometer resolution based on current Mscale.
-     */
-    void getMres();
+    void update_a_res();
+    void update_g_res();
+    void update_m_res();
 };
 
 #endif  // _IMUGY85_H_

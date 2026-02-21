@@ -11,14 +11,11 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
-#include <nvs.h>
-#include <nvs_flash.h>
 
 #include <array>
 #include <cstdio>
 #include <map>
 #include <memory>
-#include <vector>
 
 #include "AS5600.h"
 
@@ -28,13 +25,6 @@ static constexpr size_t ADC_BUFFER_SIZE = 512;
 static constexpr adc_bitwidth_t ADC_BITWIDTH = ADC_BITWIDTH_12;
 static constexpr int MIN_VALID_SWING_MV = 2000;
 static constexpr int FULL_RANGE_THRESHOLD_MV = 3300 * 0.9;  // 90% of 3.3V
-
-struct CalibrationData
-{
-    int min_voltage_mv;
-    int max_voltage_mv;
-    bool valid;
-};
 
 struct AS5600Settings
 {
@@ -88,65 +78,12 @@ class WheelStateEstimator
     static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t * edata,
                                          void * user_data);
 
-    /**
-     * @brief Saves the voltage calibration range for a specific channel to NVS (Non Volatile Storage).
-     *
-     * Stores the minimum and maximum voltage values associated with a full rotation.
-     *
-     * @param channel_idx Index of the encoder channel (0-3).
-     * @param min Minimum voltage measured (mV).
-     * @param max Maximum voltage measured (mV).
-     * @return ESP_OK on success, or an error code from the NVS API.
-     */
-    esp_err_t save_calibration_to_nvs(size_t channel_idx, int min, int max);
-
-    /**
-     * @brief Loads the voltage calibration range for a specific channel from NVS (Non Volatile Storage).
-     *
-     * @param channel_idx Index of the encoder channel (0-3).
-     * @param[out] min Pointer to store the retrieved minimum voltage (mV).
-     * @param[out] max Pointer to store the retrieved maximum voltage (mV).
-     * @return ESP_OK if data was found and loaded, ESP_ERR_NVS_NOT_FOUND if missing.
-     */
-    esp_err_t load_calibration_from_nvs(size_t channel_idx, int * min, int * max);
-
-    /**
-     * @brief Writes configuration settings to the AS5600 via I2C.
-     *
-     * Applies the output stage, slow filter, and fast filter settings to the sensor.
-     *
-     * @param enc Pointer to the AS5600 encoder instance.
-     * @param settings The configuration parameters to apply.
-     * @return ESP_OK on success, or ESP_FAIL if any I2C write operation fails.
-     */
     esp_err_t apply_i2c_settings(AS5600 * enc, const AS5600Settings & settings);
-
-    /**
-     * @brief Reads back AS5600 registers to verify they match the desired settings.
-     *
-     * Ensures that the I2C write operations were successful and the sensor state
-     * matches the configuration object.
-     *
-     * @param enc Pointer to the AS5600 encoder instance.
-     * @param settings The configuration parameters expected.
-     * @return ESP_OK if the readback values match the settings, ESP_FAIL otherwise.
-     */
     esp_err_t verify_i2c_settings(AS5600 * enc, const AS5600Settings & settings);
-
-    /**
-     * @brief Permanently burns configuration settings into the AS5600 OTP memory.
-     *
-     * @warning This operation is irreversible. The AS5600 supports burning settings
-     * only a limited number of times (typically 3).
-     *
-     * @param enc Pointer to the AS5600 encoder instance.
-     * @param settings Configuration object containing the `burn_settings` flag.
-     * @return ESP_OK on success (or if burn was not requested), ESP_FAIL on error.
-     */
     esp_err_t process_otp_burn(AS5600 * enc, const AS5600Settings & settings);
 
-    // --- Member Variables ---
     bool m_initialized = false;
+    bool m_is_suspended = false;
     adc_continuous_handle_t m_adc_handle;
     TaskHandle_t m_task_handle;
 
@@ -159,10 +96,7 @@ class WheelStateEstimator
     // Mutex to protect shared access to encoder data between ADC task and main task
     SemaphoreHandle_t m_data_mutex;
 
-    const char * nvs_namespace = "wheel_calib";
-
    public:
-    // Singleton access
     static WheelStateEstimator & get_instance();
 
     WheelStateEstimator(const WheelStateEstimator &) = delete;
@@ -170,14 +104,14 @@ class WheelStateEstimator
 
     /**
      * @brief Initializes the underlying ADC hardware and creates AS5600 objects.
-     * @param channels Vector of ADC channels to initialize.
+     * @param channels Array of ADC channels to initialize.
      * @return ESP_OK on success.
      */
     esp_err_t init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
                    adc_atten_t attenuation = ADC_ATTEN_DB_12);
 
     /**
-     * @brief Pauses the ADC task to allow for configuration/I2C operations.
+     * @brief Pauses the ADC task.
      */
     void suspend();
 
@@ -187,15 +121,12 @@ class WheelStateEstimator
     void resume();
 
     /**
-     * @brief Loads calibration from NVS. If missing, runs the interactive
-     * calibration routine which blocks for 'duration_ms'.
+     * @brief Loads calibration from NVS via encoder instances. If missing, runs the calibration routine.
      */
     esp_err_t load_or_calibrate(uint32_t duration_ms = 5000);
 
     /**
-     * @brief Performs range calibration (Min/Max Voltage) and saves to NVS. Blocks for 'duration_ms' or until all
-     * sensors hit FULL_RANGE_THRESHOLD_MV.
-     * @param stop_on_stable If true, stops early if full range (0-3.3V) is detected.
+     * @brief Performs range calibration interactively and saves to NVS.
      */
     esp_err_t force_calibration(uint32_t duration_ms, bool stop_on_stable = true);
 
@@ -209,7 +140,7 @@ class WheelStateEstimator
      */
     esp_err_t configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings = AS5600Settings());
 
-    // --- Getters for filtered state ---
+    // --- Getters ---
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_deg();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_rpm();

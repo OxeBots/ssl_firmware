@@ -14,7 +14,6 @@ esp_err_t AS5600::init_i2c()
     if (m_i2c_initialized)
         return ESP_ERR_INVALID_STATE;
 
-    // Test communication by reading a register
     uint16_t test_conf;
     if (read_config_register(&test_conf) != ESP_OK)
     {
@@ -104,7 +103,7 @@ esp_err_t AS5600::get_i2c_raw_angle(uint16_t * angle)
 
 void AS5600::process_new_reading(uint16_t raw_adc_value)
 {
-    // --- Step 1: Oversampling ---
+    // Oversampling
     if (m_sampling_state.count < OVERSAMPLE_COUNT)
         m_sampling_state.samples[m_sampling_state.count++] = raw_adc_value;
 
@@ -114,7 +113,7 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
         uint32_t sum = std::accumulate(m_sampling_state.samples.begin(), m_sampling_state.samples.end(), 0u);
         m_last_avg_value = sum / OVERSAMPLE_COUNT;
 
-        // --- Step 2: Convert to Angle ---
+        // Convert to Angle
         int current_voltage_mv = 0;
         if (m_is_voltage_calibrated)
             adc_cali_raw_to_voltage(m_cali_handle, m_last_avg_value, &current_voltage_mv);
@@ -142,10 +141,8 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
             measured_angle_rad = static_cast<float>(m_last_avg_value) * (2.0f * PI / max_raw);
         }
 
-        // --- Step 3: Update Kalman Filter ---
+        // Update Kalman Filter
         m_filter->update(measured_angle_rad);
-
-        // Reset sampling
         m_sampling_state.count = 0;
     }
 }
@@ -168,7 +165,6 @@ esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
 
     ESP_LOGI(TAG, "Channel %d calibrated. Min: %d mV, Max: %d mV", m_channel, m_min_voltage_mv, m_max_voltage_mv);
 
-    // Sanity check
     if (m_max_voltage_mv - m_min_voltage_mv < MIN_VALID_VOLTAGE_RANGE_MV)
     {
         ESP_LOGE(TAG, "Error: Voltage range for channel %d is invalid (%d mV).", m_channel,
@@ -177,6 +173,45 @@ esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
     }
 
     return ESP_OK;
+}
+
+esp_err_t AS5600::save_calibration_to_nvs()
+{
+    char key_min[15], key_max[15];
+    snprintf(key_min, sizeof(key_min), "ch%d_min", static_cast<int>(m_channel));
+    snprintf(key_max, sizeof(key_max), "ch%d_max", static_cast<int>(m_channel));
+
+    esp_err_t err = NVSManager::save_i32(NVS_NS, key_min, m_min_voltage_mv);
+
+    if (err == ESP_OK)
+        err = NVSManager::save_i32(NVS_NS, key_max, m_max_voltage_mv);
+
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Saved calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv,
+                 m_max_voltage_mv);
+
+    return err;
+}
+
+esp_err_t AS5600::load_calibration_from_nvs()
+{
+    char key_min[15], key_max[15];
+    snprintf(key_min, sizeof(key_min), "ch%d_min", static_cast<int>(m_channel));
+    snprintf(key_max, sizeof(key_max), "ch%d_max", static_cast<int>(m_channel));
+
+    int32_t min_v = 0, max_v = 0;
+    esp_err_t err_min = NVSManager::load_i32(NVS_NS, key_min, &min_v);
+    esp_err_t err_max = NVSManager::load_i32(NVS_NS, key_max, &max_v);
+
+    if (err_min == ESP_OK && err_max == ESP_OK)
+    {
+        set_calibration_range(static_cast<int>(min_v), static_cast<int>(max_v));
+        ESP_LOGI(TAG, "Loaded calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv,
+                 m_max_voltage_mv);
+        return ESP_OK;
+    }
+
+    return ESP_ERR_NVS_NOT_FOUND;
 }
 
 float AS5600::get_angle_rad() const

@@ -1,4 +1,4 @@
-menu "Oxebots Robot GPIO Configuration"
+menu "Oxebots Robot Configuration"
 
     config GPIO_MAX_INDEX
         int "Maximum GPIO number for the target board"

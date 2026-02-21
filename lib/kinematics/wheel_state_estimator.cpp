@@ -2,13 +2,14 @@
 
 static const char * TAG = "WheelStateEstimator";
 
-// --- Singleton Implementation ---
 WheelStateEstimator & WheelStateEstimator::get_instance()
 {
     static WheelStateEstimator instance;
     return instance;
 }
-WheelStateEstimator::WheelStateEstimator() : m_initialized(false), m_adc_handle(nullptr), m_task_handle(nullptr)
+
+WheelStateEstimator::WheelStateEstimator()
+: m_initialized(false), m_is_suspended(false), m_adc_handle(nullptr), m_task_handle(nullptr)
 {
     m_data_mutex = xSemaphoreCreateMutex();
     m_channel_lookup.fill(nullptr);
@@ -16,9 +17,12 @@ WheelStateEstimator::WheelStateEstimator() : m_initialized(false), m_adc_handle(
 
 WheelStateEstimator::~WheelStateEstimator()
 {
-    if (m_initialized)
+    if (m_initialized && !m_is_suspended)
     {
         adc_continuous_stop(m_adc_handle);
+    }
+    if (m_initialized)
+    {
         adc_continuous_deinit(m_adc_handle);
     }
 
@@ -30,15 +34,12 @@ WheelStateEstimator::~WheelStateEstimator()
         vTaskDelete(m_task_handle);
 }
 
-// --- Public Methods ---
-
 esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
                                     adc_atten_t attenuation)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
 
-    // Create a AS5600 object for each specified ADC channel
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
         const adc_channel_t ch = channels[i];
@@ -54,14 +55,14 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
                                                       .default_vref = ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF};
         adc_cali_handle_t handle = nullptr;
         esp_err_t ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
-        bool is_calibrated = (ret == ESP_OK);
+        bool is_adc_calibrated = (ret == ESP_OK);
 
-        if (is_calibrated)
+        if (is_adc_calibrated)
             ESP_LOGI(TAG, "ADC voltage calibration for channel %d successful.", ch);
         else
             ESP_LOGE(TAG, "ADC voltage calibration failed for channel %d with error %d", ch, ret);
 
-        auto encoder = std::make_unique<AS5600>(ch, handle, is_calibrated, ADC_UNIT, ADC_BITWIDTH);
+        auto encoder = std::make_unique<AS5600>(ch, handle, is_adc_calibrated, ADC_UNIT, ADC_BITWIDTH);
         m_enc_channels[i] = EncoderChannel{std::move(encoder), handle};
         m_channel_lookup[ch] = &m_enc_channels[i];
         ESP_LOGI(TAG, "Created AS5600 for channel %d", ch);
@@ -74,9 +75,8 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
     };
     ESP_ERROR_CHECK(adc_continuous_new_handle(&handle_config, &m_adc_handle));
 
-    std::vector<adc_digi_pattern_config_t> pattern_config;
-
-    pattern_config.reserve(channels.size());
+    std::array<adc_digi_pattern_config_t, NUM_ENC_CHANNELS> pattern_config;
+    size_t pattern_idx = 0;
 
     for (const auto & ch : channels)
     {
@@ -86,7 +86,7 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
           .unit = ADC_UNIT,
           .bit_width = ADC_BITWIDTH,
         };
-        pattern_config.push_back(pattern);
+        pattern_config[pattern_idx++] = pattern;
     }
 
     adc_continuous_config_t adc_config = {
@@ -105,72 +105,53 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
 
     ESP_ERROR_CHECK(adc_continuous_start(m_adc_handle));
     m_initialized = true;
-
-    ESP_LOGI(TAG, "Wheel Odometry initialized using ADC channels:");
-    for (size_t i = 0; i < SOC_ADC_CHANNEL_NUM(ADC_UNIT); i++)
-        if (m_channel_lookup[i])
-            ESP_LOGI(TAG, "  - Channel %d", i);
+    m_is_suspended = false;
 
     return ESP_OK;
 }
 
 void WheelStateEstimator::suspend()
 {
-    if (m_initialized)
+    if (m_initialized && !m_is_suspended)
     {
-        // Suspend the task FIRST so it stops asking for data
         vTaskSuspend(m_task_handle);
         adc_continuous_stop(m_adc_handle);
+        m_is_suspended = true;
     }
 }
 
 void WheelStateEstimator::resume()
 {
-    if (m_initialized)
+    if (m_initialized && m_is_suspended)
     {
-        // Start the hardware FIRST so data is ready for the task when it resumes
         adc_continuous_start(m_adc_handle);
         xTaskNotifyStateClear(m_task_handle);
         vTaskResume(m_task_handle);
+        m_is_suspended = false;
     }
 }
 
 esp_err_t WheelStateEstimator::load_or_calibrate(uint32_t duration_ms)
 {
     bool missing_calibration = false;
-    suspend();
 
-    // Check NVS for all channels
+    // We let the AS5600 object manage NVS reading via NVSManager (which safely suspends ADC inherently)
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
-        int min_v = 0, max_v = 0;
-        esp_err_t err = load_calibration_from_nvs(i, &min_v, &max_v);
-
-        if (err == ESP_OK)
+        if (m_enc_channels[i].encoder->load_calibration_from_nvs() != ESP_OK)
         {
-            auto * enc = m_enc_channels[i].encoder.get();
-            enc->set_calibration_range(min_v, max_v);
-        }
-        else
-        {
-            ESP_LOGW(TAG, "Missing calibration for Ch %d", i);
+            ESP_LOGW(TAG, "Missing calibration for Ch %zu", i);
             missing_calibration = true;
         }
     }
 
-    resume();
-
     if (missing_calibration)
     {
         ESP_LOGW(TAG, "Entering Calibration Mode. Please rotate all wheels fully!");
-        esp_err_t ret = force_calibration(duration_ms, true);
-
-        if (ret != ESP_OK)
-            return ret;
+        return force_calibration(duration_ms, true);
     }
-    else
-        ESP_LOGI(TAG, "Calibration loaded from NVS.");
 
+    ESP_LOGI(TAG, "All AS5600 calibration loaded via NVSManager.");
     return ESP_OK;
 }
 
@@ -178,7 +159,6 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
 {
     for (auto & ch : m_enc_channels)
     {
-        // Stop first to ensure ADC task isn't writing
         ch.encoder->stop_calibration_mode();
         ch.encoder->reset_calibration_min_max();
         ch.encoder->start_calibration_mode();
@@ -192,13 +172,10 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
     while (xTaskGetTickCount() < end_tick)
     {
         int stable_count = 0;
-
         for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
         {
             auto * enc = m_enc_channels[i].encoder.get();
-            int range = enc->get_calib_max() - enc->get_calib_min();
-
-            if (range >= FULL_RANGE_THRESHOLD_MV)
+            if ((enc->get_calib_max() - enc->get_calib_min()) >= FULL_RANGE_THRESHOLD_MV)
                 stable_count++;
         }
 
@@ -215,27 +192,25 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
     if (!all_done)
         ESP_LOGW(TAG, "Calibration timeout reached.");
 
-    // Stop and Save
-    suspend();
     int success_count = 0;
 
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
         auto * enc = m_enc_channels[i].encoder.get();
-        enc->stop_calibration_mode();  // Stop updates
+        enc->stop_calibration_mode();
 
         int range = enc->get_calib_max() - enc->get_calib_min();
 
-        // Validate against MIN_VALID_SWING_MV to catch cases where user didn't rotate enough
         if (range < MIN_VALID_SWING_MV)
-            ESP_LOGE(TAG, "Ch %d Failed: Range %d mV is too small (Min Valid: %d)", i, range, MIN_VALID_SWING_MV);
+        {
+            ESP_LOGE(TAG, "Ch %zu Failed: Range %d mV is too small", i, range);
+        }
         else
         {
-            save_calibration_to_nvs(i, enc->get_calib_min(), enc->get_calib_max());
+            enc->save_calibration_to_nvs();
             success_count++;
         }
     }
-    resume();
 
     return (success_count == NUM_ENC_CHANNELS) ? ESP_OK : ESP_FAIL;
 }
@@ -256,7 +231,6 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg()
 {
     std::array<float, NUM_ENC_CHANNELS> angles;
-
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) angles[i] = m_enc_channels[i].encoder->get_angle_deg();
@@ -280,18 +254,15 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
 
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_acceleration_rps2()
 {
-    std::array<float, NUM_ENC_CHANNELS> accelerations;
+    std::array<float, NUM_ENC_CHANNELS> accels;
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
-            accelerations[i] = m_enc_channels[i].encoder->get_acceleration_rps2();
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) accels[i] = m_enc_channels[i].encoder->get_acceleration_rps2();
 
         xSemaphoreGive(m_data_mutex);
     }
-    return accelerations;
+    return accels;
 }
-
-// --- Private Methods ---
 
 void WheelStateEstimator::s_adc_task_wrapper(void * param)
 {
@@ -340,77 +311,6 @@ void WheelStateEstimator::adc_task()
     }
 }
 
-esp_err_t WheelStateEstimator::save_calibration_to_nvs(size_t channel_idx, int min_mv, int max_mv)
-{
-    nvs_handle_t my_handle;
-    esp_err_t err;
-
-    if (nvs_open(nvs_namespace, NVS_READWRITE, &my_handle) != ESP_OK)
-        return ESP_FAIL;
-
-    // Create unique keys for this channel (Keys must be < 15 chars)
-    char key_min[15], key_max[15];
-    snprintf(key_min, sizeof(key_min), "ch%zu_min", channel_idx);
-    snprintf(key_max, sizeof(key_max), "ch%zu_max", channel_idx);
-
-    // Write
-    err = nvs_set_i32(my_handle, key_min, min_mv);
-    if (err != ESP_OK)
-        goto exit;
-
-    err = nvs_set_i32(my_handle, key_max, max_mv);
-    if (err != ESP_OK)
-        goto exit;
-
-    // Commit
-    err = nvs_commit(my_handle);
-    if (err != ESP_OK)
-        goto exit;
-
-    ESP_LOGI(TAG, "Saved calibration for Ch %zu: [%d, %d] mV", channel_idx, min_mv, max_mv);
-
-exit:
-    // Close
-    nvs_close(my_handle);
-    return err;
-}
-
-esp_err_t WheelStateEstimator::load_calibration_from_nvs(size_t channel_idx, int * min_mv, int * max_mv)
-{
-    nvs_handle_t my_handle;
-    esp_err_t err;
-
-    if (nvs_open(nvs_namespace, NVS_READONLY, &my_handle) != ESP_OK)
-        return ESP_FAIL;
-
-    // Generate keys
-    char key_min[15];
-    char key_max[15];
-    snprintf(key_min, sizeof(key_min), "ch%zu_min", channel_idx);
-    snprintf(key_max, sizeof(key_max), "ch%zu_max", channel_idx);
-
-    // Read
-    int32_t val_min = 0;
-    int32_t val_max = 0;
-
-    err = nvs_get_i32(my_handle, key_min, &val_min);
-    if (err == ESP_OK)
-        err = nvs_get_i32(my_handle, key_max, &val_max);
-
-    nvs_close(my_handle);
-
-    if (err == ESP_OK)
-    {
-        *min_mv = (int)val_min;
-        *max_mv = (int)val_max;
-        ESP_LOGI(TAG, "Loaded calibration for Ch %zu: [%d, %d] mV", channel_idx, *min_mv, *max_mv);
-    }
-    else
-        ESP_LOGW(TAG, "Calibration data not found for Ch %zu", channel_idx);
-
-    return err;
-}
-
 esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings)
 {
     if (channel_idx >= NUM_ENC_CHANNELS)
@@ -426,20 +326,15 @@ esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const 
 
     if (enc && enc->init_i2c() == ESP_OK)
     {
-        // Write Settings
         ret = apply_i2c_settings(enc, settings);
-
-        // Verify Settings
         if (ret == ESP_OK)
         {
-            // Small delay for register settling
             vTaskDelay(pdMS_TO_TICKS(10));
             ret = verify_i2c_settings(enc, settings);
         }
         else
             ESP_LOGE(TAG, "I2C Config failed to write settings on Ch %d", channel_idx);
 
-        // Burn to OTP (if requested and verified)
         if (ret == ESP_OK)
         {
             ESP_LOGI(TAG, "I2C Config & Verification Success.");
@@ -456,10 +351,8 @@ esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const 
     return ret;
 }
 
-// --- Helper Implementations ---
-
 esp_err_t WheelStateEstimator::apply_i2c_settings(AS5600 * enc, const AS5600Settings & settings)
-{        
+{
     if (enc->set_output_stage(settings.output_stage) != ESP_OK)
         return ESP_FAIL;
     if (enc->set_slow_filter(settings.slow_filter) != ESP_OK)
@@ -488,6 +381,7 @@ esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Set
                  (uint8_t)read_stage);
         match = false;
     }
+
     if (read_slow != settings.slow_filter)
     {
         ESP_LOGE(TAG, "Verify Failed: Slow Filter mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.slow_filter,
@@ -509,13 +403,5 @@ esp_err_t WheelStateEstimator::process_otp_burn(AS5600 * enc, const AS5600Settin
     if (!settings.burn_settings)
         return ESP_OK;
 
-    ESP_LOGW(TAG, "BURNING SETTINGS TO OTP MEMORY...");
-    esp_err_t ret = enc->burn_settings();
-
-    if (ret == ESP_OK)
-        ESP_LOGI(TAG, "Burn Successful.");
-    else
-        ESP_LOGE(TAG, "Burn Failed!");
-
-    return ret;
+    return enc->burn_settings();
 }

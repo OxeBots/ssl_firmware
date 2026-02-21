@@ -9,6 +9,7 @@
 
 #include "BL48250.h"
 #include "IMUGY85.h"
+#include "NVSManager.h"
 #include "mirf.h"
 #include "omni_robot.h"
 #include "wheel_state_estimator.h"
@@ -76,15 +77,16 @@ void imu_update_task(void * pvParameters)
 
         if (xSemaphoreTake(data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
         {
-            imu.getAcceleration(&imu_data.ax, &imu_data.ay, &imu_data.az);
-            imu.getGyro(&imu_data.gx, &imu_data.gy, &imu_data.gz);
-            imu.getMagnetometer(&imu_data.mx, &imu_data.my, &imu_data.mz);
+            imu.get_acceleration(&imu_data.ax, &imu_data.ay, &imu_data.az);
+            imu.get_gyro(&imu_data.gx, &imu_data.gy, &imu_data.gz);
+            imu.get_magnetometer(&imu_data.mx, &imu_data.my, &imu_data.mz);
 
-            imu_data.roll = imu.getRoll();
-            imu_data.pitch = imu.getPitch();
-            imu_data.yaw = imu.getYaw();
-            imu_data.azimuth = imu.mag.getAzimuth();
-            imu.mag.getDirection(imu_data.mag_dir, imu_data.azimuth);
+            imu_data.roll = imu.get_roll();
+            imu_data.pitch = imu.get_pitch();
+            imu_data.yaw = imu.get_yaw();
+
+            imu_data.azimuth = imu.mag.get_azimuth();
+            imu.mag.get_direction(imu_data.mag_dir, imu_data.azimuth);
 
             xSemaphoreGive(data_mutex);
         }
@@ -130,6 +132,10 @@ extern "C" void app_main(void)
 
     WheelStateEstimator & w_state_estimator = WheelStateEstimator::get_instance();
 
+    // Tie the central NVSManager locks to the wheel estimator's task to safely halt the ADC during flash commits
+    NVSManager::set_adc_callbacks([&w_state_estimator]() { w_state_estimator.suspend(); },
+                                  [&w_state_estimator]() { w_state_estimator.resume(); });
+
     ESP_LOGI(TAG, "Initializing Wheel State Estimator...");
     ESP_ERROR_CHECK(w_state_estimator.init(wheel_adc_channels, ADC_ATTEN_DB_12));
 
@@ -140,23 +146,29 @@ extern "C" void app_main(void)
     xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
     xTaskCreate(imu_update_task, "IMU Update", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
 
-    // --- CALIBRATION STEP ---
-    ESP_LOGI(TAG, "Starting sensor range calibration...");
+    ESP_LOGI(TAG, "Starting sensor calibration check...");
 
-    w_state_estimator.configure_encoder_i2c(0);  // one-time config to ensure all AS5600 is in the correct mode
+    // Wheel Calibration
+    // w_state_estimator.configure_encoder_i2c(0);  // one-time config
+    ESP_LOGI(TAG, "Checking wheel encoders...");
     w_state_estimator.load_or_calibrate(5000);
-    // w_state_estimator.force_calibration(10000, false);
+
+    // 2. Magnetometer Calibration
+    ESP_LOGI(TAG, "Checking magnetometer calibration...");
+
+    if (imu.load_or_calibrate_mag(10) != ESP_OK)
+        ESP_LOGE(TAG, "Magnetometer calibration failed or timed out!");
+    else
+        ESP_LOGI(TAG, "Magnetometer is ready.");
 
     // Main log loop
     while (true)
     {
-        // Get the latest filtered data from the wheel state estimator
         const std::array<float, NUM_ENC_CHANNELS> angles_rad = w_state_estimator.get_filtered_angle_rad();
         const std::array<float, NUM_ENC_CHANNELS> angles_deg = w_state_estimator.get_filtered_angle_deg();
         const std::array<float, NUM_ENC_CHANNELS> rpms = w_state_estimator.get_filtered_rpm();
         const std::array<float, NUM_ENC_CHANNELS> accels = w_state_estimator.get_filtered_acceleration_rps2();
 
-        // Log the data for each wheel
         for (int i = 0; i < NUM_ENC_CHANNELS; ++i)
         {
             printf(">w_%d_rad:%f\n", i + 1, angles_rad[i]);
@@ -170,10 +182,6 @@ extern "C" void app_main(void)
             local_data = imu_data;
             xSemaphoreGive(data_mutex);
         }
-
-        // Print in Teleplot format (like the example)
-        // Note: Teleplot example prints Yaw, Pitch, Roll in degrees.
-        // We match that format exactly.
 
         printf(">a.x:%.2f\n", local_data.ay);
         printf(">a.y:%.2f\n", -local_data.ax);
@@ -191,10 +199,6 @@ extern "C" void app_main(void)
         printf(">pose.pitch:%.2f\n", local_data.pitch);
         printf(">pose.yaw:%.2f\n", local_data.yaw);
 
-        // 3D Teleplot Visualization
-        // Format: >3D|IMU:R:{roll_rad}:{pitch_rad}:{yaw_rad}:...
-        // Note: Adafruit example uses Pitch:Yaw:-Roll ordering for the cube visualization
-        // Adjust signs here if the 3D cube moves opposite to the board.
         float rad_roll = local_data.roll * M_PI / 180.0f;
         float rad_pitch = local_data.pitch * M_PI / 180.0f;
         float rad_yaw = local_data.yaw * M_PI / 180.0f;
@@ -202,7 +206,7 @@ extern "C" void app_main(void)
         printf(">3D|IMU:R:%.4f:%.4f:%.4f:S:cube:W:3:H:1.5:D:4:C:grey|g\n",
                rad_roll,   // X Rotation
                rad_pitch,  // Y Rotation
-               -rad_yaw    // Z Rotation
+               rad_yaw    // Z Rotation
         );
 
         vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));

@@ -1,339 +1,335 @@
 #include "QMC5883L.h"
 
-/**
- * @brief Default Constructor.
- */
-QMC5883L::QMC5883L()
+static const char * TAG = "QMC5883L";
+static const char * NVS_NS = "mag_calib";
+static const char * NVS_KEY_BLOB = "calib_blob";
+
+QMC5883L::QMC5883L(uint8_t address) : m_dev_addr(address)
 {
-    devAddr = QMC5883L_DEFAULT_ADDRESS;
 }
 
-/**
- * @brief Constructor with specified I2C address.
- * @param address I2C address of the QMC5883L device.
- */
-QMC5883L::QMC5883L(uint8_t address)
-{
-    devAddr = address;
-}
-
-
-/**
- * @brief Initialize the QMC5883L sensor with default settings.
- */
-void QMC5883L::initialize()
+void QMC5883L::init()
 {
     // Define Set/Reset Period (Recommended by datasheet)
-    I2Cdev::writeByte(devAddr, QMC5883L_RA_PERIOD, 0x01);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::PERIOD), 0x01);
 
     // Set Continuous Mode, 200Hz, 8G Range, OSR 512
-    setMode(QMC5883L_MODE_CONTINUOUS, QMC5883L_ODR_200HZ, QMC5883L_RNG_8G, QMC5883L_OSR_512);
+    set_mode(Mode::CONTINUOUS, OutputDataRate::ODR_200HZ, Range::RNG_8G, Oversampling::OSR_512);
 }
 
-void QMC5883L::setADDR(uint8_t b)
+void QMC5883L::set_addr(uint8_t hex)
 {
-    devAddr = b;
+    m_dev_addr = hex;
 }
 
-void QMC5883L::setMode(uint8_t mode, uint8_t odr, uint8_t rng, uint8_t osr)
+void QMC5883L::set_mode(Mode mode, OutputDataRate odr, Range rng, Oversampling osr)
 {
-    _mode = mode;
-    _odr = odr;
-    _rng = rng;
-    _osr = osr;
+    m_mode = mode;
+    m_odr = odr;
+    m_rng = rng;
+    m_osr = osr;
 
-    I2Cdev::writeByte(devAddr, QMC5883L_RA_CONTROL_1, _mode | _odr | _rng | _osr);
+    uint8_t config_val = static_cast<uint8_t>(m_mode) | static_cast<uint8_t>(m_odr) | static_cast<uint8_t>(m_rng) |
+                         static_cast<uint8_t>(m_osr);
+
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::CONTROL_1), config_val);
 }
 
-void QMC5883L::setReset()
+void QMC5883L::set_reset()
 {
-    I2Cdev::writeByte(devAddr, QMC5883L_RA_CONTROL_2, 0x80);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::CONTROL_2), 0x80);
 }
 
-void QMC5883L::setMagneticDeclination(int degrees, uint8_t minutes)
+void QMC5883L::set_magnetic_declination(int degrees, uint8_t minutes)
 {
-    _magneticDeclinationDegrees = degrees + minutes / 60.0f;
+    m_magnetic_declination_degrees = degrees + (minutes / 60.0f);
 }
 
-void QMC5883L::setSmoothing(uint8_t steps, bool adv)
+void QMC5883L::set_smoothing(uint8_t steps, bool adv)
 {
-    _smoothUse = true;
-    _smoothSteps = (steps > 10) ? 10 : steps;
-    _smoothAdvanced = adv;
+    m_smooth_use = true;
+    m_smooth_steps = (steps > 10) ? 10 : steps;
+    m_smooth_advanced = adv;
 
-    // Clear history to prevent jumps when enabling
-    memset(_vHistory, 0, sizeof(_vHistory));
-    _vTotals[0] = 0;
-    _vTotals[1] = 0;
-    _vTotals[2] = 0;
-    _vScan = 0;
+    memset(m_v_history, 0, sizeof(m_v_history));
+    m_v_totals[0] = m_v_totals[1] = m_v_totals[2] = 0;
+    m_v_scan = 0;
 }
 
-void QMC5883L::clearCalibration()
+void QMC5883L::clear_calibration()
 {
-    setCalibrationOffsets(0.0f, 0.0f, 0.0f);
-    setCalibrationScales(1.0f, 1.0f, 1.0f);
+    set_calibration_offsets(0.0f, 0.0f, 0.0f);
+    set_calibration_scales(1.0f, 1.0f, 1.0f);
 }
 
-void QMC5883L::setCalibrationOffsets(float x_offset, float y_offset, float z_offset)
+void QMC5883L::set_calibration_offsets(float x_offset, float y_offset, float z_offset)
 {
-    _offset[0] = x_offset;
-    _offset[1] = y_offset;
-    _offset[2] = z_offset;
+    m_offset[0] = x_offset;
+    m_offset[1] = y_offset;
+    m_offset[2] = z_offset;
 }
 
-void QMC5883L::setCalibrationScales(float x_scale, float y_scale, float z_scale)
+void QMC5883L::set_calibration_scales(float x_scale, float y_scale, float z_scale)
 {
-    _scale[0] = x_scale;
-    _scale[1] = y_scale;
-    _scale[2] = z_scale;
+    m_scale[0] = x_scale;
+    m_scale[1] = y_scale;
+    m_scale[2] = z_scale;
 }
 
-float QMC5883L::getCalibrationOffset(uint8_t index)
+float QMC5883L::get_calibration_offset(uint8_t index) const
 {
-    if (index < 3)
-        return _offset[index];
-    return 0.0f;
+    return (index < 3) ? m_offset[index] : 0.0f;
 }
 
-float QMC5883L::getCalibrationScale(uint8_t index)
+float QMC5883L::get_calibration_scale(uint8_t index) const
 {
-    if (index < 3)
-        return _scale[index];
-    return 1.0f;
+    return (index < 3) ? m_scale[index] : 1.0f;
 }
 
-void QMC5883L::calibrate()
+void QMC5883L::start_calibration_mode(uint32_t seconds)
 {
-    clearCalibration();
-    int32_t calibrationData[3][2] = {{65000, -65000}, {65000, -65000}, {65000, -65000}};
-
-    // Initial Read
-    read();
-    int16_t x = getX();
-    int16_t y = getY();
-    int16_t z = getZ();
-
-    calibrationData[0][0] = calibrationData[0][1] = x;
-    calibrationData[1][0] = calibrationData[1][1] = y;
-    calibrationData[2][0] = calibrationData[2][1] = z;
-
-    uint64_t startTime = esp_timer_get_time();  // Microseconds
-    const uint64_t duration = 10000000;         // 10 seconds in microseconds
-
-    while ((esp_timer_get_time() - startTime) < duration)
+    for (int i = 0; i < 3; i++)
     {
-        read();
-        x = getX();
-        y = getY();
-        z = getZ();
+        m_calib_min[i] = 32767;
+        m_calib_max[i] = -32768;
+    }
+    m_calib_duration_us = seconds * 1000000ULL;
+    m_calib_start_time = esp_timer_get_time();
+    m_calib_active = true;
+}
 
-        if (x < calibrationData[0][0])
-            calibrationData[0][0] = x;
-        if (x > calibrationData[0][1])
-            calibrationData[0][1] = x;
+bool QMC5883L::calibration_update()
+{
+    if (!m_calib_active)
+        return true;
 
-        if (y < calibrationData[1][0])
-            calibrationData[1][0] = y;
-        if (y > calibrationData[1][1])
-            calibrationData[1][1] = y;
+    read();
 
-        if (z < calibrationData[2][0])
-            calibrationData[2][0] = z;
-        if (z > calibrationData[2][1])
-            calibrationData[2][1] = z;
-
-        // Yield to prevent watchdog triggers
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+    // Update min/max for each axis
+    for (int i = 0; i < 3; i++)
+    {
+        if (m_v_raw[i] < m_calib_min[i])
+            m_calib_min[i] = m_v_raw[i];
+        if (m_v_raw[i] > m_calib_max[i])
+            m_calib_max[i] = m_v_raw[i];
     }
 
-    // Calculate Offsets
-    float x_avg = (calibrationData[0][1] + calibrationData[0][0]) / 2.0f;
-    float y_avg = (calibrationData[1][1] + calibrationData[1][0]) / 2.0f;
-    float z_avg = (calibrationData[2][1] + calibrationData[2][0]) / 2.0f;
+    if ((esp_timer_get_time() - m_calib_start_time) >= m_calib_duration_us)
+        return true;
 
-    setCalibrationOffsets(x_avg, y_avg, z_avg);
+    return false;
+}
 
-    // Calculate Scales
-    float x_avg_delta = (calibrationData[0][1] - calibrationData[0][0]) / 2.0f;
-    float y_avg_delta = (calibrationData[1][1] - calibrationData[1][0]) / 2.0f;
-    float z_avg_delta = (calibrationData[2][1] - calibrationData[2][0]) / 2.0f;
+void QMC5883L::stop_calibration_mode()
+{
+    if (!m_calib_active)
+        return;
 
-    float avg_delta = (x_avg_delta + y_avg_delta + z_avg_delta) / 3.0f;
+    // Calculate offsets as the average of min and max, and scales to normalize the range to be equal across axes
+    float x_avg = (m_calib_max[0] + m_calib_min[0]) / 2.0f;
+    float y_avg = (m_calib_max[1] + m_calib_min[1]) / 2.0f;
+    float z_avg = (m_calib_max[2] + m_calib_min[2]) / 2.0f;
 
-    // Prevent division by zero
-    if (x_avg_delta != 0)
-        _scale[0] = avg_delta / x_avg_delta;
-    if (y_avg_delta != 0)
-        _scale[1] = avg_delta / y_avg_delta;
-    if (z_avg_delta != 0)
-        _scale[2] = avg_delta / z_avg_delta;
+    set_calibration_offsets(x_avg, y_avg, z_avg);
+
+    // Calculate scales to normalize the half-range of each axis to be the same (assuming the true magnetic field
+    // strength is similar across axes)
+    float x_half_range = (m_calib_max[0] - m_calib_min[0]) / 2.0f;
+    float y_half_range = (m_calib_max[1] - m_calib_min[1]) / 2.0f;
+    float z_half_range = (m_calib_max[2] - m_calib_min[2]) / 2.0f;
+
+    float avg_half_range = (x_half_range + y_half_range + z_half_range) / 3.0f;
+
+    if (x_half_range != 0)
+        m_scale[0] = avg_half_range / x_half_range;
+    if (y_half_range != 0)
+        m_scale[1] = avg_half_range / y_half_range;
+    if (z_half_range != 0)
+        m_scale[2] = avg_half_range / z_half_range;
+
+    set_calibration_scales(m_scale[0], m_scale[1], m_scale[2]);
+
+    ESP_LOGI(TAG, "Calibration Results: Offsets[%.2f, %.2f, %.2f], Scales[%.2f, %.2f, %.2f]", m_offset[0], m_offset[1],
+             m_offset[2], m_scale[0], m_scale[1], m_scale[2]);
+
+    m_calib_active = false;
+}
+
+esp_err_t QMC5883L::save_calibration_to_nvs()
+{
+    float data[6] = {m_offset[0], m_offset[1], m_offset[2], m_scale[0], m_scale[1], m_scale[2]};
+    esp_err_t err = NVSManager::save_blob(NVS_NS, NVS_KEY_BLOB, data, sizeof(data));
+
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Magnetometer calibration saved to NVS.");
+
+    return err;
+}
+
+esp_err_t QMC5883L::load_calibration_from_nvs()
+{
+    float data[6];
+    size_t req_size = sizeof(data);
+
+    esp_err_t err = NVSManager::load_blob(NVS_NS, NVS_KEY_BLOB, data, &req_size);
+    if (err == ESP_OK && req_size == sizeof(data))
+    {
+        m_offset[0] = data[0];
+        m_offset[1] = data[1];
+        m_offset[2] = data[2];
+        m_scale[0] = data[3];
+        m_scale[1] = data[4];
+        m_scale[2] = data[5];
+        ESP_LOGI(TAG, "Loaded magnetometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]", m_offset[0],
+                 m_offset[1], m_offset[2], m_scale[0], m_scale[1], m_scale[2]);
+        return ESP_OK;
+    }
+
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+        ESP_LOGW(TAG, "Magnetometer calibration not found in NVS.");
+
+    return err != ESP_OK ? err : ESP_FAIL;
+}
+
+bool QMC5883L::is_calibrated() const
+{
+    return !((m_scale[0] == 1.0f) &&   //
+             (m_scale[1] == 1.0f) &&   //
+             (m_scale[2] == 1.0f) &&   //
+             (m_offset[0] == 0.0f) &&  //
+             (m_offset[1] == 0.0f) &&  //
+             (m_offset[2] == 0.0f));
 }
 
 void QMC5883L::read()
 {
-    // Read 6 bytes starting from 0x00 (DATAX_L)
-    if (I2Cdev::readBytes(devAddr, QMC5883L_RA_DATAX_L, 6, buffer) == 6)
+    if (I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX_L), 6, m_buffer) == 6)
     {
-        // QMC5883L is Little Endian
-        _vRaw[0] = (int16_t)(((uint16_t)buffer[1] << 8) | buffer[0]);
-        _vRaw[1] = (int16_t)(((uint16_t)buffer[3] << 8) | buffer[2]);
-        _vRaw[2] = (int16_t)(((uint16_t)buffer[5] << 8) | buffer[4]);
+        m_v_raw[0] = (int16_t)(((uint16_t)m_buffer[1] << 8) | m_buffer[0]);
+        m_v_raw[1] = (int16_t)(((uint16_t)m_buffer[3] << 8) | m_buffer[2]);
+        m_v_raw[2] = (int16_t)(((uint16_t)m_buffer[5] << 8) | m_buffer[4]);
 
-        _applyCalibration();
+        apply_calibration();
 
-        if (_smoothUse)
-        {
-            _smoothing();
-        }
+        if (m_smooth_use)
+            apply_smoothing();
     }
 }
 
-void QMC5883L::_applyCalibration()
+void QMC5883L::apply_calibration()
 {
-    _vCalibrated[0] = (_vRaw[0] - _offset[0]) * _scale[0];
-    _vCalibrated[1] = (_vRaw[1] - _offset[1]) * _scale[1];
-    _vCalibrated[2] = (_vRaw[2] - _offset[2]) * _scale[2];
+    m_v_calibrated[0] = (m_v_raw[0] - m_offset[0]) * m_scale[0];
+    m_v_calibrated[1] = (m_v_raw[1] - m_offset[1]) * m_scale[1];
+    m_v_calibrated[2] = (m_v_raw[2] - m_offset[2]) * m_scale[2];
 }
 
-/**
- * @brief Read and get the current calibrated orientation values.
- * @param x  Pointer to store the X-axis orientation value.
- * @param y  Pointer to store the Y-axis orientation velue.
- * @param z  Pointer to store the Z-axis orientation value.
- */
-void QMC5883L::getOrientation(int16_t * x, int16_t * y, int16_t * z)
+void QMC5883L::get_orientation(int16_t * x, int16_t * y, int16_t * z)
 {
     read();
-    *x = getX();
-    *y = getY();
-    *z = getZ();
+    *x = get_x();
+    *y = get_y();
+    *z = get_z();
 }
 
-void QMC5883L::_smoothing()
+void QMC5883L::apply_smoothing()
 {
     int max_idx = 0;
     int min_idx = 0;
 
-    if (_vScan >= _smoothSteps)
-    {
-        _vScan = 0;
-    }
+    if (m_v_scan >= m_smooth_steps)
+        m_v_scan = 0;
 
     for (int i = 0; i < 3; i++)
     {
-        // Remove old value from total
-        if (_vTotals[i] != 0)
-        {  // Simple check, technically not perfect if sum is 0
-            _vTotals[i] = _vTotals[i] - _vHistory[_vScan][i];
-        }
+        if (m_v_totals[i] != 0)
+            m_v_totals[i] -= m_v_history[m_v_scan][i];
 
-        // Add new value
-        _vHistory[_vScan][i] = _vCalibrated[i];
-        _vTotals[i] = _vTotals[i] + _vHistory[_vScan][i];
+        m_v_history[m_v_scan][i] = m_v_calibrated[i];
+        m_v_totals[i] += m_v_history[m_v_scan][i];
 
-        if (_smoothAdvanced)
+        if (m_smooth_advanced)
         {
-            max_idx = 0;
-            min_idx = 0;
-            // Find min/max in history
-            for (int j = 0; j < _smoothSteps; j++)
+            max_idx = min_idx = 0;
+            for (int j = 0; j < m_smooth_steps; j++)
             {
-                if (_vHistory[j][i] > _vHistory[max_idx][i])
+                if (m_v_history[j][i] > m_v_history[max_idx][i])
                     max_idx = j;
-                if (_vHistory[j][i] < _vHistory[min_idx][i])
+                if (m_v_history[j][i] < m_v_history[min_idx][i])
                     min_idx = j;
             }
 
-            // Average excluding min and max
-            int32_t sum = _vTotals[i] - (_vHistory[max_idx][i] + _vHistory[min_idx][i]);
-            if (_smoothSteps > 2)
-            {
-                _vSmooth[i] = sum / (_smoothSteps - 2);
-            }
+            int32_t sum = m_v_totals[i] - (m_v_history[max_idx][i] + m_v_history[min_idx][i]);
+            if (m_smooth_steps > 2)
+                m_v_smooth[i] = sum / (m_smooth_steps - 2);
             else
-            {
-                _vSmooth[i] = _vTotals[i] / _smoothSteps;  // Fallback
-            }
+                m_v_smooth[i] = m_v_totals[i] / m_smooth_steps;
         }
         else
         {
-            _vSmooth[i] = _vTotals[i] / _smoothSteps;
+            m_v_smooth[i] = m_v_totals[i] / m_smooth_steps;
         }
     }
-    _vScan++;
+
+    m_v_scan++;
 }
 
-int16_t QMC5883L::_get(int index)
+int16_t QMC5883L::get_axis(int index) const
 {
     if (index < 0 || index > 2)
         return 0;
-    if (_smoothUse)
-        return _vSmooth[index];
-    return _vCalibrated[index];
+
+    if (m_smooth_use)
+        return m_v_smooth[index];
+
+    return m_v_calibrated[index];
 }
 
-int QMC5883L::getAzimuth()
+int QMC5883L::get_azimuth() const
 {
-    float heading = atan2((float)getY(), (float)getX()) * 180.0 / M_PI;
-    heading += _magneticDeclinationDegrees;
+    float heading = atan2((float)get_y(), (float)get_x()) * 180.0 / M_PI;
+    heading += m_magnetic_declination_degrees;
 
-    // Normalize to 0-360
-    while (heading < 0)
-        heading += 360;
-    while (heading >= 360)
-        heading -= 360;
+    while (heading < 0) heading += 360;
 
-    return (int)heading;
+    while (heading >= 360) heading -= 360;
+
+    return static_cast<int>(heading);
 }
 
-uint8_t QMC5883L::getBearing(int azimuth)
+uint8_t QMC5883L::get_bearing(int azimuth) const
 {
-    // azimuth is 0-360
-    // 360 / 16 = 22.5 degrees per sector
-    // Shift by half sector (11.25) so 0 is centered on N
-    float sector = (float)azimuth / 22.5f;
-    int bearing = (int)(sector + 0.5f);
-
-    return (uint8_t)(bearing % 16);
+    float sector = static_cast<float>(azimuth) / 22.5f;
+    int bearing = static_cast<int>(sector + 0.5f);
+    return static_cast<uint8_t>(bearing % 16);
 }
 
-void QMC5883L::getDirection(char * myArray, int azimuth)
+void QMC5883L::get_direction(char * myArray, int azimuth) const
 {
-    int d = getBearing(azimuth);
-    myArray[0] = _bearings[d][0];
-    myArray[1] = _bearings[d][1];
-    myArray[2] = _bearings[d][2];
-    myArray[3] = '\0';  // Null terminator safety
+    int d = get_bearing(azimuth);
+    myArray[0] = m_bearings[d][0];
+    myArray[1] = m_bearings[d][1];
+    myArray[2] = m_bearings[d][2];
+    myArray[3] = '\0';
 }
 
-bool QMC5883L::testConnection()
+uint8_t QMC5883L::get_chip_id()
 {
-    return getChipID() == 0xFF;
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::CHIP_ID), m_buffer);
+    return m_buffer[0];
 }
 
-uint8_t QMC5883L::getChipID()
+bool QMC5883L::test_connection()
 {
-    I2Cdev::readByte(devAddr, QMC5883L_RA_CHIP_ID, buffer);
-    return buffer[0];
+    return get_chip_id() == 0xFF;
 }
 
-/**
- * @brief Set the Magnetometer Range.
- * @param rng One of QMC5883L_RNG_2G or QMC5883L_RNG_8G
- */
-void QMC5883L::setRange(uint8_t rng)
+void QMC5883L::set_range(Range rng)
 {
-    // Update only the range, keep other settings (ODR, Mode, OSR)
-    _rng = rng;
-    setMode(_mode, _odr, _rng, _osr);
+    m_rng = rng;
+    set_mode(m_mode, m_odr, m_rng, m_osr);
 }
 
-/**
- * @brief Get the current Magnetometer Range.
- * @return QMC5883L_RNG_2G or QMC5883L_RNG_8G
- */
-uint8_t QMC5883L::getRange()
+QMC5883L::Range QMC5883L::get_range() const
 {
-    return _rng;
+    return m_rng;
 }

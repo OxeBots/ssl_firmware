@@ -20,6 +20,7 @@
 #include <numeric>
 
 #include "I2Cdev.h"
+#include "NVSManager.h"
 #include "helper_func.h"
 #include "wheel_ekf.h"
 
@@ -103,7 +104,7 @@ class AS5600
     void process_new_reading(uint16_t raw_adc_value);
 
     /**
-     * @brief Calibrates the min/max voltage range for angle conversion.
+     * @brief Calibrates the min/max voltage range of the encoder for angle conversion.
      * @param duration_ms The duration for the calibration process.
      * @return ESP_OK on success.
      */
@@ -131,6 +132,18 @@ class AS5600
      * @brief Disables the learning mode.
      */
     void stop_calibration_mode();
+
+    /**
+     * @brief Saves the encoder's min/max calibration range to NVS via NVSManager.
+     * @return ESP_OK on success.
+     */
+    esp_err_t save_calibration_to_nvs();
+
+    /**
+     * @brief Loads the encoder's min/max calibration range from NVS via NVSManager.
+     * @return ESP_OK on success.
+     */
+    esp_err_t load_calibration_from_nvs();
 
     // --- Getters ---
     float get_angle_rad() const;
@@ -161,12 +174,12 @@ class AS5600
     esp_err_t read_config_register(uint16_t * config);
     esp_err_t write_config_register(uint16_t config);
 
-    // Analog Reading Members
     const adc_bitwidth_t ADC_BITWIDTH;
     static constexpr int MIN_VALID_VOLTAGE_RANGE_MV = 500;
     static constexpr double RAD_S_TO_RPM = 60.0 / (2.0 * PI);
     static constexpr double RAD_S2_TO_RPS2 = 1.0 / (2.0 * PI);
     static constexpr size_t OVERSAMPLE_COUNT = 16;
+    static constexpr const char * NVS_NS = "wheel_calib";
 
     struct SamplingState
     {
