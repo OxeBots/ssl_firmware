@@ -27,7 +27,6 @@
 class AS5600
 {
    public:
-    // --- I2C Enums ---
     enum class OutputStage : uint8_t
     {
         ANALOG_FULL = 0x00,
@@ -55,97 +54,35 @@ class AS5600
 
     static constexpr uint8_t AS5600_ADDR = 0x36;
 
-    /**
-     * @brief Constructor for AS5600.
-     * @param channel ADC channel for analog reading.
-     * @param cali_handle ADC calibration handle.
-     * @param voltage_calibrated Whether the ADC is voltage-calibrated.
-     * @param unit ADC unit (default ADC_UNIT_1).
-     * @param bitwidth ADC bitwidth (default ADC_BITWIDTH_12).
-     */
     AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltage_calibrated, adc_unit_t unit = ADC_UNIT_1,
            adc_bitwidth_t bitwidth = ADC_BITWIDTH_12);
     ~AS5600() = default;
 
-    /**
-     * @brief Initializes the AS5600 device via I2C.
-     * @return ESP_OK on success
-     */
+    // I2C methods
     esp_err_t init_i2c();
 
-    // --- I2C Configuration Methods ---
     esp_err_t set_output_stage(OutputStage stage);
     esp_err_t set_slow_filter(SlowFilter filter);
     esp_err_t set_fast_filter(FastFilter threshold);
     esp_err_t burn_settings();
 
-    /**
-     * @brief Reads the current configuration from the sensor.
-     * @param stage [out] Current output stage setting.
-     * @param slow [out] Current slow filter setting.
-     * @param fast [out] Current fast filter setting.
-     * @return ESP_OK on success.
-     */
     esp_err_t read_configuration(OutputStage * stage, SlowFilter * slow, FastFilter * fast);
-
-    /**
-     * @brief Get the raw angle from the sensor via I2C.
-     * @param angle Pointer to store the 12-bit raw angle (0-4095).
-     * @return ESP_OK on success.
-     */
     esp_err_t get_i2c_raw_angle(uint16_t * angle);
 
-    // --- Analog Reading Methods ---
-    /**
-     * @brief Processes a new raw ADC value from the hardware.
-     * This method handles oversampling and feeding the result to the EKF.
-     * @param raw_adc_value The new 12-bit ADC reading.
-     */
+    // Analog methods
     void process_new_reading(uint16_t raw_adc_value);
-
-    /**
-     * @brief Calibrates the min/max voltage range of the encoder for angle conversion.
-     * @param duration_ms The duration for the calibration process.
-     * @return ESP_OK on success.
-     */
     esp_err_t calibrate_range(uint32_t duration_ms);
-
-    /**
-     * @brief Sets the calibration range for voltage-to-angle conversion.
-     * @param min_mv Minimum voltage in millivolts corresponding to 0 degrees.
-     * @param max_mv Maximum voltage in millivolts corresponding to 360 degrees.
-     */
     esp_err_t set_calibration_range(int min_mv = 0, int max_mv = 3300);
 
-    /**
-     * @brief Resets the internal min/max trackers to their inverse extremes.
-     * Call this before starting a new calibration motion.
-     */
+    // Calibration
     void reset_calibration_min_max();
-
-    /**
-     * @brief Enables the "learning" mode where new ADC readings expand the min/max range.
-     */
     void start_calibration_mode();
-
-    /**
-     * @brief Disables the learning mode.
-     */
     void stop_calibration_mode();
 
-    /**
-     * @brief Saves the encoder's min/max calibration range to NVS via NVSManager.
-     * @return ESP_OK on success.
-     */
     esp_err_t save_calibration_to_nvs();
-
-    /**
-     * @brief Loads the encoder's min/max calibration range from NVS via NVSManager.
-     * @return ESP_OK on success.
-     */
     esp_err_t load_calibration_from_nvs();
 
-    // --- Getters ---
+    // Getters
     float get_angle_rad() const;
     float get_angle_deg() const;
     float get_rpm() const;
@@ -156,7 +93,6 @@ class AS5600
     int get_calib_max() const;
 
    private:
-    // I2C Registers and Commands
     enum class Register : uint8_t
     {
         CONF_H = 0x07,
@@ -190,7 +126,6 @@ class AS5600
     adc_channel_t m_channel;
     std::unique_ptr<WheelKalmanFilter> m_filter;
 
-    // ADC Calibration
     adc_cali_handle_t m_cali_handle = nullptr;
     bool m_is_voltage_calibrated = false;
     volatile bool m_is_calibrating = false;

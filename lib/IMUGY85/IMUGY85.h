@@ -17,7 +17,6 @@
 #include "ITG3200.h"
 #include "QMC5883L.h"
 
-// Arduino compatibility macros
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
@@ -26,29 +25,10 @@
 
 #define IMU_SAMPLE_RATE 100
 
-/**
- * @brief Class for GY-85 9DOF IMU.
- *
- * This class interfaces with the ADXL345 accelerometer, ITG3200 gyroscope, and QMC5883L magnetometer
- * on the GY-85 board. It uses the Fusion AHRS filter to fuse sensor data and calculate
- * orientation (Pitch, Roll, Yaw).
- */
 class IMUGY85
 {
-    enum Gscale
-    {
-        GFS_2000DPS = ITG3200_FULLSCALE_2000
-    };
-    enum Ascale
-    {
-        AFS_2G = 0,
-        AFS_4G,
-        AFS_8G,
-        AFS_16G
-    };
-
-    uint8_t m_g_scale = GFS_2000DPS;
-    uint8_t m_a_scale = AFS_16G;
+    uint8_t m_g_scale = static_cast<uint8_t>(ITG3200::FullScaleRange::FS_2000);
+    uint8_t m_a_scale = static_cast<uint8_t>(ADXL345::Range::RNG_16G);
     bool m_a_full_res = true;
 
     float m_a_res = 0.0f, m_g_res = 0.0f, m_m_res = 0.0f;
@@ -90,21 +70,11 @@ class IMUGY85
 
     IMUGY85();
 
-    /**
-     * @brief Initialize all internal sensors (Accel, Gyro, Mag) and Fusion algorithm.
-     * @note I2C bus must be initialized before calling this.
-     */
     void init();
-
-    /**
-     * @brief Update the IMU state.
-     *
-     * Reads new data from all sensors, applies calibrations, updates the Fusion AHRS,
-     * and computes Euler angles.
-     */
     void update();
 
-    // Getters
+    void set_fusion_mode(bool use_mag);
+
     double get_roll() const;
     double get_pitch() const;
     double get_yaw() const;
@@ -113,24 +83,17 @@ class IMUGY85
     void get_gyro(double * m1, double * m2, double * m3) const;
     void get_magnetometer(double * m1, double * m2, double * m3) const;
 
-    // Calibration setters for external calibration
     void set_gyroscope_calibration(FusionMatrix misalignment, FusionVector sensitivity, FusionVector offset_vec);
     void set_accelerometer_calibration(FusionMatrix misalignment, FusionVector sensitivity, FusionVector offset_vec);
-    void set_magnetometer_calibration(FusionMatrix soft_iron, FusionVector hard_iron);
+    void set_magnetometer_calibration(FusionMatrix softIron, FusionVector hardIron);
 
-    /**
-     * @brief Loads magnetometer calibration from NVS, or starts calibration if missing.
-     * @param seconds Duration in seconds for the calibration routine.
-     * @return ESP_OK on success, ESP_FAIL on failure.
-     */
-    esp_err_t load_or_calibrate_mag(uint32_t seconds = 10);
-
-    /**
-     * @brief Force a new magnetometer calibration sequence.
-     * @param seconds Duration in seconds.
-     * @return ESP_OK on success.
-     */
+    esp_err_t calibrate_accelerometer(uint32_t seconds = 10);
+    esp_err_t calibrate_gyroscope(uint32_t seconds = 10);
     esp_err_t calibrate_magnetometer(uint32_t seconds = 10);
+
+    esp_err_t load_or_calibrate_accel(uint32_t seconds = 10);
+    esp_err_t load_or_calibrate_gyro(uint32_t seconds = 10);
+    esp_err_t load_or_calibrate_mag(uint32_t seconds = 10);
 
    private:
     void update_a_res();

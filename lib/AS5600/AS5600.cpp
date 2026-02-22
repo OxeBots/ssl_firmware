@@ -1,7 +1,20 @@
+/**
+ * @file AS5600.cpp
+ * @brief Implementation of the AS5600 magnetic rotary encoder driver.
+ */
+
 #include "AS5600.h"
 
 static const char * TAG = "AS5600";
 
+/**
+ * @brief Constructor for AS5600.
+ * @param channel ADC channel for analog reading.
+ * @param cali_handle ADC calibration handle.
+ * @param voltage_calibrated Whether the ADC is voltage-calibrated.
+ * @param unit ADC unit (default ADC_UNIT_1).
+ * @param bitwidth ADC bitwidth (default ADC_BITWIDTH_12).
+ */
 AS5600::AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltage_calibrated, adc_unit_t unit,
                adc_bitwidth_t bitwidth)
 : ADC_BITWIDTH(bitwidth), m_channel(channel), m_cali_handle(cali_handle), m_is_voltage_calibrated(voltage_calibrated)
@@ -9,6 +22,10 @@ AS5600::AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltag
     m_filter = std::make_unique<WheelKalmanFilter>();
 }
 
+/**
+ * @brief Initializes the AS5600 device via I2C. Validates connection.
+ * @return ESP_OK on success, ESP_FAIL on failure, ESP_ERR_INVALID_STATE if already initialized.
+ */
 esp_err_t AS5600::init_i2c()
 {
     if (m_i2c_initialized)
@@ -26,6 +43,11 @@ esp_err_t AS5600::init_i2c()
     return ESP_OK;
 }
 
+/**
+ * @brief Sets the analog output mode (full, reduced, PWM).
+ * @param stage Selected OutputStage enum.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::set_output_stage(OutputStage stage)
 {
     if (!m_i2c_initialized)
@@ -42,6 +64,11 @@ esp_err_t AS5600::set_output_stage(OutputStage stage)
     return write_config_register(config);
 }
 
+/**
+ * @brief Sets the internal slow filter step.
+ * @param filter Selected SlowFilter enum.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::set_slow_filter(SlowFilter filter)
 {
     if (!m_i2c_initialized)
@@ -58,6 +85,11 @@ esp_err_t AS5600::set_slow_filter(SlowFilter filter)
     return write_config_register(config);
 }
 
+/**
+ * @brief Sets the internal fast filter threshold.
+ * @param threshold Selected FastFilter enum.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::set_fast_filter(FastFilter threshold)
 {
     if (!m_i2c_initialized)
@@ -74,6 +106,10 @@ esp_err_t AS5600::set_fast_filter(FastFilter threshold)
     return write_config_register(config);
 }
 
+/**
+ * @brief Permanently burns settings into the AS5600 OTP memory. Can only be performed 3 times per chip.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::burn_settings()
 {
     if (!m_i2c_initialized)
@@ -84,10 +120,15 @@ esp_err_t AS5600::burn_settings()
     if (!I2Cdev::writeByte(AS5600_ADDR, static_cast<uint8_t>(Register::BURN), cmd))
         return ESP_FAIL;
 
-    vTaskDelay(pdMS_TO_TICKS(10));  // Wait for burn to complete
+    vTaskDelay(pdMS_TO_TICKS(10));
     return ESP_OK;
 }
 
+/**
+ * @brief Retrieves the raw magnetic angle using I2C (instead of ADC).
+ * @param angle Pointer to output variable.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::get_i2c_raw_angle(uint16_t * angle)
 {
     if (!m_i2c_initialized)
@@ -96,11 +137,14 @@ esp_err_t AS5600::get_i2c_raw_angle(uint16_t * angle)
     if (I2Cdev::readWord(AS5600_ADDR, static_cast<uint8_t>(Register::RAW_ANGLE_H), angle) != 0)
         return ESP_FAIL;
 
-    // AS5600 returns 12 bits
     *angle &= 0x0FFF;
     return ESP_OK;
 }
 
+/**
+ * @brief Processes an incoming raw ADC reading, applying oversampling and feeding the Kalman filter.
+ * @param raw_adc_value Raw uint16_t coming directly from the ADC buffer.
+ */
 void AS5600::process_new_reading(uint16_t raw_adc_value)
 {
     // Oversampling
@@ -147,6 +191,11 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
     }
 }
 
+/**
+ * @brief Starts an interactive calibration routine determining the true min/max analog voltages.
+ * @param duration_ms Time to sample min/max readings.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
 {
     if (!m_is_voltage_calibrated)
@@ -156,11 +205,8 @@ esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
     }
 
     ESP_LOGI(TAG, "Starting range calibration for channel %d. Rotate sensor now...", m_channel);
-
     m_is_calibrating = true;
-
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
-
     m_is_calibrating = false;
 
     ESP_LOGI(TAG, "Channel %d calibrated. Min: %d mV, Max: %d mV", m_channel, m_min_voltage_mv, m_max_voltage_mv);
@@ -175,6 +221,10 @@ esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
     return ESP_OK;
 }
 
+/**
+ * @brief Safely saves the encoder's min/max calibration range to NVS via NVSManager.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::save_calibration_to_nvs()
 {
     char key_min[15], key_max[15];
@@ -193,6 +243,10 @@ esp_err_t AS5600::save_calibration_to_nvs()
     return err;
 }
 
+/**
+ * @brief Safely loads the encoder's min/max calibration range from NVS via NVSManager.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::load_calibration_from_nvs()
 {
     char key_min[15], key_max[15];
@@ -214,26 +268,46 @@ esp_err_t AS5600::load_calibration_from_nvs()
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+/**
+ * @brief Get the final filtered absolute angle in radians.
+ * @return Angle (0.0 to 2PI)
+ */
 float AS5600::get_angle_rad() const
 {
     return m_filter->get_angle_rad();
 }
 
+/**
+ * @brief Get the final filtered absolute angle in degrees.
+ * @return Angle (0.0 to 360)
+ */
 float AS5600::get_angle_deg() const
 {
     return m_filter->get_angle_rad() * RAD_TO_DEG;
 }
 
+/**
+ * @brief Get the filtered rotational velocity in RPM.
+ * @return Rotational velocity (Revolutions Per Minute).
+ */
 float AS5600::get_rpm() const
 {
     return m_filter->get_velocity_rad_s() * RAD_S_TO_RPM;
 }
 
+/**
+ * @brief Get the filtered rotational acceleration.
+ * @return Acceleration (Radians Per Second Squared).
+ */
 float AS5600::get_acceleration_rps2() const
 {
     return m_filter->get_acceleration_rad_s2() * RAD_S2_TO_RPS2;
 }
 
+/**
+ * @brief Get the last sampled raw voltage.
+ * @return Voltage in millivolts.
+ */
 int AS5600::get_last_voltage_mv() const
 {
     if (m_is_voltage_calibrated)
@@ -245,11 +319,20 @@ int AS5600::get_last_voltage_mv() const
     return -1;
 }
 
+/**
+ * @brief Get the last 12-bit ADC raw read value.
+ * @return Raw value (0-4095).
+ */
 uint16_t AS5600::get_last_raw_value() const
 {
     return m_last_avg_value;
 }
 
+/**
+ * @brief Internal helper to read the CONF_H I2C register.
+ * @param config Output word pointer.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::read_config_register(uint16_t * config)
 {
     if (I2Cdev::readWord(AS5600_ADDR, static_cast<uint8_t>(Register::CONF_H), config) != 0)
@@ -258,6 +341,11 @@ esp_err_t AS5600::read_config_register(uint16_t * config)
     return ESP_OK;
 }
 
+/**
+ * @brief Internal helper to write the CONF_H I2C register.
+ * @param config Input word.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::write_config_register(uint16_t config)
 {
     if (!I2Cdev::writeWord(AS5600_ADDR, static_cast<uint8_t>(Register::CONF_H), config))
@@ -266,6 +354,13 @@ esp_err_t AS5600::write_config_register(uint16_t config)
     return ESP_OK;
 }
 
+/**
+ * @brief Reads the currently active filter and stage configurations via I2C.
+ * @param stage Pointer to receive output stage setting.
+ * @param slow Pointer to receive slow filter setting.
+ * @param fast Pointer to receive fast filter setting.
+ * @return ESP_OK on success.
+ */
 esp_err_t AS5600::read_configuration(OutputStage * stage, SlowFilter * slow, FastFilter * fast)
 {
     if (!m_i2c_initialized)
@@ -292,6 +387,12 @@ esp_err_t AS5600::read_configuration(OutputStage * stage, SlowFilter * slow, Fas
     return ESP_OK;
 }
 
+/**
+ * @brief Manually sets the upper and lower voltage bounds for rotation mapping.
+ * @param min_mv Minimum recorded voltage at 0 degrees.
+ * @param max_mv Maximum recorded voltage at 360 degrees.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if invalid range.
+ */
 esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
 {
     if (min_mv >= max_mv)
@@ -315,27 +416,44 @@ esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
     return ESP_OK;
 }
 
+/**
+ * @brief Resets the calibration boundaries, preparing for a new tracking run.
+ */
 void AS5600::reset_calibration_min_max()
 {
     m_min_voltage_mv = 5000;
     m_max_voltage_mv = 0;
 }
 
+/**
+ * @brief Enables live tracking of minimum and maximum voltages during readings.
+ */
 void AS5600::start_calibration_mode()
 {
     m_is_calibrating = true;
 }
 
+/**
+ * @brief Disables live tracking of min/max voltages.
+ */
 void AS5600::stop_calibration_mode()
 {
     m_is_calibrating = false;
 }
 
+/**
+ * @brief Get currently calibrated minimum voltage.
+ * @return Millivolts.
+ */
 int AS5600::get_calib_min() const
 {
     return m_min_voltage_mv;
 }
 
+/**
+ * @brief Get currently calibrated maximum voltage.
+ * @return Millivolts.
+ */
 int AS5600::get_calib_max() const
 {
     return m_max_voltage_mv;
