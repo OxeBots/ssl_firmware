@@ -1,3 +1,7 @@
+/**
+ * @file QMC5883L.h
+ * @brief Driver for the QMC5883L I2C magnetometer sensor.
+ */
 #ifndef _QMC5883L_H_
 #define _QMC5883L_H_
 
@@ -61,87 +65,48 @@ class QMC5883L
         OSR_64 = 0xC0
     };
 
-    /**
-     * @brief Default Constructor.
-     */
     QMC5883L(uint8_t address = DEFAULT_ADDRESS);
 
-    /**
-     * @brief Initialize the QMC5883L sensor with default settings.
-     */
     void init();
-
-    /**
-     * @brief Test connection to the sensor.
-     */
     bool test_connection();
-
-    // Configuration
     void set_addr(uint8_t hex);
     void set_mode(Mode mode, OutputDataRate odr, Range rng, Oversampling osr);
     void set_reset();
+
     void set_range(Range rng);
     Range get_range() const;
 
-    // Calibration & Smoothing Settings
     void set_magnetic_declination(int degrees, uint8_t minutes);
     void set_smoothing(uint8_t steps, bool adv);
     void clear_calibration();
-
-    // Manual Calibration Access
     void set_calibration_offsets(float x_offset, float y_offset, float z_offset);
     void set_calibration_scales(float x_scale, float y_scale, float z_scale);
     float get_calibration_offset(uint8_t index) const;
     float get_calibration_scale(uint8_t index) const;
 
-    // Data Access
-    void read();  // Must call this to update values
+    void read();
+
     int16_t inline get_x() const { return get_axis(0); }
     int16_t inline get_y() const { return get_axis(1); }
     int16_t inline get_z() const { return get_axis(2); }
-    void get_orientation(int16_t * x, int16_t * y, int16_t * z);
 
-    // Calculated Data
+    void get_orientation(int16_t * x, int16_t * y, int16_t * z);
     int get_azimuth() const;
     uint8_t get_bearing(int azimuth) const;
     void get_direction(char * myArray, int azimuth) const;
     uint8_t get_chip_id();
 
     // ========== CALIBRATION ROUTINES ==========
-    /**
-     * @brief Start a non‑blocking calibration session.
-     * @param seconds Duration in seconds.
-     */
+
     void start_calibration_mode(uint32_t seconds);
-
-    /**
-     * @brief Update calibration state (call periodically).
-     * @return true if calibration finished, false if still running.
-     */
     bool calibration_update();
-
-    /**
-     * @brief Finish calibration, compute offsets/scales, and log results.
-     */
     void stop_calibration_mode();
+    bool is_calibrated() const;
 
     // ========== NVS PERSISTENCE ==========
-    /**
-     * @brief Loads calibration data (offsets and scales) from NVS via NVSManager.
-     * @return ESP_OK on success.
-     */
+
     esp_err_t load_calibration_from_nvs();
-
-    /**
-     * @brief Saves current calibration data (offsets and scales) to NVS via NVSManager.
-     * @return ESP_OK on success.
-     */
     esp_err_t save_calibration_to_nvs();
-
-    /**
-     * @brief Checks if valid calibration data is currently loaded.
-     */
-    bool is_calibrated() const;
 
    private:
     uint8_t m_dev_addr;
@@ -160,20 +125,22 @@ class QMC5883L
 
     // Raw Data
     int16_t m_v_raw[3] = {0, 0, 0};
+    int16_t get_axis(int index) const;
 
     // Smoothing Data
     int16_t m_v_history[10][3] = {{0}};
     int m_v_scan = 0;
     int32_t m_v_totals[3] = {0, 0, 0};
     int16_t m_v_smooth[3] = {0, 0, 0};
+
     void apply_smoothing();
 
     // Calibration Data
     float m_offset[3] = {0.f, 0.f, 0.f};
     float m_scale[3] = {1.f, 1.f, 1.f};
     int16_t m_v_calibrated[3] = {0, 0, 0};
+
     void apply_calibration();
-    int16_t get_axis(int index) const;
 
     // Calibration State
     bool m_calib_active = false;

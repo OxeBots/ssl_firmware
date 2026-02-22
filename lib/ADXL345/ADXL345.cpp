@@ -1,121 +1,121 @@
-// I2Cdev library collection - ADXL345 I2C device class
-// Based on Analog Devices ADXL345 datasheet rev. C, 5/2011
-// 7/31/2011 by Jeff Rowberg <jeff@rowberg.net>
-// Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
-//
-// Changelog:
-//     2011-07-31 - initial release
-
-/* ============================================
-I2Cdev device library code is placed under the MIT license
-Copyright (c) 2011 Jeff Rowberg
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-===============================================
-*/
+/**
+ * I2Cdev library collection - ADXL345 I2C device class
+ * Based on Analog Devices ADXL345 datasheet rev. C, 5/2011
+ * 7/31/2011 by Jeff Rowberg <jeff@rowberg.net>
+ * Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
+ *
+ * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not equal to the
+ * original.
+ *
+ * Changelog:
+ *     2011-07-31 - initial release
+ *
+ *  ============================================
+ * I2Cdev device library code is placed under the MIT license
+ * Copyright (c) 2011 Jeff Rowberg
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ * ===============================================
+ */
 
 #include "ADXL345.h"
 
-/** Default constructor, uses default I2C address.
- * @see ADXL345_DEFAULT_ADDRESS
- */
-ADXL345::ADXL345()
-{
-    devAddr = ADXL345_DEFAULT_ADDRESS;
-    clearCalibration();
-}
+static const char * TAG = "ADXL345";
+static const char * NVS_NS = "accel_calib";
+static const char * NVS_KEY_BLOB = "calib_blob";
 
-/** Specific address constructor.
+/**
+ * @brief Specific address constructor.
  * @param address I2C address
- * @see ADXL345_DEFAULT_ADDRESS
- * @see ADXL345_ADDRESS_ALT_LOW
- * @see ADXL345_ADDRESS_ALT_HIGH
+ *
+ * @see ADXL345::DEFAULT_ADDRESS
+ * @see ADXL345::ADDRESS_ALT_HIGH
  */
-ADXL345::ADXL345(uint8_t address)
+ADXL345::ADXL345(uint8_t address) : m_dev_addr(address)
 {
-    devAddr = address;
-    clearCalibration();
+    clear_calibration();
 }
 
-/** Power on and prepare for general usage.
+/**
+ * @brief Power on and prepare for general usage.
  * This will activate the accelerometer, so be sure to adjust the power settings
  * after you call this method if you want it to enter standby mode, or another
  * less demanding mode of operation.
  */
-void ADXL345::initialize()
+void ADXL345::init()
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_POWER_CTL, 0);  // reset all power settings
-    setAutoSleepEnabled(true);
-    setMeasureEnabled(true);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), 0);
+    set_auto_sleep_enabled(true);
+    set_measure_enabled(true);
 }
 
-/** Verify the I2C connection.
+/**
+ * @brief Verify the I2C connection.
  * Make sure the device is connected and responds as expected.
  * @return True if connection is valid, false otherwise
  */
-bool ADXL345::testConnection()
+bool ADXL345::test_connection()
 {
-    return getDeviceID() == 0xE5;
+    return get_device_id() == 0xE5;
 }
 
-// DEVID register
-
-/** Get Device ID.
+/**
+ * @brief Get Device ID.
  * The DEVID register holds a fixed device ID code of 0xE5 (345 octal).
  * @return Device ID (should be 0xE5, 229 dec, 345 oct)
- * @see ADXL345_RA_DEVID
+ * @see Register::DEVID
  */
-uint8_t ADXL345::getDeviceID()
+uint8_t ADXL345::get_device_id()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_DEVID, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::DEVID), m_buffer);
+    return m_buffer[0];
 }
 
-// THRESH_TAP register
-
-/** Get tap threshold.
+/**
+ * @brief Get tap threshold.
  * The THRESH_TAP register is eight bits and holds the threshold value for tap
  * interrupts. The data format is unsigned, therefore, the magnitude of the tap
  * event is compared with the value in THRESH_TAP for normal tap detection. The
  * scale factor is 62.5 mg/LSB (that is, 0xFF = 16 g). A value of 0 may result
  * in undesirable behavior if single tap/double tap interrupts are enabled.
  * @return Tap threshold (scaled at 62.5 mg/LSB)
- * @see ADXL345_RA_THRESH_TAP
+ * @see Register::THRESH_TAP
  */
-uint8_t ADXL345::getTapThreshold()
+uint8_t ADXL345::get_tap_threshold()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_THRESH_TAP, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_TAP), m_buffer);
+    return m_buffer[0];
 }
-/** Set tap threshold.
+
+/**
+ * @brief Set tap threshold.
  * @param threshold Tap magnitude threshold (scaled at 62.5 mg/LSB)
- * @see ADXL345_RA_THRESH_TAP
- * @see getTapThreshold()
+ * @see get_tap_threshold()
+ * @see Register::THRESH_TAP
  */
-void ADXL345::setTapThreshold(uint8_t threshold)
+void ADXL345::set_tap_threshold(uint8_t threshold)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_THRESH_TAP, threshold);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_TAP), threshold);
 }
 
-// OFS* registers
-
-/** Get axis offsets.
+/**
+ * @brief Get axis offsets.
  * The OFSX, OFSY, and OFSZ registers are each eight bits and offer user-set
  * offset adjustments in twos complement format with a scale factor of 15.6
  * mg/LSB (that is, 0x7F = 2 g). The value stored in the offset registers is
@@ -126,222 +126,240 @@ void ADXL345::setTapThreshold(uint8_t threshold)
  * @param x X axis offset container
  * @param y Y axis offset container
  * @param z Z axis offset container
- * @see ADXL345_RA_OFSX
- * @see ADXL345_RA_OFSY
- * @see ADXL345_RA_OFSZ
+ * @see Register::OFSX
+ * @see Register::OFSY
+ * @see Register::OFSZ
  */
-void ADXL345::getOffset(int8_t * x, int8_t * y, int8_t * z)
+void ADXL345::get_offset(int8_t * x, int8_t * y, int8_t * z)
 {
-    I2Cdev::readBytes(devAddr, ADXL345_RA_OFSX, 3, buffer);
-    *x = buffer[0];
-    *y = buffer[1];
-    *z = buffer[2];
+    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::OFSX), 3, m_buffer);
+    *x = m_buffer[0];
+    *y = m_buffer[1];
+    *z = m_buffer[2];
 }
-/** Set axis offsets.
+
+/**
+ * @brief Set axis offsets.
  * @param x X axis offset value
  * @param y Y axis offset value
  * @param z Z axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSX
- * @see ADXL345_RA_OFSY
- * @see ADXL345_RA_OFSZ
+ * @see get_offset()
+ * @see Register::OFSX
+ * @see Register::OFSY
+ * @see Register::OFSZ
  */
-void ADXL345::setOffset(int8_t x, int8_t y, int8_t z)
+void ADXL345::set_offset(int8_t x, int8_t y, int8_t z)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_OFSX, x);
-    I2Cdev::writeByte(devAddr, ADXL345_RA_OFSY, y);
-    I2Cdev::writeByte(devAddr, ADXL345_RA_OFSZ, z);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::OFSX), x);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::OFSY), y);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::OFSZ), z);
 }
-/** Get X axis offset.
+
+/**
+ * @brief Get X axis offset.
  * @return X axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSX
+ * @see get_offset()
+ * @see Register::OFSX
  */
-int8_t ADXL345::getOffsetX()
+int8_t ADXL345::get_offset_x()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_OFSX, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::OFSX), m_buffer);
+    return m_buffer[0];
 }
-/** Set X axis offset.
+
+/**
+ * @brief Set X axis offset.
  * @param x X axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSX
+ * @see get_offset_x()
+ * @see Register::OFSX
  */
-void ADXL345::setOffsetX(int8_t x)
+void ADXL345::set_offset_x(int8_t x)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_OFSX, x);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::OFSX), x);
 }
-/** Get Y axis offset.
+
+/**
+ * @brief Get Y axis offset.
  * @return Y axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSY
+ * @see get_offset()
+ * @see Register::OFSY
  */
-int8_t ADXL345::getOffsetY()
+int8_t ADXL345::get_offset_y()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_OFSY, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::OFSY), m_buffer);
+    return m_buffer[0];
 }
-/** Set Y axis offset.
+
+/**
+ * @brief Set Y axis offset.
  * @param y Y axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSY
+ * @see get_offset_y()
+ * @see Register::OFSY
  */
-void ADXL345::setOffsetY(int8_t y)
+void ADXL345::set_offset_y(int8_t y)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_OFSY, y);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::OFSY), y);
 }
-/** Get Z axis offset.
+
+/**
+ * @brief Get Z axis offset.
  * @return Z axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSZ
+ * @see get_offset()
+ * @see Register::OFSZ
  */
-int8_t ADXL345::getOffsetZ()
+int8_t ADXL345::get_offset_z()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_OFSZ, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::OFSZ), m_buffer);
+    return m_buffer[0];
 }
-/** Set Z axis offset.
+
+/**
+ * @brief Set Z axis offset.
  * @param z Z axis offset value
- * @see getOffset()
- * @see ADXL345_RA_OFSZ
+ * @see get_offset_z()
+ * @see Register::OFSZ
  */
-void ADXL345::setOffsetZ(int8_t z)
+void ADXL345::set_offset_z(int8_t z)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_OFSZ, z);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::OFSZ), z);
 }
 
-// DUR register
-
-/** Get tap duration.
+/**
+ * @brief Get tap duration.
  * The DUR register is eight bits and contains an unsigned time value
  * representing the maximum time that an event must be above the THRESH_TAP
  * threshold to qualify as a tap event. The scale factor is 625 us/LSB. A value
  * of 0 disables the single tap/ double tap functions.
  * @return Tap duration (scaled at 625 us/LSB)
- * @see ADXL345_RA_DUR
+ * @see Register::DUR
  */
-uint8_t ADXL345::getTapDuration()
+uint8_t ADXL345::get_tap_duration()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_DUR, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::DUR), m_buffer);
+    return m_buffer[0];
 }
-/** Set tap duration.
+
+/**
+ * @brief Set tap duration.
  * @param duration Tap duration (scaled at 625 us/LSB)
- * @see getTapDuration()
- * @see ADXL345_RA_DUR
+ * @see get_tap_duration()
+ * @see Register::DUR
  */
-void ADXL345::setTapDuration(uint8_t duration)
+void ADXL345::set_tap_duration(uint8_t duration)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_DUR, duration);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::DUR), duration);
 }
 
-// LATENT register
-
-/** Get tap duration.
+/**
+ * @brief Get tap latency.
  * The latent register is eight bits and contains an unsigned time value
  * representing the wait time from the detection of a tap event to the start of
  * the time window (defined by the window register) during which a possible
  * second tap event can be detected. The scale factor is 1.25 ms/LSB. A value of
  * 0 disables the double tap function.
  * @return Tap latency (scaled at 1.25 ms/LSB)
- * @see ADXL345_RA_LATENT
+ * @see Register::LATENT
  */
-uint8_t ADXL345::getDoubleTapLatency()
+uint8_t ADXL345::get_double_tap_latency()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_LATENT, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::LATENT), m_buffer);
+    return m_buffer[0];
 }
-/** Set tap duration.
+
+/**
+ * @brief Set tap latency.
  * @param latency Tap latency (scaled at 1.25 ms/LSB)
- * @see getDoubleTapLatency()
- * @see ADXL345_RA_LATENT
+ * @see get_double_tap_latency()
+ * @see Register::LATENT
  */
-void ADXL345::setDoubleTapLatency(uint8_t latency)
+void ADXL345::set_double_tap_latency(uint8_t latency)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_LATENT, latency);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::LATENT), latency);
 }
 
-// WINDOW register
-
-/** Get double tap window.
+/**
+ * @brief Get double tap window.
  * The window register is eight bits and contains an unsigned time value
  * representing the amount of time after the expiration of the latency time
  * (determined by the latent register) during which a second valid tap can
  * begin. The scale factor is 1.25 ms/LSB. A value of 0 disables the double tap
  * function.
  * @return Double tap window (scaled at 1.25 ms/LSB)
- * @see ADXL345_RA_WINDOW
+ * @see Register::WINDOW
  */
-uint8_t ADXL345::getDoubleTapWindow()
+uint8_t ADXL345::get_double_tap_window()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_WINDOW, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::WINDOW), m_buffer);
+    return m_buffer[0];
 }
-/** Set double tap window.
+
+/**
+ * @brief Set double tap window.
  * @param window Double tap window (scaled at 1.25 ms/LSB)
- * @see getDoubleTapWindow()
- * @see ADXL345_RA_WINDOW
+ * @see get_double_tap_window()
+ * @see Register::WINDOW
  */
-void ADXL345::setDoubleTapWindow(uint8_t window)
+void ADXL345::set_double_tap_window(uint8_t window)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_WINDOW, window);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::WINDOW), window);
 }
 
-// THRESH_ACT register
-
-/** Get activity threshold.
+/**
+ * @brief Get activity threshold.
  * The THRESH_ACT register is eight bits and holds the threshold value for
  * detecting activity. The data format is unsigned, so the magnitude of the
  * activity event is compared with the value in the THRESH_ACT register. The
  * scale factor is 62.5 mg/LSB. A value of 0 may result in undesirable behavior
  * if the activity interrupt is enabled.
  * @return Activity threshold (scaled at 62.5 mg/LSB)
- * @see ADXL345_RA_THRESH_ACT
+ * @see Register::THRESH_ACT
  */
-uint8_t ADXL345::getActivityThreshold()
+uint8_t ADXL345::get_activity_threshold()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_THRESH_ACT, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_ACT), m_buffer);
+    return m_buffer[0];
 }
-/** Set activity threshold.
+
+/**
+ * @brief Set activity threshold.
  * @param threshold Activity threshold (scaled at 62.5 mg/LSB)
- * @see getActivityThreshold()
- * @see ADXL345_RA_THRESH_ACT
+ * @see get_activity_threshold()
+ * @see Register::THRESH_ACT
  */
-void ADXL345::setActivityThreshold(uint8_t threshold)
+void ADXL345::set_activity_threshold(uint8_t threshold)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_THRESH_ACT, threshold);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_ACT), threshold);
 }
 
-// THRESH_INACT register
-
-/** Get inactivity threshold.
+/**
+ * @brief Get inactivity threshold.
  * The THRESH_INACT register is eight bits and holds the threshold value for
  * detecting inactivity. The data format is unsigned, so the magnitude of the
  * inactivity event is compared with the value in the THRESH_INACT register. The
  * scale factor is 62.5 mg/LSB. A value of 0 may result in undesirable behavior
  * if the inactivity interrupt is enabled.
  * @return Inactivity threshold (scaled at 62.5 mg/LSB)
- * @see ADXL345_RA_THRESH_INACT
+ * @see Register::THRESH_INACT
  */
-uint8_t ADXL345::getInactivityThreshold()
+uint8_t ADXL345::get_inactivity_threshold()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_THRESH_INACT, buffer);
-    return buffer[0];
-}
-/** Set inactivity threshold.
- * @param threshold Inctivity threshold (scaled at 62.5 mg/LSB)
- * @see getInctivityThreshold()
- * @see ADXL345_RA_THRESH_INACT
- */
-void ADXL345::setInactivityThreshold(uint8_t threshold)
-{
-    I2Cdev::writeByte(devAddr, ADXL345_RA_THRESH_INACT, threshold);
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_INACT), m_buffer);
+    return m_buffer[0];
 }
 
-// TIME_INACT register
+/**
+ * @brief Set inactivity threshold.
+ * @param threshold Inactivity threshold (scaled at 62.5 mg/LSB)
+ * @see get_inactivity_threshold()
+ * @see Register::THRESH_INACT
+ */
+void ADXL345::set_inactivity_threshold(uint8_t threshold)
+{
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_INACT), threshold);
+}
 
-/** Set inactivity time.
+/**
+ * @brief Get inactivity time.
  * The TIME_INACT register is eight bits and contains an unsigned time value
  * representing the amount of time that acceleration must be less than the value
  * in the THRESH_INACT register for inactivity to be declared. The scale factor
@@ -353,26 +371,27 @@ void ADXL345::setInactivityThreshold(uint8_t threshold)
  * constant of the output data rate. A value of 0 results in an interrupt when
  * the output data is less than the value in the THRESH_INACT register.
  * @return Inactivity time (scaled at 1 sec/LSB)
- * @see ADXL345_RA_TIME_INACT
+ * @see Register::TIME_INACT
  */
-uint8_t ADXL345::getInactivityTime()
+uint8_t ADXL345::get_inactivity_time()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_TIME_INACT, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::TIME_INACT), m_buffer);
+    return m_buffer[0];
 }
-/** Set inactivity time.
+
+/**
+ * @brief Set inactivity time.
  * @param time Inactivity time (scaled at 1 sec/LSB)
- * @see getInctivityTime()
- * @see ADXL345_RA_TIME_INACT
+ * @see get_inactivity_time()
+ * @see Register::TIME_INACT
  */
-void ADXL345::setInactivityTime(uint8_t time)
+void ADXL345::set_inactivity_time(uint8_t time)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_TIME_INACT, time);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::TIME_INACT), time);
 }
 
-// ACT_INACT_CTL register
-
-/** Get activity AC/DC coupling.
+/**
+ * @brief Get activity AC/DC coupling.
  * A setting of 0 selects dc-coupled operation, and a setting of 1 enables
  * ac-coupled operation. In dc-coupled operation, the current acceleration
  * magnitude is compared directly with THRESH_ACT and THRESH_INACT to determine
@@ -393,195 +412,224 @@ void ADXL345::setInactivityTime(uint8_t time)
  * inactive and the inactivity interrupt is triggered.
  *
  * @return Activity coupling (0 = DC, 1 = AC)
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_AC_BIT
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_AC_BIT
  */
-bool ADXL345::getActivityAC()
+bool ADXL345::get_activity_ac()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_AC_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_AC_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set activity AC/DC coupling.
+
+/**
+ * @brief Set activity AC/DC coupling.
  * @param enabled Activity AC/DC coupling (TRUE for AC, FALSE for DC)
- * @see getActivityAC()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_AC_BIT
+ * @see get_activity_ac()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_AC_BIT
  */
-void ADXL345::setActivityAC(bool enabled)
+void ADXL345::set_activity_ac(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_AC_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_AC_BIT, enabled);
 }
-/** Get X axis activity monitoring inclusion.
+
+/**
+ * @brief Get X axis activity monitoring inclusion.
  * For all "get[In]Activity*Enabled()" methods: a setting of 1 enables x-, y-,
  * or z-axis participation in detecting activity or inactivity. A setting of 0
  * excludes the selected axis from participation. If all axes are excluded, the
  * function is disabled. For activity detection, all participating axes are
- * logically OR�ed, causing the activity function to trigger when any of the
+ * logically ORded, causing the activity function to trigger when any of the
  * participating axes exceeds the threshold. For inactivity detection, all
- * participating axes are logically AND�ed, causing the inactivity function to
+ * participating axes are logically ANDded, causing the inactivity function to
  * trigger only if all participating axes are below the threshold for the
  * specified time.
  * @return X axis activity monitoring enabled value
- * @see getActivityAC()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_X_BIT
+ * @see get_activity_ac()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_X_BIT
  */
-bool ADXL345::getActivityXEnabled()
+bool ADXL345::get_activity_x_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_X_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_X_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set X axis activity monitoring inclusion.
+
+/**
+ * @brief Set X axis activity monitoring inclusion.
  * @param enabled X axis activity monitoring inclusion value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_X_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_X_BIT
  */
-void ADXL345::setActivityXEnabled(bool enabled)
+void ADXL345::set_activity_x_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_X_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_X_BIT, enabled);
 }
-/** Get Y axis activity monitoring.
+
+/**
+ * @brief Get Y axis activity monitoring.
  * @return Y axis activity monitoring enabled value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_Y_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_Y_BIT
  */
-bool ADXL345::getActivityYEnabled()
+bool ADXL345::get_activity_y_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_Y_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Y_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set Y axis activity monitoring inclusion.
+
+/**
+ * @brief Set Y axis activity monitoring inclusion.
  * @param enabled Y axis activity monitoring inclusion value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_Y_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_Y_BIT
  */
-void ADXL345::setActivityYEnabled(bool enabled)
+void ADXL345::set_activity_y_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_Y_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Y_BIT, enabled);
 }
-/** Get Z axis activity monitoring.
+
+/**
+ * @brief Get Z axis activity monitoring.
  * @return Z axis activity monitoring enabled value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_Z_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_Z_BIT
  */
-bool ADXL345::getActivityZEnabled()
+bool ADXL345::get_activity_z_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_Z_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Z_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set Z axis activity monitoring inclusion.
+
+/**
+ * @brief Set Z axis activity monitoring inclusion.
  * @param enabled Z axis activity monitoring inclusion value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_ACT_Z_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_ACT_Z_BIT
  */
-void ADXL345::setActivityZEnabled(bool enabled)
+void ADXL345::set_activity_z_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_ACT_Z_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Z_BIT, enabled);
 }
-/** Get inactivity AC/DC coupling.
+
+/**
+ * @brief Get inactivity AC/DC coupling.
  * @return Inctivity coupling (0 = DC, 1 = AC)
- * @see getActivityAC()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_AC_BIT
+ * @see get_activity_ac()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_AC_BIT
  */
-bool ADXL345::getInactivityAC()
+bool ADXL345::get_inactivity_ac()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_AC_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_AC_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set inctivity AC/DC coupling.
+
+/**
+ * @brief Set inctivity AC/DC coupling.
  * @param enabled Inactivity AC/DC coupling (TRUE for AC, FALSE for DC)
- * @see getActivityAC()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_AC_BIT
+ * @see get_activity_ac()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_AC_BIT
  */
-void ADXL345::setInactivityAC(bool enabled)
+void ADXL345::set_inactivity_ac(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_AC_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_AC_BIT, enabled);
 }
-/** Get X axis inactivity monitoring.
- * @return Y axis inactivity monitoring enabled value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_X_BIT
+
+/**
+ * @brief Get X axis inactivity monitoring.
+ * @return X axis inactivity monitoring enabled value
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_X_BIT
  */
-bool ADXL345::getInactivityXEnabled()
+bool ADXL345::get_inactivity_x_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_X_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_X_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set X axis activity monitoring inclusion.
+
+/**
+ * @brief Set X axis inactivity monitoring inclusion.
  * @param enabled X axis inactivity monitoring inclusion value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_X_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_X_BIT
  */
-void ADXL345::setInactivityXEnabled(bool enabled)
+void ADXL345::set_inactivity_x_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_X_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_X_BIT, enabled);
 }
-/** Get Y axis inactivity monitoring.
+
+/**
+ * @brief Get Y axis inactivity monitoring.
  * @return Y axis inactivity monitoring enabled value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_Y_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_Y_BIT
  */
-bool ADXL345::getInactivityYEnabled()
+bool ADXL345::get_inactivity_y_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_Y_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Y_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set Y axis inactivity monitoring inclusion.
+
+/**
+ * @brief Set Y axis inactivity monitoring inclusion.
  * @param enabled Y axis inactivity monitoring inclusion value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_Y_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_Y_BIT
  */
-void ADXL345::setInactivityYEnabled(bool enabled)
+void ADXL345::set_inactivity_y_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_Y_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Y_BIT, enabled);
 }
-/** Get Z axis inactivity monitoring.
+
+/**
+ * @brief Get Z axis inactivity monitoring.
  * @return Z axis inactivity monitoring enabled value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_Z_BIT
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_Z_BIT
  */
-bool ADXL345::getInactivityZEnabled()
+bool ADXL345::get_inactivity_z_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_Z_BIT, buffer);
-    return buffer[0];
-}
-/** Set Z axis inactivity monitoring inclusion.
- * @param enabled Z axis activity monitoring inclusion value
- * @see getActivityAC()
- * @see getActivityXEnabled()
- * @see ADXL345_RA_ACT_INACT_CTL
- * @see ADXL345_AIC_INACT_Z_BIT
- */
-void ADXL345::setInactivityZEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_ACT_INACT_CTL, ADXL345_AIC_INACT_Z_BIT, enabled);
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Z_BIT, m_buffer);
+    return m_buffer[0];
 }
 
-// THRESH_FF register
+/**
+ * @brief Set Z axis inactivity monitoring inclusion.
+ * @param enabled Z axis inactivity monitoring inclusion value
+ * @see get_activity_ac()
+ * @see get_activity_x_enabled()
+ * @see Register::ACT_INACT_CTL
+ * @see AIC_INACT_Z_BIT
+ */
+void ADXL345::set_inactivity_z_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Z_BIT, enabled);
+}
 
-/** Get freefall threshold value.
+/**
+ * @brief Get freefall threshold value.
  * The THRESH_FF register is eight bits and holds the threshold value, in
  * unsigned format, for free-fall detection. The acceleration on all axes is
  * compared with the value in THRESH_FF to determine if a free-fall event
@@ -589,152 +637,167 @@ void ADXL345::setInactivityZEnabled(bool enabled)
  * result in undesirable behavior if the free-fall interrupt is enabled. Values
  * between 300 mg and 600 mg (0x05 to 0x09) are recommended.
  * @return Freefall threshold value (scaled at 62.5 mg/LSB)
- * @see ADXL345_RA_THRESH_FF
+ * @see Register::THRESH_FF
  */
-uint8_t ADXL345::getFreefallThreshold()
+uint8_t ADXL345::get_freefall_threshold()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_THRESH_FF, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_FF), m_buffer);
+    return m_buffer[0];
 }
-/** Set freefall threshold value.
+
+/**
+ * @brief Set freefall threshold value.
  * @param threshold Freefall threshold value (scaled at 62.5 mg/LSB)
- * @see getFreefallThreshold()
- * @see ADXL345_RA_THRESH_FF
+ * @see get_freefall_threshold()
+ * @see Register::THRESH_FF
  */
-void ADXL345::setFreefallThreshold(uint8_t threshold)
+void ADXL345::set_freefall_threshold(uint8_t threshold)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_THRESH_FF, threshold);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::THRESH_FF), threshold);
 }
 
-// TIME_FF register
-
-/** Get freefall time value.
+/**
+ * @brief Get freefall time value.
  * The TIME_FF register is eight bits and stores an unsigned time value
  * representing the minimum time that the value of all axes must be less than
  * THRESH_FF to generate a free-fall interrupt. The scale factor is 5 ms/LSB. A
  * value of 0 may result in undesirable behavior if the free-fall interrupt is
  * enabled. Values between 100 ms and 350 ms (0x14 to 0x46) are recommended.
  * @return Freefall time value (scaled at 5 ms/LSB)
- * @see getFreefallThreshold()
- * @see ADXL345_RA_TIME_FF
+ * @see get_freefall_threshold()
+ * @see Register::TIME_FF
  */
-uint8_t ADXL345::getFreefallTime()
+uint8_t ADXL345::get_freefall_time()
 {
-    I2Cdev::readByte(devAddr, ADXL345_RA_TIME_FF, buffer);
-    return buffer[0];
+    I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::TIME_FF), m_buffer);
+    return m_buffer[0];
 }
-/** Set freefall time value.
+
+/**
+ * @brief Set freefall time value.
  * @param threshold Freefall time value (scaled at 5 ms/LSB)
- * @see getFreefallTime()
- * @see ADXL345_RA_TIME_FF
+ * @see get_freefall_time()
+ * @see Register::TIME_FF
  */
-void ADXL345::setFreefallTime(uint8_t time)
+void ADXL345::set_freefall_time(uint8_t time)
 {
-    I2Cdev::writeByte(devAddr, ADXL345_RA_TIME_FF, time);
+    I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::TIME_FF), time);
 }
 
-// TAP_AXES register
-
-/** Get double-tap fast-movement suppression.
+/**
+ * @brief Get double-tap fast-movement suppression.
  * Setting the suppress bit suppresses double tap detection if acceleration
  * greater than the value in THRESH_TAP is present between taps. See the Tap
  * Detection section in the datasheet for more details.
  * @return Double-tap fast-movement suppression value
- * @see getTapThreshold()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_SUP_BIT
+ * @see get_tap_threshold()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_SUP_BIT
  */
-bool ADXL345::getTapAxisSuppress()
+bool ADXL345::get_tap_axis_suppress()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_SUP_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_SUP_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set double-tap fast-movement suppression.
+
+/**
+ * @brief Set double-tap fast-movement suppression.
  * @param enabled Double-tap fast-movement suppression value
- * @see getTapAxisSuppress()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_SUP_BIT
+ * @see get_tap_axis_suppress()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_SUP_BIT
  */
-void ADXL345::setTapAxisSuppress(bool enabled)
+void ADXL345::set_tap_axis_suppress(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_SUP_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_SUP_BIT, enabled);
 }
-/** Get double-tap fast-movement suppression.
+
+/**
+ * @brief Get double-tap fast-movement suppression.
  * A setting of 1 in the TAP_X enable bit enables x-axis participation in tap
  * detection. A setting of 0 excludes the selected axis from participation in
  * tap detection.
  * @return Double-tap fast-movement suppression value
- * @see getTapThreshold()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_X_BIT
+ * @see get_tap_threshold()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_X_BIT
  */
-bool ADXL345::getTapAxisXEnabled()
+bool ADXL345::get_tap_axis_x_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_X_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_X_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set tap detection X axis inclusion.
+
+/**
+ * @brief Set tap detection X axis inclusion.
  * @param enabled X axis tap detection enabled value
- * @see getTapAxisXEnabled()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_X_BIT
+ * @see get_tap_axis_x_enabled()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_X_BIT
  */
-void ADXL345::setTapAxisXEnabled(bool enabled)
+void ADXL345::set_tap_axis_x_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_X_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_X_BIT, enabled);
 }
-/** Get tap detection Y axis inclusion.
+
+/**
+ * @brief Get tap detection Y axis inclusion.
  * A setting of 1 in the TAP_Y enable bit enables y-axis participation in tap
  * detection. A setting of 0 excludes the selected axis from participation in
  * tap detection.
  * @return Double-tap fast-movement suppression value
- * @see getTapThreshold()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_Y_BIT
+ * @see get_tap_threshold()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_Y_BIT
  */
-bool ADXL345::getTapAxisYEnabled()
+bool ADXL345::get_tap_axis_y_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_Y_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_Y_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set tap detection Y axis inclusion.
+
+/**
+ * @brief Set tap detection Y axis inclusion.
  * @param enabled Y axis tap detection enabled value
- * @see getTapAxisYEnabled()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_Y_BIT
+ * @see get_tap_axis_y_enabled()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_Y_BIT
  */
-void ADXL345::setTapAxisYEnabled(bool enabled)
+void ADXL345::set_tap_axis_y_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_Y_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_Y_BIT, enabled);
 }
-/** Get tap detection Z axis inclusion.
+
+/**
+ * @brief Get tap detection Z axis inclusion.
  * A setting of 1 in the TAP_Z enable bit enables z-axis participation in tap
  * detection. A setting of 0 excludes the selected axis from participation in
  * tap detection.
  * @return Double-tap fast-movement suppression value
- * @see getTapThreshold()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_Z_BIT
+ * @see get_tap_threshold()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_Z_BIT
  */
-bool ADXL345::getTapAxisZEnabled()
+bool ADXL345::get_tap_axis_z_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_Z_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_Z_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set tap detection Z axis inclusion.
+
+/**
+ * @brief Set tap detection Z axis inclusion.
  * @param enabled Z axis tap detection enabled value
- * @see getTapAxisZEnabled()
- * @see ADXL345_RA_TAP_AXES
- * @see ADXL345_TAPAXIS_Z_BIT
+ * @see get_tap_axis_z_enabled()
+ * @see Register::TAP_AXES
+ * @see TAPAXIS_Z_BIT
  */
-void ADXL345::setTapAxisZEnabled(bool enabled)
+void ADXL345::set_tap_axis_z_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_TAP_AXES, ADXL345_TAPAXIS_Z_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_Z_BIT, enabled);
 }
 
-// ACT_TAP_STATUS register
-
-/** Get X axis activity source flag.
+/**
+ * @brief Get X axis activity source flag.
  * These bits indicate the first axis involved in a tap or activity event. A
  * setting of 1 corresponds to involvement in the event, and a setting of 0
  * corresponds to no involvement. When new data is available, these bits are not
@@ -743,110 +806,125 @@ void ADXL345::setTapAxisZEnabled(bool enabled)
  * participation clears the corresponding source bit when the next activity or
  * single tap/double tap event occurs.
  * @return X axis activity source flag
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_ACTX_BIT
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_ACTX_BIT
  */
-bool ADXL345::getActivitySourceX()
+bool ADXL345::get_activity_source_x()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_ACTX_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTX_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get Y axis activity source flag.
+
+/**
+ * @brief Get Y axis activity source flag.
  * @return Y axis activity source flag
- * @see getActivitySourceX()
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_ACTY_BIT
+ * @see get_activity_source_x()
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_ACTY_BIT
  */
-bool ADXL345::getActivitySourceY()
+bool ADXL345::get_activity_source_y()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_ACTY_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTY_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get Z axis activity source flag.
+
+/**
+ * @brief Get Z axis activity source flag.
  * @return Z axis activity source flag
- * @see getActivitySourceX()
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_ACTZ_BIT
+ * @see get_activity_source_x()
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_ACTZ_BIT
  */
-bool ADXL345::getActivitySourceZ()
+bool ADXL345::get_activity_source_z()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_ACTZ_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTZ_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get sleep mode flag.
+
+/**
+ * @brief Get sleep mode flag.
  * A setting of 1 in the asleep bit indicates that the part is asleep, and a
  * setting of 0 indicates that the part is not asleep. This bit toggles only if
  * the device is configured for auto sleep. See the AUTO_SLEEP Bit section of
  * the datasheet for more information on autosleep mode.
  * @return Sleep mode enabled flag
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_ASLEEP_BIT
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_ASLEEP_BIT
  */
-bool ADXL345::getAsleep()
+bool ADXL345::get_asleep()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_ASLEEP_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ASLEEP_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get X axis tap source flag.
+
+/**
+ * @brief Get X axis tap source flag.
  * @return X axis tap source flag
- * @see getActivitySourceX()
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_TAPX_BIT
+ * @see get_tap_source_x()
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_TAPX_BIT
  */
-bool ADXL345::getTapSourceX()
+bool ADXL345::get_tap_source_x()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_TAPX_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPX_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get Y axis tap source flag.
+
+/**
+ * @brief Get Y axis tap source flag.
  * @return Y axis tap source flag
- * @see getActivitySourceX()
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_TAPY_BIT
+ * @see get_tap_source_x()
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_TAPY_BIT
  */
-bool ADXL345::getTapSourceY()
+bool ADXL345::get_tap_source_y()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_TAPY_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPY_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get Z axis tap source flag.
+
+/**
+ * @brief Get Z axis tap source flag.
  * @return Z axis tap source flag
- * @see getActivitySourceX()
- * @see ADXL345_RA_ACT_TAP_STATUS
- * @see ADXL345_TAPSTAT_TAPZ_BIT
+ * @see get_tap_source_x()
+ * @see Register::ACT_TAP_STATUS
+ * @see TAPSTAT_TAPZ_BIT
  */
-bool ADXL345::getTapSourceZ()
+bool ADXL345::get_tap_source_z()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_ACT_TAP_STATUS, ADXL345_TAPSTAT_TAPZ_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPZ_BIT, m_buffer);
+    return m_buffer[0];
 }
 
-// BW_RATE register
-
-/** Get low power enabled status.
+/**
+ * @brief Get low power enabled status.
  * A setting of 0 in the LOW_POWER bit selects normal operation, and a setting
  * of 1 selects reduced power operation, which has somewhat higher noise (see
  * the Power Modes section of the datasheet for details).
  * @return Low power enabled status
- * @see ADXL345_RA_BW_RATE
- * @see ADXL345_BW_LOWPOWER_BIT
+ * @see Register::BW_RATE
+ * @see BW_LOWPOWER_BIT
  */
-bool ADXL345::getLowPowerEnabled()
+bool ADXL345::get_low_power_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_BW_RATE, ADXL345_BW_LOWPOWER_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_LOWPOWER_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set low power enabled status.
- * @see getLowPowerEnabled()
+
+/**
+ * @brief Set low power enabled status.
+ * @see get_low_power_enabled()
  * @param enabled Low power enable setting
- * @see ADXL345_RA_BW_RATE
- * @see ADXL345_BW_LOWPOWER_BIT
+ * @see Register::BW_RATE
+ * @see BW_LOWPOWER_BIT
  */
-void ADXL345::setLowPowerEnabled(bool enabled)
+void ADXL345::set_low_power_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_BW_RATE, ADXL345_BW_LOWPOWER_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_LOWPOWER_BIT, enabled);
 }
-/** Get measurement data rate.
+
+/**
+ * @brief Get measurement data rate.
  * These bits select the device bandwidth and output data rate (see Table 7 and
  * Table 8 in the datasheet for details). The default value is 0x0A, which
  * translates to a 100 Hz output data rate. An output data rate should be
@@ -854,34 +932,34 @@ void ADXL345::setLowPowerEnabled(bool enabled)
  * selected. Selecting too high of an output data rate with a low communication
  * speed results in samples being discarded.
  * @return Data rate (0x0 - 0xF)
- * @see ADXL345_RA_BW_RATE
- * @see ADXL345_BW_RATE_BIT
- * @see ADXL345_BW_RATE_LENGTH
+ * @see Register::BW_RATE
+ * @see BW_RATE_BIT
+ * @see BW_RATE_LENGTH
  */
-uint8_t ADXL345::getRate()
+uint8_t ADXL345::get_rate()
 {
-    I2Cdev::readBits(devAddr, ADXL345_RA_BW_RATE, ADXL345_BW_RATE_BIT, ADXL345_BW_RATE_LENGTH, buffer);
-    return buffer[0];
+    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_RATE_BIT, BW_RATE_LENGTH, m_buffer);
+    return m_buffer[0];
 }
-/** Set measurement data rate.
+
+/**
+ * @brief Set measurement data rate.
  * 0x7 =  12.5Hz
  * 0x8 =  25Hz, increasing or decreasing by factors of 2, so:
  * 0x9 =  50Hz
  * 0xA = 100Hz
  * @param rate New data rate (0x0 - 0xF)
- * @see ADXL345_RATE_100
- * @see ADXL345_RA_BW_RATE
- * @see ADXL345_BW_RATE_BIT
- * @see ADXL345_BW_RATE_LENGTH
+ * @see Register::BW_RATE
+ * @see BW_RATE_BIT
+ * @see BW_RATE_LENGTH
  */
-void ADXL345::setRate(uint8_t rate)
+void ADXL345::set_rate(uint8_t rate)
 {
-    I2Cdev::writeBits(devAddr, ADXL345_RA_BW_RATE, ADXL345_BW_RATE_BIT, ADXL345_BW_RATE_LENGTH, rate);
+    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_RATE_BIT, BW_RATE_LENGTH, rate);
 }
 
-// POWER_CTL register
-
-/** Get activity/inactivity serial linkage status.
+/**
+ * @brief Get activity/inactivity serial linkage status.
  * A setting of 1 in the link bit with both the activity and inactivity
  * functions enabled delays the start of the activity function until
  * inactivity is detected. After activity is detected, inactivity detection
@@ -898,24 +976,28 @@ void ADXL345::setRate(uint8_t rate)
  * when the bit was cleared.
  *
  * @return Link status
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_LINK_BIT
+ * @see Register::POWER_CTL
+ * @see PCTL_LINK_BIT
  */
-bool ADXL345::getLinkEnabled()
+bool ADXL345::get_link_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_LINK_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_LINK_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set activity/inactivity serial linkage status.
+
+/**
+ * @brief Set activity/inactivity serial linkage status.
  * @param enabled New link status
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_LINK_BIT
+ * @see Register::POWER_CTL
+ * @see PCTL_LINK_BIT
  */
-void ADXL345::setLinkEnabled(bool enabled)
+void ADXL345::set_link_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_LINK_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_LINK_BIT, enabled);
 }
-/** Get auto-sleep enabled status.
+
+/**
+ * @brief Get auto-sleep enabled status.
  * If the link bit is set, a setting of 1 in the AUTO_SLEEP bit enables the
  * auto-sleep functionality. In this mode, the ADXL345 auto-matically switches
  * to sleep mode if the inactivity function is enabled and inactivity is
@@ -940,51 +1022,59 @@ void ADXL345::setLinkEnabled(bool enabled)
  * was asleep when the bit was cleared.
  *
  * @return Auto-sleep enabled status
- * @see getActivityThreshold()
- * @see getInactivityThreshold()
- * @see getInactivityTime()
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_AUTOSLEEP_BIT
+ * @see get_activity_threshold()
+ * @see get_inactivity_threshold()
+ * @see get_inactivity_time()
+ * @see Register::POWER_CTL
+ * @see PCTL_AUTOSLEEP_BIT
  */
-bool ADXL345::getAutoSleepEnabled()
+bool ADXL345::get_auto_sleep_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_AUTOSLEEP_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_AUTOSLEEP_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set auto-sleep enabled status.
+
+/**
+ * @brief Set auto-sleep enabled status.
  * @param enabled New auto-sleep status
- * @see getAutoSleepEnabled()
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_AUTOSLEEP_BIT
+ * @see get_auto_sleep_enabled()
+ * @see Register::POWER_CTL
+ * @see PCTL_AUTOSLEEP_BIT
  */
-void ADXL345::setAutoSleepEnabled(bool enabled)
+void ADXL345::set_auto_sleep_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_AUTOSLEEP_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_AUTOSLEEP_BIT, enabled);
 }
-/** Get measurement enabled status.
+
+/**
+ * @brief Get measurement enabled status.
  * A setting of 0 in the measure bit places the part into standby mode, and a
  * setting of 1 places the part into measurement mode. The ADXL345 powers up in
  * standby mode with minimum power consumption.
  * @return Measurement enabled status
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_MEASURE_BIT
+ * @see Register::POWER_CTL
+ * @see PCTL_MEASURE_BIT
  */
-bool ADXL345::getMeasureEnabled()
+bool ADXL345::get_measure_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_MEASURE_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_MEASURE_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set measurement enabled status.
+
+/**
+ * @brief Set measurement enabled status.
  * @param enabled Measurement enabled status
- * @see getMeasureEnabled()
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_MEASURE_BIT
+ * @see get_measure_enabled()
+ * @see Register::POWER_CTL
+ * @see PCTL_MEASURE_BIT
  */
-void ADXL345::setMeasureEnabled(bool enabled)
+void ADXL345::set_measure_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_MEASURE_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_MEASURE_BIT, enabled);
 }
-/** Get sleep mode enabled status.
+
+/**
+ * @brief Get sleep mode enabled status.
  * A setting of 0 in the sleep bit puts the part into the normal mode of
  * operation, and a setting of 1 places the part into sleep mode. Sleep mode
  * suppresses DATA_READY, stops transmission of data to FIFO, and switches the
@@ -1001,398 +1091,462 @@ void ADXL345::setMeasureEnabled(bool enabled)
  * when the bit was cleared.
  *
  * @return Sleep enabled status
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_SLEEP_BIT
+ * @see Register::POWER_CTL
+ * @see PCTL_SLEEP_BIT
  */
-bool ADXL345::getSleepEnabled()
+bool ADXL345::get_sleep_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_SLEEP_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_SLEEP_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set sleep mode enabled status.
- * @param Sleep mode enabled status
- * @see getSleepEnabled()
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_SLEEP_BIT
+
+/**
+ * @brief Set sleep mode enabled status.
+ * @param enabled Sleep mode enabled status
+ * @see get_sleep_enabled()
+ * @see Register::POWER_CTL
+ * @see PCTL_SLEEP_BIT
  */
-void ADXL345::setSleepEnabled(bool enabled)
+void ADXL345::set_sleep_enabled(bool enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_SLEEP_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_SLEEP_BIT, enabled);
 }
-/** Get wakeup frequency.
+
+/**
+ * @brief Get wakeup frequency.
  * These bits control the frequency of readings in sleep mode as described in
  * Table 20 in the datasheet. (That is, 0 = 8Hz, 1 = 4Hz, 2 = 2Hz, 3 = 1Hz)
  * @return Wakeup frequency (0x0 - 0x3, indicating 8/4/2/1Hz respectively)
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_SLEEP_BIT
+ * @see Register::POWER_CTL
+ * @see PCTL_WAKEUP_BIT
  */
-uint8_t ADXL345::getWakeupFrequency()
+uint8_t ADXL345::get_wakeup_frequency()
 {
-    I2Cdev::readBits(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_WAKEUP_BIT, ADXL345_PCTL_WAKEUP_LENGTH, buffer);
-    return buffer[0];
+    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_WAKEUP_BIT, PCTL_WAKEUP_LENGTH,
+                     m_buffer);
+    return m_buffer[0];
 }
-/** Set wakeup frequency.
+
+/**
+ * @brief Set wakeup frequency.
  * @param frequency Wakeup frequency (0x0 - 0x3, indicating 8/4/2/1Hz respectively)
- * @see getWakeupFrequency()
- * @see ADXL345_RA_POWER_CTL
- * @see ADXL345_PCTL_SLEEP_BIT
+ * @see get_wakeup_frequency()
+ * @see Register::POWER_CTL
+ * @see PCTL_WAKEUP_BIT
  */
-void ADXL345::setWakeupFrequency(uint8_t frequency)
+void ADXL345::set_wakeup_frequency(uint8_t frequency)
 {
-    I2Cdev::writeBits(devAddr, ADXL345_RA_POWER_CTL, ADXL345_PCTL_WAKEUP_BIT, ADXL345_PCTL_WAKEUP_LENGTH, frequency);
+    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_WAKEUP_BIT, PCTL_WAKEUP_LENGTH,
+                      frequency);
 }
 
-// INT_ENABLE register
-
-/** Get DATA_READY interrupt enabled status.
+/**
+ * @brief Get DATA_READY interrupt enabled status.
  * Setting bits in this register to a value of 1 enables their respective
  * functions to generate interrupts, whereas a value of 0 prevents the functions
  * from generating interrupts. The DATA_READY, watermark, and overrun bits
  * enable only the interrupt output; the functions are always enabled. It is
  * recommended that interrupts be configured before enabling their outputs.
  * @return DATA_READY interrupt enabled status.
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_DATA_READY_BIT
+ * @see Register::INT_ENABLE
+ * @see INT_DATA_READY_BIT
  */
-bool ADXL345::getIntDataReadyEnabled()
+bool ADXL345::get_int_data_ready_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_DATA_READY_BIT, buffer);
-    return buffer[0];
-}
-/** Set DATA_READY interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_DATA_READY_BIT
- */
-void ADXL345::setIntDataReadyEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_DATA_READY_BIT, enabled);
-}
-/** Set SINGLE_TAP interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_SINGLE_TAP_BIT
- */
-bool ADXL345::getIntSingleTapEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_SINGLE_TAP_BIT, buffer);
-    return buffer[0];
-}
-/** Set SINGLE_TAP interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_SINGLE_TAP_BIT
- */
-void ADXL345::setIntSingleTapEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_SINGLE_TAP_BIT, enabled);
-}
-/** Get DOUBLE_TAP interrupt enabled status.
- * @return Interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_DOUBLE_TAP_BIT
- */
-bool ADXL345::getIntDoubleTapEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_DOUBLE_TAP_BIT, buffer);
-    return buffer[0];
-}
-/** Set DOUBLE_TAP interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_DOUBLE_TAP_BIT
- */
-void ADXL345::setIntDoubleTapEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_DOUBLE_TAP_BIT, enabled);
-}
-/** Set ACTIVITY interrupt enabled status.
- * @return Interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_ACTIVITY_BIT
- */
-bool ADXL345::getIntActivityEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_ACTIVITY_BIT, buffer);
-    return buffer[0];
-}
-/** Set ACTIVITY interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_ACTIVITY_BIT
- */
-void ADXL345::setIntActivityEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_ACTIVITY_BIT, enabled);
-}
-/** Get INACTIVITY interrupt enabled status.
- * @return Interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_INACTIVITY_BIT
- */
-bool ADXL345::getIntInactivityEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_INACTIVITY_BIT, buffer);
-    return buffer[0];
-}
-/** Set INACTIVITY interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_INACTIVITY_BIT
- */
-void ADXL345::setIntInactivityEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_INACTIVITY_BIT, enabled);
-}
-/** Get FREE_FALL interrupt enabled status.
- * @return Interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_FREE_FALL_BIT
- */
-bool ADXL345::getIntFreefallEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_FREE_FALL_BIT, buffer);
-    return buffer[0];
-}
-/** Set FREE_FALL interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_FREE_FALL_BIT
- */
-void ADXL345::setIntFreefallEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_FREE_FALL_BIT, enabled);
-}
-/** Get WATERMARK interrupt enabled status.
- * @return Interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_WATERMARK_BIT
- */
-bool ADXL345::getIntWatermarkEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_WATERMARK_BIT, buffer);
-    return buffer[0];
-}
-/** Set WATERMARK interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_WATERMARK_BIT
- */
-void ADXL345::setIntWatermarkEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_WATERMARK_BIT, enabled);
-}
-/** Get OVERRUN interrupt enabled status.
- * @return Interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_OVERRUN_BIT
- */
-bool ADXL345::getIntOverrunEnabled()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_OVERRUN_BIT, buffer);
-    return buffer[0];
-}
-/** Set OVERRUN interrupt enabled status.
- * @param enabled New interrupt enabled status
- * @see getIntDataReadyEnabled()
- * @see ADXL345_RA_INT_ENABLE
- * @see ADXL345_INT_OVERRUN_BIT
- */
-void ADXL345::setIntOverrunEnabled(bool enabled)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_ENABLE, ADXL345_INT_OVERRUN_BIT, enabled);
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DATA_READY_BIT, m_buffer);
+    return m_buffer[0];
 }
 
-// INT_MAP register
+/**
+ * @brief Set DATA_READY interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_DATA_READY_BIT
+ */
+void ADXL345::set_int_data_ready_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DATA_READY_BIT, enabled);
+}
 
-/** Get DATA_READY interrupt pin.
+/**
+ * @brief Set SINGLE_TAP interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_single_tap_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_SINGLE_TAP_BIT
+ */
+bool ADXL345::get_int_single_tap_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_SINGLE_TAP_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set SINGLE_TAP interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_single_tap_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_SINGLE_TAP_BIT
+ */
+void ADXL345::set_int_single_tap_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_SINGLE_TAP_BIT, enabled);
+}
+
+/**
+ * @brief Get DOUBLE_TAP interrupt enabled status.
+ * @return Interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_DOUBLE_TAP_BIT
+ */
+bool ADXL345::get_int_double_tap_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DOUBLE_TAP_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set DOUBLE_TAP interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_double_tap_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_DOUBLE_TAP_BIT
+ */
+void ADXL345::set_int_double_tap_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DOUBLE_TAP_BIT, enabled);
+}
+
+/**
+ * @brief Get ACTIVITY interrupt enabled status.
+ * @return Interrupt enabled status
+ * @see Register::INT_ENABLE
+ * @see INT_ACTIVITY_BIT
+ */
+bool ADXL345::get_int_activity_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_ACTIVITY_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set ACTIVITY interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_ACTIVITY_BIT
+ */
+void ADXL345::set_int_activity_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_ACTIVITY_BIT, enabled);
+}
+
+/**
+ * @brief Get INACTIVITY interrupt enabled status.
+ * @return Interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_INACTIVITY_BIT
+ */
+bool ADXL345::get_int_inactivity_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_INACTIVITY_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set INACTIVITY interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_INACTIVITY_BIT
+ */
+void ADXL345::set_int_inactivity_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_INACTIVITY_BIT, enabled);
+}
+
+/**
+ * @brief Get FREE_FALL interrupt enabled status.
+ * @return Interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_FREE_FALL_BIT
+ */
+bool ADXL345::get_int_freefall_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_FREE_FALL_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set FREE_FALL interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_FREE_FALL_BIT
+ */
+void ADXL345::set_int_freefall_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_FREE_FALL_BIT, enabled);
+}
+
+/**
+ * @brief Get WATERMARK interrupt enabled status.
+ * @return Interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_WATERMARK_BIT
+ */
+bool ADXL345::get_int_watermark_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_WATERMARK_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set WATERMARK interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_WATERMARK_BIT
+ */
+void ADXL345::set_int_watermark_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_WATERMARK_BIT, enabled);
+}
+
+/**
+ * @brief Get OVERRUN interrupt enabled status.
+ * @return Interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_OVERRUN_BIT
+ */
+bool ADXL345::get_int_overrun_enabled()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_OVERRUN_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set OVERRUN interrupt enabled status.
+ * @param enabled New interrupt enabled status
+ * @see get_int_data_ready_enabled()
+ * @see Register::INT_ENABLE
+ * @see INT_OVERRUN_BIT
+ */
+void ADXL345::set_int_overrun_enabled(bool enabled)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_OVERRUN_BIT, enabled);
+}
+
+/**
+ * @brief Get DATA_READY interrupt pin.
  * Any bits set to 0 in this register send their respective interrupts to the
  * INT1 pin, whereas bits set to 1 send their respective interrupts to the INT2
  * pin. All selected interrupts for a given pin are OR'ed.
  * @return Interrupt pin setting
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_DATA_READY_BIT
+ * @see Register::INT_MAP
+ * @see INT_DATA_READY_BIT
  */
-uint8_t ADXL345::getIntDataReadyPin()
+uint8_t ADXL345::get_int_data_ready_pin()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_DATA_READY_BIT, buffer);
-    return buffer[0];
-}
-/** Set DATA_READY interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_DATA_READY_BIT
- */
-void ADXL345::setIntDataReadyPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_DATA_READY_BIT, pin);
-}
-/** Get SINGLE_TAP interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_SINGLE_TAP_BIT
- */
-uint8_t ADXL345::getIntSingleTapPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_SINGLE_TAP_BIT, buffer);
-    return buffer[0];
-}
-/** Set SINGLE_TAP interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_SINGLE_TAP_BIT
- */
-void ADXL345::setIntSingleTapPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_SINGLE_TAP_BIT, pin);
-}
-/** Get DOUBLE_TAP interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_DOUBLE_TAP_BIT
- */
-uint8_t ADXL345::getIntDoubleTapPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_DOUBLE_TAP_BIT, buffer);
-    return buffer[0];
-}
-/** Set DOUBLE_TAP interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_DOUBLE_TAP_BIT
- */
-void ADXL345::setIntDoubleTapPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_DOUBLE_TAP_BIT, pin);
-}
-/** Get ACTIVITY interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_ACTIVITY_BIT
- */
-uint8_t ADXL345::getIntActivityPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_ACTIVITY_BIT, buffer);
-    return buffer[0];
-}
-/** Set ACTIVITY interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_ACTIVITY_BIT
- */
-void ADXL345::setIntActivityPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_ACTIVITY_BIT, pin);
-}
-/** Get INACTIVITY interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_INACTIVITY_BIT
- */
-uint8_t ADXL345::getIntInactivityPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_INACTIVITY_BIT, buffer);
-    return buffer[0];
-}
-/** Set INACTIVITY interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_INACTIVITY_BIT
- */
-void ADXL345::setIntInactivityPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_INACTIVITY_BIT, pin);
-}
-/** Get FREE_FALL interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_FREE_FALL_BIT
- */
-uint8_t ADXL345::getIntFreefallPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_FREE_FALL_BIT, buffer);
-    return buffer[0];
-}
-/** Set FREE_FALL interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_FREE_FALL_BIT
- */
-void ADXL345::setIntFreefallPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_FREE_FALL_BIT, pin);
-}
-/** Get WATERMARK interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_WATERMARK_BIT
- */
-uint8_t ADXL345::getIntWatermarkPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_WATERMARK_BIT, buffer);
-    return buffer[0];
-}
-/** Set WATERMARK interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_WATERMARK_BIT
- */
-void ADXL345::setIntWatermarkPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_WATERMARK_BIT, pin);
-}
-/** Get OVERRUN interrupt pin.
- * @return Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_OVERRUN_BIT
- */
-uint8_t ADXL345::getIntOverrunPin()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_OVERRUN_BIT, buffer);
-    return buffer[0];
-}
-/** Set OVERRUN interrupt pin.
- * @param pin Interrupt pin setting
- * @see getIntDataReadyPin()
- * @see ADXL345_RA_INT_MAP
- * @see ADXL345_INT_OVERRUN_BIT
- */
-void ADXL345::setIntOverrunPin(uint8_t pin)
-{
-    I2Cdev::writeBit(devAddr, ADXL345_RA_INT_MAP, ADXL345_INT_OVERRUN_BIT, pin);
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DATA_READY_BIT, m_buffer);
+    return m_buffer[0];
 }
 
-// INT_SOURCE register
+/**
+ * @brief Set DATA_READY interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_DATA_READY_BIT
+ */
+void ADXL345::set_int_data_ready_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DATA_READY_BIT, pin);
+}
 
-/** Get DATA_READY interrupt source flag.
+/**
+ * @brief Get SINGLE_TAP interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_SINGLE_TAP_BIT
+ */
+uint8_t ADXL345::get_int_single_tap_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_SINGLE_TAP_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set SINGLE_TAP interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_SINGLE_TAP_BIT
+ */
+void ADXL345::set_int_single_tap_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_SINGLE_TAP_BIT, pin);
+}
+
+/**
+ * @brief Get DOUBLE_TAP interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_DOUBLE_TAP_BIT
+ */
+uint8_t ADXL345::get_int_double_tap_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DOUBLE_TAP_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set DOUBLE_TAP interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_DOUBLE_TAP_BIT
+ */
+void ADXL345::set_int_double_tap_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DOUBLE_TAP_BIT, pin);
+}
+
+/**
+ * @brief Get ACTIVITY interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_ACTIVITY_BIT
+ */
+uint8_t ADXL345::get_int_activity_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_ACTIVITY_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set ACTIVITY interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_ACTIVITY_BIT
+ */
+void ADXL345::set_int_activity_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_ACTIVITY_BIT, pin);
+}
+
+/**
+ * @brief Get INACTIVITY interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_INACTIVITY_BIT
+ */
+uint8_t ADXL345::get_int_inactivity_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_INACTIVITY_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set INACTIVITY interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_INACTIVITY_BIT
+ */
+void ADXL345::set_int_inactivity_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_INACTIVITY_BIT, pin);
+}
+
+/**
+ * @brief Get FREE_FALL interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_FREE_FALL_BIT
+ */
+uint8_t ADXL345::get_int_freefall_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_FREE_FALL_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set FREE_FALL interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_FREE_FALL_BIT
+ */
+void ADXL345::set_int_freefall_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_FREE_FALL_BIT, pin);
+}
+
+/**
+ * @brief Get WATERMARK interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_WATERMARK_BIT
+ */
+uint8_t ADXL345::get_int_watermark_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_WATERMARK_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set WATERMARK interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_WATERMARK_BIT
+ */
+void ADXL345::set_int_watermark_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_WATERMARK_BIT, pin);
+}
+
+/**
+ * @brief Get OVERRUN interrupt pin.
+ * @return Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_OVERRUN_BIT
+ */
+uint8_t ADXL345::get_int_overrun_pin()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_OVERRUN_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Set OVERRUN interrupt pin.
+ * @param pin Interrupt pin setting
+ * @see get_int_data_ready_pin()
+ * @see Register::INT_MAP
+ * @see INT_OVERRUN_BIT
+ */
+void ADXL345::set_int_overrun_pin(uint8_t pin)
+{
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_OVERRUN_BIT, pin);
+}
+
+/**
+ * @brief Get DATA_READY interrupt source flag.
  * Bits set to 1 in this register indicate that their respective functions have
  * triggered an event, whereas a value of 0 indicates that the corresponding
  * event has not occurred. The DATA_READY, watermark, and overrun bits are
@@ -1403,229 +1557,265 @@ void ADXL345::setIntOverrunPin(uint8_t pin)
  * bits, and the corresponding interrupts, are cleared by reading the INT_SOURCE
  * register.
  * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_DATA_READY_BIT
+ * @see Register::INT_SOURCE
+ * @see INT_DATA_READY_BIT
  */
-uint8_t ADXL345::getIntDataReadySource()
+uint8_t ADXL345::get_int_data_ready_source()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_DATA_READY_BIT, buffer);
-    return buffer[0];
-}
-/** Get SINGLE_TAP interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_SINGLE_TAP_BIT
- */
-uint8_t ADXL345::getIntSingleTapSource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_SINGLE_TAP_BIT, buffer);
-    return buffer[0];
-}
-/** Get DOUBLE_TAP interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_DOUBLE_TAP_BIT
- */
-uint8_t ADXL345::getIntDoubleTapSource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_DOUBLE_TAP_BIT, buffer);
-    return buffer[0];
-}
-/** Get ACTIVITY interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_ACTIVITY_BIT
- */
-uint8_t ADXL345::getIntActivitySource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_ACTIVITY_BIT, buffer);
-    return buffer[0];
-}
-/** Get INACTIVITY interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_INACTIVITY_BIT
- */
-uint8_t ADXL345::getIntInactivitySource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_INACTIVITY_BIT, buffer);
-    return buffer[0];
-}
-/** Get FREE_FALL interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_FREE_FALL_BIT
- */
-uint8_t ADXL345::getIntFreefallSource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_FREE_FALL_BIT, buffer);
-    return buffer[0];
-}
-/** Get WATERMARK interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_WATERMARK_BIT
- */
-uint8_t ADXL345::getIntWatermarkSource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_WATERMARK_BIT, buffer);
-    return buffer[0];
-}
-/** Get OVERRUN interrupt source flag.
- * @return Interrupt source flag
- * @see ADXL345_RA_INT_SOURCE
- * @see ADXL345_INT_OVERRUN_BIT
- */
-uint8_t ADXL345::getIntOverrunSource()
-{
-    I2Cdev::readBit(devAddr, ADXL345_RA_INT_SOURCE, ADXL345_INT_OVERRUN_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_DATA_READY_BIT, m_buffer);
+    return m_buffer[0];
 }
 
-// DATA_FORMAT register
+/**
+ * @brief Get SINGLE_TAP interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_SINGLE_TAP_BIT
+ */
+uint8_t ADXL345::get_int_single_tap_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_SINGLE_TAP_BIT, m_buffer);
+    return m_buffer[0];
+}
 
-/** Get self-test force enabled.
+/**
+ * @brief Get DOUBLE_TAP interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_DOUBLE_TAP_BIT
+ */
+uint8_t ADXL345::get_int_double_tap_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_DOUBLE_TAP_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Get ACTIVITY interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_ACTIVITY_BIT
+ */
+uint8_t ADXL345::get_int_activity_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_ACTIVITY_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Get INACTIVITY interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_INACTIVITY_BIT
+ */
+uint8_t ADXL345::get_int_inactivity_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_INACTIVITY_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Get FREE_FALL interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_FREE_FALL_BIT
+ */
+uint8_t ADXL345::get_int_freefall_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_FREE_FALL_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Get WATERMARK interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_WATERMARK_BIT
+ */
+uint8_t ADXL345::get_int_watermark_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_WATERMARK_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Get OVERRUN interrupt source flag.
+ * @return Interrupt source flag
+ * @see Register::INT_SOURCE
+ * @see INT_OVERRUN_BIT
+ */
+uint8_t ADXL345::get_int_overrun_source()
+{
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_OVERRUN_BIT, m_buffer);
+    return m_buffer[0];
+}
+
+/**
+ * @brief Get self-test force enabled.
  * A setting of 1 in the SELF_TEST bit applies a self-test force to the sensor,
  * causing a shift in the output data. A value of 0 disables the self-test
  * force.
  * @return Self-test force enabled setting
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_SELFTEST_BIT
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_SELFTEST_BIT
  */
-uint8_t ADXL345::getSelfTestEnabled()
+uint8_t ADXL345::get_self_test_enabled()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_SELFTEST_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SELFTEST_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set self-test force enabled.
+
+/**
+ * @brief Set self-test force enabled.
  * @param enabled New self-test force enabled setting
  * @see getSelfTestEnabled()
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_SELFTEST_BIT
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_SELFTEST_BIT
  */
-void ADXL345::setSelfTestEnabled(uint8_t enabled)
+void ADXL345::set_self_test_enabled(uint8_t enabled)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_SELFTEST_BIT, enabled);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SELFTEST_BIT, enabled);
 }
-/** Get SPI mode setting.
+
+/**
+ * @brief Get SPI mode setting.
  * A value of 1 in the SPI bit sets the device to 3-wire SPI mode, and a value
  * of 0 sets the device to 4-wire SPI mode.
  * @return SPI mode setting
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_SELFTEST_BIT
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_SELFTEST_BIT
  */
-uint8_t ADXL345::getSPIMode()
+uint8_t ADXL345::get_spi_mode()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_SPIMODE_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SPIMODE_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set SPI mode setting.
+
+/**
+ * @brief Set SPI mode setting.
  * @param mode New SPI mode setting
- * @see getSPIMode()
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_SELFTEST_BIT
+ * @see get_spi_mode()
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_SELFTEST_BIT
  */
-void ADXL345::setSPIMode(uint8_t mode)
+void ADXL345::set_spi_mode(uint8_t mode)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_SPIMODE_BIT, mode);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SPIMODE_BIT, mode);
 }
-/** Get interrupt mode setting.
+
+/**
+ * @brief Get interrupt mode setting.
  * A value of 0 in the INT_INVERT bit sets the interrupts to active high, and a
  * value of 1 sets the interrupts to active low.
  * @return Interrupt mode setting
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_INTMODE_BIT
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_INTMODE_BIT
  */
-uint8_t ADXL345::getInterruptMode()
+uint8_t ADXL345::get_interrupt_mode()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_INTMODE_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_INTMODE_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set interrupt mode setting.
+
+/**
+ * @brief Set interrupt mode setting.
  * @param mode New interrupt mode setting
- * @see getInterruptMode()
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_INTMODE_BIT
+ * @see get_interrupt_mode()
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_INTMODE_BIT
  */
-void ADXL345::setInterruptMode(uint8_t mode)
+void ADXL345::set_interrupt_mode(uint8_t mode)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_INTMODE_BIT, mode);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_INTMODE_BIT, mode);
 }
-/** Get full resolution mode setting.
+
+/**
+ * @brief Get full resolution mode setting.
  * When this bit is set to a value of 1, the device is in full resolution mode,
  * where the output resolution increases with the g range set by the range bits
  * to maintain a 4 mg/LSB scale factor. When the FULL_RES bit is set to 0, the
  * device is in 10-bit mode, and the range bits determine the maximum g range
  * and scale factor.
  * @return Full resolution enabled setting
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_FULL_RES_BIT
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_FULL_RES_BIT
  */
-uint8_t ADXL345::getFullResolution()
+uint8_t ADXL345::get_full_resolution()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_FULL_RES_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_FULL_RES_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set full resolution mode setting.
+
+/**
+ * @brief Set full resolution mode setting.
  * @param resolution New full resolution enabled setting
- * @see getFullResolution()
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_FULL_RES_BIT
+ * @see get_full_resolution()
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_FULL_RES_BIT
  */
-void ADXL345::setFullResolution(uint8_t resolution)
+void ADXL345::set_full_resolution(uint8_t resolution)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_FULL_RES_BIT, resolution);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_FULL_RES_BIT, resolution);
 }
-/** Get data justification mode setting.
+
+/**
+ * @brief Get data justification mode setting.
  * A setting of 1 in the justify bit selects left-justified (MSB) mode, and a
  * setting of 0 selects right-justified mode with sign extension.
  * @return Data justification mode
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_JUSTIFY_BIT
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_JUSTIFY_BIT
  */
-uint8_t ADXL345::getDataJustification()
+uint8_t ADXL345::get_data_justification()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_JUSTIFY_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_JUSTIFY_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set data justification mode setting.
+
+/**
+ * @brief Set data justification mode setting.
  * @param justification New data justification mode
- * @see getDataJustification()
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_JUSTIFY_BIT
+ * @see get_data_justification()
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_JUSTIFY_BIT
  */
-void ADXL345::setDataJustification(uint8_t justification)
+void ADXL345::set_data_justification(uint8_t justification)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_JUSTIFY_BIT, justification);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_JUSTIFY_BIT, justification);
 }
-/** Get data range setting.
+
+/**
+ * @brief Get data range setting.
  * These bits set the g range as described in Table 21. (That is, 0x0 - 0x3 to
  * indicate 2g/4g/8g/16g respectively)
  * @return Range value (0x0 - 0x3 for 2g/4g/8g/16g)
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_RANGE_BIT
- * @see ADXL345_FORMAT_RANGE_LENGTH
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_RANGE_BIT
+ * @see FORMAT_RANGE_LENGTH
  */
-uint8_t ADXL345::getRange()
+ADXL345::Range ADXL345::get_range()
 {
-    I2Cdev::readBits(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_RANGE_BIT, ADXL345_FORMAT_RANGE_LENGTH, buffer);
-    return buffer[0];
+    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_RANGE_BIT, FORMAT_RANGE_LENGTH,
+                     m_buffer);
+    return static_cast<Range>(m_buffer[0]);
 }
-/** Set data range setting.
+
+/**
+ * @brief Set data range setting.
  * @param range Range value (0x0 - 0x3 for 2g/4g/8g/16g)
- * @see getRange()
- * @see ADXL345_RA_DATA_FORMAT
- * @see ADXL345_FORMAT_RANGE_BIT
- * @see ADXL345_FORMAT_RANGE_LENGTH
+ * @see get_range()
+ * @see Register::DATA_FORMAT
+ * @see FORMAT_RANGE_BIT
+ * @see FORMAT_RANGE_LENGTH
  */
-void ADXL345::setRange(uint8_t range)
+void ADXL345::set_range(Range range)
 {
-    I2Cdev::writeBits(devAddr, ADXL345_RA_DATA_FORMAT, ADXL345_FORMAT_RANGE_BIT, ADXL345_FORMAT_RANGE_LENGTH, range);
+    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_RANGE_BIT, FORMAT_RANGE_LENGTH,
+                      static_cast<uint8_t>(range));
 }
 
-// DATA* registers
-
-/** Get 3-axis accleration measurements.
+/**
+ * @brief Get 3-axis accleration measurements.
  * These six bytes (Register 0x32 to Register 0x37) are eight bits each and hold
  * the output data for each axis. Register 0x32 and Register 0x33 hold the
  * output data for the x-axis, Register 0x34 and Register 0x35 hold the output
@@ -1643,46 +1833,51 @@ void ADXL345::setRange(uint8_t range)
  * @param x 16-bit signed integer container for X-axis acceleration
  * @param y 16-bit signed integer container for Y-axis acceleration
  * @param z 16-bit signed integer container for Z-axis acceleration
- * @see ADXL345_RA_DATAX0
+ * @see Register::DATAX0
  */
-void ADXL345::getAcceleration(int16_t * x, int16_t * y, int16_t * z)
+void ADXL345::get_acceleration(int16_t * x, int16_t * y, int16_t * z)
 {
-    I2Cdev::readBytes(devAddr, ADXL345_RA_DATAX0, 6, buffer);
-    *x = (((int16_t)buffer[1]) << 8) | buffer[0];
-    *y = (((int16_t)buffer[3]) << 8) | buffer[2];
-    *z = (((int16_t)buffer[5]) << 8) | buffer[4];
+    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX0), sizeof(int16_t) * 3, m_buffer);
+    *x = (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
+    *y = (((int16_t)m_buffer[3]) << 8) | m_buffer[2];
+    *z = (((int16_t)m_buffer[5]) << 8) | m_buffer[4];
 }
-/** Get X-axis accleration measurement.
+
+/**
+ * @brief Get X-axis accleration measurement.
  * @return 16-bit signed X-axis acceleration value
- * @see ADXL345_RA_DATAX0
+ * @see Register::DATAX0
  */
-int16_t ADXL345::getAccelerationX()
+int16_t ADXL345::get_acceleration_x()
 {
-    I2Cdev::readBytes(devAddr, ADXL345_RA_DATAX0, 2, buffer);
-    return (((int16_t)buffer[1]) << 8) | buffer[0];
+    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX0), sizeof(int16_t), m_buffer);
+    return (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
 }
-/** Get Y-axis accleration measurement.
+
+/**
+ * @brief Get Y-axis accleration measurement.
  * @return 16-bit signed Y-axis acceleration value
- * @see ADXL345_RA_DATAY0
+ * @see Register::DATAY0
  */
-int16_t ADXL345::getAccelerationY()
+int16_t ADXL345::get_acceleration_y()
 {
-    I2Cdev::readBytes(devAddr, ADXL345_RA_DATAY0, 2, buffer);
-    return (((int16_t)buffer[1]) << 8) | buffer[0];
+    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAY0), sizeof(int16_t), m_buffer);
+    return (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
 }
-/** Get Z-axis accleration measurement.
+
+/**
+ * @brief Get Z-axis accleration measurement.
  * @return 16-bit signed Z-axis acceleration value
- * @see ADXL345_RA_DATAZ0
+ * @see Register::DATAZ0
  */
-int16_t ADXL345::getAccelerationZ()
+int16_t ADXL345::get_acceleration_z()
 {
-    I2Cdev::readBytes(devAddr, ADXL345_RA_DATAZ0, 2, buffer);
-    return (((int16_t)buffer[1]) << 8) | buffer[0];
+    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAZ0), sizeof(int16_t), m_buffer);
+    return (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
 }
 
-// FIFO_CTL register
-
-/** Get FIFO mode.
+/**
+ * @brief Get FIFO mode.
  * These bits set the FIFO mode, as described in Table 22. That is:
  *
  * 0x0 = Bypass (FIFO is bypassed.)
@@ -1698,48 +1893,57 @@ int16_t ADXL345::getAccelerationZ()
  *       until full. New data is collected only when FIFO is not full.)
  *
  * @return Curent FIFO mode
- * @see ADXL345_RA_FIFO_CTL
- * @see ADXL345_FIFO_MODE_BIT
- * @see ADXL345_FIFO_MODE_LENGTH
+ * @see Register::FIFO_CTL
+ * @see FIFO_MODE_BIT
+ * @see FIFO_MODE_LENGTH
  */
-uint8_t ADXL345::getFIFOMode()
+ADXL345::FifoMode ADXL345::get_fifo_mode()
 {
-    I2Cdev::readBits(devAddr, ADXL345_RA_FIFO_CTL, ADXL345_FIFO_MODE_BIT, ADXL345_FIFO_MODE_LENGTH, buffer);
-    return buffer[0];
+    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_MODE_BIT, FIFO_MODE_LENGTH, m_buffer);
+    return static_cast<FifoMode>(m_buffer[0]);
 }
-/** Set FIFO mode.
+
+/**
+ * @brief Set FIFO mode.
  * @param mode New FIFO mode
- * @see getFIFOMode()
- * @see ADXL345_RA_FIFO_CTL
- * @see ADXL345_FIFO_MODE_BIT
- * @see ADXL345_FIFO_MODE_LENGTH
+ * @see get_fifo_mode()
+ * @see Register::FIFO_CTL
+ * @see FIFO_MODE_BIT
+ * @see FIFO_MODE_LENGTH
  */
-void ADXL345::setFIFOMode(uint8_t mode)
+void ADXL345::set_fifo_mode(FifoMode mode)
 {
-    I2Cdev::writeBits(devAddr, ADXL345_RA_FIFO_CTL, ADXL345_FIFO_MODE_BIT, ADXL345_FIFO_MODE_LENGTH, mode);
+    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_MODE_BIT, FIFO_MODE_LENGTH,
+                      static_cast<uint8_t>(mode));
 }
-/** Get FIFO trigger interrupt setting.
+
+/**
+ * @brief Get FIFO trigger interrupt setting.
  * A value of 0 in the trigger bit links the trigger event of trigger mode to
  * INT1, and a value of 1 links the trigger event to INT2.
  * @return Current FIFO trigger interrupt setting
- * @see ADXL345_RA_FIFO_CTL
- * @see ADXL345_FIFO_TRIGGER_BIT
+ * @see Register::FIFO_CTL
+ * @see FIFO_TRIGGER_BIT
  */
-uint8_t ADXL345::getFIFOTriggerInterruptPin()
+uint8_t ADXL345::get_fifo_trigger_interrupt_pin()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_FIFO_CTL, ADXL345_FIFO_TRIGGER_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_TRIGGER_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Set FIFO trigger interrupt pin setting.
+
+/**
+ * @brief Set FIFO trigger interrupt pin setting.
  * @param interrupt New FIFO trigger interrupt pin setting
- * @see ADXL345_RA_FIFO_CTL
- * @see ADXL345_FIFO_TRIGGER_BIT
+ * @see Register::FIFO_CTL
+ * @see FIFO_TRIGGER_BIT
  */
-void ADXL345::setFIFOTriggerInterruptPin(uint8_t interrupt)
+void ADXL345::set_fifo_trigger_interrupt_pin(uint8_t interrupt)
 {
-    I2Cdev::writeBit(devAddr, ADXL345_RA_FIFO_CTL, ADXL345_FIFO_TRIGGER_BIT, interrupt);
+    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_TRIGGER_BIT, interrupt);
 }
-/** Get FIFO samples setting.
+
+/**
+ * @brief Get FIFO samples setting.
  * The function of these bits depends on the FIFO mode selected (see Table 23).
  * Entering a value of 0 in the samples bits immediately sets the watermark
  * status bit in the INT_SOURCE register, regardless of which FIFO mode is
@@ -1754,43 +1958,48 @@ void ADXL345::setFIFOTriggerInterruptPin(uint8_t interrupt)
  * Trigger | Samples are retained in the FIFO buffer before a trigger event.
  *
  * @return Current FIFO samples setting
- * @see ADXL345_RA_FIFO_CTL
- * @see ADXL345_FIFO_SAMPLES_BIT
- * @see ADXL345_FIFO_SAMPLES_LENGTH
+ * @see Register::FIFO_CTL
+ * @see FIFO_SAMPLES_BIT
+ * @see FIFO_SAMPLES_LENGTH
  */
-uint8_t ADXL345::getFIFOSamples()
+uint8_t ADXL345::get_fifo_samples()
 {
-    I2Cdev::readBits(devAddr, ADXL345_RA_FIFO_CTL, ADXL345_FIFO_SAMPLES_BIT, ADXL345_FIFO_SAMPLES_LENGTH, buffer);
-    return buffer[0];
+    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_SAMPLES_BIT, FIFO_SAMPLES_LENGTH,
+                     m_buffer);
+    return m_buffer[0];
 }
-/** Set FIFO samples setting.
+
+/**
+ * @brief Set FIFO samples setting.
  * @param size New FIFO samples setting (impact depends on FIFO mode setting)
- * @see getFIFOSamples()
- * @see getFIFOMode()
- * @see ADXL345_RA_FIFO_CTL
- * @see ADXL345_FIFO_SAMPLES_BIT
- * @see ADXL345_FIFO_SAMPLES_LENGTH
+ * @see get_fifo_samples()
+ * @see get_fifo_mode()
+ * @see Register::FIFO_CTL
+ * @see FIFO_SAMPLES_BIT
+ * @see FIFO_SAMPLES_LENGTH
  */
-void ADXL345::setFIFOSamples(uint8_t size)
+void ADXL345::set_fifo_samples(uint8_t size)
 {
-    I2Cdev::writeBits(devAddr, ADXL345_RA_FIFO_CTL, ADXL345_FIFO_SAMPLES_BIT, ADXL345_FIFO_SAMPLES_LENGTH, size);
+    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_SAMPLES_BIT, FIFO_SAMPLES_LENGTH,
+                      size);
 }
 
-// FIFO_STATUS register
-
-/** Get FIFO trigger occurred status.
+/**
+ * @brief Get FIFO trigger occurred status.
  * A 1 in the FIFO_TRIG bit corresponds to a trigger event occurring, and a 0
  * means that a FIFO trigger event has not occurred.
  * @return FIFO trigger occurred status
- * @see ADXL345_RA_FIFO_STATUS
- * @see ADXL345_FIFOSTAT_TRIGGER_BIT
+ * @see Register::FIFO_STATUS
+ * @see FIFOSTAT_TRIGGER_BIT
  */
-bool ADXL345::getFIFOTriggerOccurred()
+bool ADXL345::get_fifo_trigger_occurred()
 {
-    I2Cdev::readBit(devAddr, ADXL345_RA_FIFO_STATUS, ADXL345_FIFOSTAT_TRIGGER_BIT, buffer);
-    return buffer[0];
+    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::FIFO_STATUS), FIFOSTAT_TRIGGER_BIT, m_buffer);
+    return m_buffer[0];
 }
-/** Get FIFO length.
+
+/**
+ * @brief Get FIFO length.
  * These bits report how many data values are stored in FIFO. Access to collect
  * the data from FIFO is provided through the DATAX, DATAY, and DATAZ registers.
  * FIFO reads must be done in burst or multiple-byte mode because each FIFO
@@ -1799,53 +2008,81 @@ bool ADXL345::getFIFOTriggerOccurred()
  * available at any given time because an additional entry is available at the
  * output filter of the I2Cdev::
  * @return Current FIFO length
- * @see ADXL345_RA_FIFO_STATUS
- * @see ADXL345_FIFOSTAT_LENGTH_BIT
- * @see ADXL345_FIFOSTAT_LENGTH_LENGTH
+ * @see Register::FIFO_STATUS
+ * @see FIFOSTAT_LENGTH_BIT
+ * @see FIFOSTAT_LENGTH_LENGTH
  */
-uint8_t ADXL345::getFIFOLength()
+uint8_t ADXL345::get_fifo_length()
 {
-    I2Cdev::readBits(devAddr, ADXL345_RA_FIFO_STATUS, ADXL345_FIFOSTAT_LENGTH_BIT, ADXL345_FIFOSTAT_LENGTH_LENGTH,
-                     buffer);
-    return buffer[0];
+    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_STATUS), FIFOSTAT_LENGTH_BIT,
+                     FIFOSTAT_LENGTH_LENGTH, m_buffer);
+    return m_buffer[0];
 }
 
-void ADXL345::clearCalibration()
+/**
+ * @brief Clear calibration data.
+ * This sets all calibration offsets to 0 and all calibration scales to 1.
+ */
+void ADXL345::clear_calibration()
 {
-    _cal_offset[0] = 0.0f;
-    _cal_offset[1] = 0.0f;
-    _cal_offset[2] = 0.0f;
-    _cal_scale[0] = 1.0f;
-    _cal_scale[1] = 1.0f;
-    _cal_scale[2] = 1.0f;
+    m_cal_offset[0] = 0.0f;
+    m_cal_offset[1] = 0.0f;
+    m_cal_offset[2] = 0.0f;
+    m_cal_scale[0] = 1.0f;
+    m_cal_scale[1] = 1.0f;
+    m_cal_scale[2] = 1.0f;
 }
 
-void ADXL345::setCalibrationOffsets(float x, float y, float z)
+/**
+ * @brief Set calibration offsets.
+ * Calibration offsets are added to raw acceleration values after scaling. This
+ * can be used to correct for sensor bias.
+ *
+ * @param x X-axis offset
+ * @param y Y-axis offset
+ * @param z Z-axis offset
+ */
+void ADXL345::set_calibration_offsets(float x, float y, float z)
 {
-    _cal_offset[0] = x;
-    _cal_offset[1] = y;
-    _cal_offset[2] = z;
+    m_cal_offset[0] = x;
+    m_cal_offset[1] = y;
+    m_cal_offset[2] = z;
 }
 
-void ADXL345::setCalibrationScales(float x, float y, float z)
+/**
+ * @brief Set calibration scales.
+ * Calibration scales are multiplied with raw acceleration values after adding offsets.
+ * This can be used to correct for sensor sensitivity variations.
+ *
+ * @param x X-axis scale
+ * @param y Y-axis scale
+ * @param z Z-axis scale
+ */
+void ADXL345::set_calibration_scales(float x, float y, float z)
 {
-    _cal_scale[0] = x;
-    _cal_scale[1] = y;
-    _cal_scale[2] = z;
+    m_cal_scale[0] = x;
+    m_cal_scale[1] = y;
+    m_cal_scale[2] = z;
 }
 
-float ADXL345::getCalibrationOffset(uint8_t index)
+/**
+ * @brief Get calibration offset for a specific axis.
+ * @param index Axis index (0 for X, 1 for Y, 2 for Z)
+ * @return Calibration offset for the specified axis, or 0.0f if index is out of range
+ */
+float ADXL345::get_calibration_offset(uint8_t index) const
 {
-    if (index < 3)
-        return _cal_offset[index];
-    return 0.0f;
+    return (index < 3) ? m_cal_offset[index] : 0.0f;
 }
 
-float ADXL345::getCalibrationScale(uint8_t index)
+/**
+ * @brief Get calibration scale for a specific axis.
+ * @param index Axis index (0 for X, 1 for Y, 2 for Z)
+ * @return Calibration scale for the specified axis, or 1.0f if index is out of range
+ */
+float ADXL345::get_calibration_scale(uint8_t index) const
 {
-    if (index < 3)
-        return _cal_scale[index];
-    return 1.0f;
+    return (index < 3) ? m_cal_scale[index] : 1.0f;
 }
 
 /**
@@ -1853,35 +2090,26 @@ float ADXL345::getCalibrationScale(uint8_t index)
  * Calculates offsets for X, Y, and Z and writes them to the OFS registers.
  * @param samples Number of samples to take for averaging (default 100)
  */
-
 void ADXL345::calibrate()
 {
-    // 1. Reset SW calibration to ensure we read raw data
-    clearCalibration();
+    clear_calibration();
 
-    // 2. Reset HW offset registers to 0 to ensure pure raw data
-    setOffsetX(0);
-    setOffsetY(0);
-    setOffsetZ(0);
+    set_offset_x(0);
+    set_offset_y(0);
+    set_offset_z(0);
 
-    // Initial min/max values
     int16_t x, y, z;
     int16_t minX = 32000, maxX = -32000;
     int16_t minY = 32000, maxY = -32000;
     int16_t minZ = 32000, maxZ = -32000;
 
-    // Completion Threshold:
-    // 1g is ~256 LSB. A full rotation (+1g to -1g) is ~512 LSB.
-    // We require a span of at least 400 LSB (approx 1.5g) on an axis to consider it "calibrated".
     const int16_t SPAN_THRESHOLD = 500;
-
     bool is_calibrating = true;
 
     while (is_calibrating)
     {
-        getAcceleration(&x, &y, &z);
+        get_acceleration(&x, &y, &z);
 
-        // Update X only if Y and Z are close to 0
         if (y == 0 && z == 0)
         {
             if (x < minX)
@@ -1889,8 +2117,6 @@ void ADXL345::calibrate()
             if (x > maxX)
                 maxX = x;
         }
-
-        // Update Y only if X and Z are close to 0
         if (x == 0 && z == 0)
         {
             if (y < minY)
@@ -1898,8 +2124,6 @@ void ADXL345::calibrate()
             if (y > maxY)
                 maxY = y;
         }
-
-        // Update Z only if X and Y are close to 0
         if (x == 0 && y == 0)
         {
             if (z < minZ)
@@ -1908,38 +2132,97 @@ void ADXL345::calibrate()
                 maxZ = z;
         }
 
-        // Check if we have gathered enough data for all axes
         bool xReady = (maxX - minX) > SPAN_THRESHOLD;
         bool yReady = (maxY - minY) > SPAN_THRESHOLD;
         bool zReady = (maxZ - minZ) > SPAN_THRESHOLD;
 
         if (xReady && yReady && zReady)
-        {
             is_calibrating = false;
-        }
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    // 3. Calculate Offsets: (Max + Min) / 2
-    float offX = (maxX + minX) / (256.0f *2.0f);
-    float offY = (maxY + minY) / (256.0f *2.0f);
-    float offZ = (maxZ + minZ) / (256.0f *2.0f);
+    float offX = (maxX + minX) / (256.0f * 2.0f);
+    float offY = (maxY + minY) / (256.0f * 2.0f);
+    float offZ = (maxZ + minZ) / (256.0f * 2.0f);
 
-    setCalibrationOffsets(offX, offY, offZ);
+    set_calibration_offsets(offX, offY, offZ);
 
-    // 4. Calculate Scales: Target / ((Max - Min) / 2)
-    // Target is 256.0f (Standard 1g LSB for ADXL345)
     float target = 256.0f;
-
     float semiRangeX = (maxX - minX) / 2.0f;
     float semiRangeY = (maxY - minY) / 2.0f;
     float semiRangeZ = (maxZ - minZ) / 2.0f;
 
     if (semiRangeX > 0)
-        _cal_scale[0] = target / semiRangeX;
+        m_cal_scale[0] = target / semiRangeX;
     if (semiRangeY > 0)
-        _cal_scale[1] = target / semiRangeY;
+        m_cal_scale[1] = target / semiRangeY;
     if (semiRangeZ > 0)
-        _cal_scale[2] = target / semiRangeZ;
+        m_cal_scale[2] = target / semiRangeZ;
+}
+
+/**
+ * @brief Save calibration data to NVS.
+ * @return ESP_OK on success, or an error code on failure
+ */
+esp_err_t ADXL345::save_calibration_to_nvs()
+{
+    float data[6] = {m_cal_offset[0], m_cal_offset[1], m_cal_offset[2], m_cal_scale[0], m_cal_scale[1], m_cal_scale[2]};
+    esp_err_t err = NVSManager::save_blob(NVS_NS, NVS_KEY_BLOB, data, sizeof(data));
+
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Accelerometer calibration saved to NVS.");
+
+    return err;
+}
+
+/**
+ * @brief Load calibration data from NVS.
+ * @return ESP_OK on success, or an error code on failure
+ */
+esp_err_t ADXL345::load_calibration_from_nvs()
+{
+    float data[6];
+    size_t req_size = sizeof(data);
+
+    esp_err_t err = NVSManager::load_blob(NVS_NS, NVS_KEY_BLOB, data, &req_size);
+    if (err == ESP_OK)
+    {
+        if (req_size == sizeof(data))
+        {
+            m_cal_offset[0] = data[0];
+            m_cal_offset[1] = data[1];
+            m_cal_offset[2] = data[2];
+            m_cal_scale[0] = data[3];
+            m_cal_scale[1] = data[4];
+            m_cal_scale[2] = data[5];
+            ESP_LOGI(TAG, "Loaded accelerometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]",
+                     m_cal_offset[0], m_cal_offset[1], m_cal_offset[2], m_cal_scale[0], m_cal_scale[1], m_cal_scale[2]);
+            return ESP_OK;
+        }
+        else
+        {
+            ESP_LOGE(TAG, "NVS Blob size mismatch! Expected %zu, got %zu", sizeof(data), req_size);
+            return ESP_ERR_NVS_INVALID_LENGTH;
+        }
+    }
+
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+        ESP_LOGW(TAG, "Accelerometer calibration not found in NVS.");
+
+    return err;
+}
+
+/**
+ * @brief Check if calibration data is set (i.e., not default).
+ * @return True if calibration data is set, false if it is still at default values
+ */
+bool ADXL345::is_calibrated() const
+{
+    return !(m_cal_scale[0] == 1.0f &&   //
+             m_cal_scale[1] == 1.0f &&   //
+             m_cal_scale[2] == 1.0f &&   //
+             m_cal_offset[0] == 0.0f &&  //
+             m_cal_offset[1] == 0.0f &&  //
+             m_cal_offset[2] == 0.0f);
 }

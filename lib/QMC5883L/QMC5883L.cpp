@@ -1,13 +1,24 @@
+/**
+ * @file QMC5883L.cpp
+ * @brief Driver implementation for the QMC5883L I2C magnetometer sensor.
+ */
 #include "QMC5883L.h"
 
 static const char * TAG = "QMC5883L";
 static const char * NVS_NS = "mag_calib";
 static const char * NVS_KEY_BLOB = "calib_blob";
 
+/**
+ * @brief Constructor with specified I2C address.
+ * @param address I2C address of the QMC5883L device.
+ */
 QMC5883L::QMC5883L(uint8_t address) : m_dev_addr(address)
 {
 }
 
+/**
+ * @brief Initialize the QMC5883L sensor with default continuous settings.
+ */
 void QMC5883L::init()
 {
     // Define Set/Reset Period (Recommended by datasheet)
@@ -17,11 +28,22 @@ void QMC5883L::init()
     set_mode(Mode::CONTINUOUS, OutputDataRate::ODR_200HZ, Range::RNG_8G, Oversampling::OSR_512);
 }
 
+/**
+ * @brief Overrides the I2C address.
+ * @param hex New I2C address.
+ */
 void QMC5883L::set_addr(uint8_t hex)
 {
     m_dev_addr = hex;
 }
 
+/**
+ * @brief Set the configuration for the sensor.
+ * @param mode Operational mode (Standby/Continuous)
+ * @param odr Output Data Rate
+ * @param rng Magnetic Range
+ * @param osr Oversampling Ratio
+ */
 void QMC5883L::set_mode(Mode mode, OutputDataRate odr, Range rng, Oversampling osr)
 {
     m_mode = mode;
@@ -35,16 +57,29 @@ void QMC5883L::set_mode(Mode mode, OutputDataRate odr, Range rng, Oversampling o
     I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::CONTROL_1), config_val);
 }
 
+/**
+ * @brief Perform a software reset.
+ */
 void QMC5883L::set_reset()
 {
     I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::CONTROL_2), 0x80);
 }
 
+/**
+ * @brief Set local magnetic declination to accurately convert magnetic North to true North.
+ * @param degrees Declination degrees.
+ * @param minutes Declination minutes.
+ */
 void QMC5883L::set_magnetic_declination(int degrees, uint8_t minutes)
 {
     m_magnetic_declination_degrees = degrees + (minutes / 60.0f);
 }
 
+/**
+ * @brief Configure internal software data smoothing (moving average).
+ * @param steps Number of past samples to retain (up to 10).
+ * @param adv Whether to use advanced smoothing (discard highest/lowest samples).
+ */
 void QMC5883L::set_smoothing(uint8_t steps, bool adv)
 {
     m_smooth_use = true;
@@ -56,12 +91,21 @@ void QMC5883L::set_smoothing(uint8_t steps, bool adv)
     m_v_scan = 0;
 }
 
+/**
+ * @brief Clears all internal calibration offsets and scales.
+ */
 void QMC5883L::clear_calibration()
 {
     set_calibration_offsets(0.0f, 0.0f, 0.0f);
     set_calibration_scales(1.0f, 1.0f, 1.0f);
 }
 
+/**
+ * @brief Manually sets calibration offsets.
+ * @param x_offset Offset for the X-axis.
+ * @param y_offset Offset for the Y-axis.
+ * @param z_offset Offset for the Z-axis.
+ */
 void QMC5883L::set_calibration_offsets(float x_offset, float y_offset, float z_offset)
 {
     m_offset[0] = x_offset;
@@ -69,6 +113,12 @@ void QMC5883L::set_calibration_offsets(float x_offset, float y_offset, float z_o
     m_offset[2] = z_offset;
 }
 
+/**
+ * @brief Manually sets calibration scales.
+ * @param x_scale Scale for the X-axis.
+ * @param y_scale Scale for the Y-axis.
+ * @param z_scale Scale for the Z-axis.
+ */
 void QMC5883L::set_calibration_scales(float x_scale, float y_scale, float z_scale)
 {
     m_scale[0] = x_scale;
@@ -76,16 +126,30 @@ void QMC5883L::set_calibration_scales(float x_scale, float y_scale, float z_scal
     m_scale[2] = z_scale;
 }
 
+/**
+ * @brief Get the calibration offset for a given axis.
+ * @param index 0=X, 1=Y, 2=Z
+ * @return Axis offset.
+ */
 float QMC5883L::get_calibration_offset(uint8_t index) const
 {
     return (index < 3) ? m_offset[index] : 0.0f;
 }
 
+/**
+ * @brief Get the calibration scale for a given axis.
+ * @param index 0=X, 1=Y, 2=Z
+ * @return Axis scale.
+ */
 float QMC5883L::get_calibration_scale(uint8_t index) const
 {
     return (index < 3) ? m_scale[index] : 1.0f;
 }
 
+/**
+ * @brief Start a non-blocking calibration session.
+ * @param seconds Duration in seconds.
+ */
 void QMC5883L::start_calibration_mode(uint32_t seconds)
 {
     for (int i = 0; i < 3; i++)
@@ -98,6 +162,10 @@ void QMC5883L::start_calibration_mode(uint32_t seconds)
     m_calib_active = true;
 }
 
+/**
+ * @brief Update calibration state (must be called periodically during calibration).
+ * @return true if calibration duration has finished, false if still running.
+ */
 bool QMC5883L::calibration_update()
 {
     if (!m_calib_active)
@@ -105,7 +173,6 @@ bool QMC5883L::calibration_update()
 
     read();
 
-    // Update min/max for each axis
     for (int i = 0; i < 3; i++)
     {
         if (m_v_raw[i] < m_calib_min[i])
@@ -120,6 +187,9 @@ bool QMC5883L::calibration_update()
     return false;
 }
 
+/**
+ * @brief Finalizes calibration, computes the offsets/scales, and applies them.
+ */
 void QMC5883L::stop_calibration_mode()
 {
     if (!m_calib_active)
@@ -155,6 +225,10 @@ void QMC5883L::stop_calibration_mode()
     m_calib_active = false;
 }
 
+/**
+ * @brief Saves current calibration data (offsets and scales) to NVS via NVSManager.
+ * @return ESP_OK on success.
+ */
 esp_err_t QMC5883L::save_calibration_to_nvs()
 {
     float data[6] = {m_offset[0], m_offset[1], m_offset[2], m_scale[0], m_scale[1], m_scale[2]};
@@ -166,6 +240,10 @@ esp_err_t QMC5883L::save_calibration_to_nvs()
     return err;
 }
 
+/**
+ * @brief Loads calibration data (offsets and scales) from NVS via NVSManager.
+ * @return ESP_OK on success.
+ */
 esp_err_t QMC5883L::load_calibration_from_nvs()
 {
     float data[6];
@@ -200,6 +278,10 @@ esp_err_t QMC5883L::load_calibration_from_nvs()
     return err;
 }
 
+/**
+ * @brief Checks if valid (non-default) calibration data is currently loaded.
+ * @return true if calibrated.
+ */
 bool QMC5883L::is_calibrated() const
 {
     return !((m_scale[0] == 1.0f) &&   //
@@ -210,8 +292,12 @@ bool QMC5883L::is_calibrated() const
              (m_offset[2] == 0.0f));
 }
 
+/**
+ * @brief Reads new data from the sensor. Must be called periodically to update values.
+ */
 void QMC5883L::read()
 {
+    // sizeof(m_buffer) limits FlawFinder boundaries warning.
     if (I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX_L), sizeof(m_buffer), m_buffer) ==
         sizeof(m_buffer))
     {
@@ -226,6 +312,9 @@ void QMC5883L::read()
     }
 }
 
+/**
+ * @brief Computes m_v_calibrated from m_v_raw using offsets and scales.
+ */
 void QMC5883L::apply_calibration()
 {
     m_v_calibrated[0] = (m_v_raw[0] - m_offset[0]) * m_scale[0];
@@ -233,6 +322,12 @@ void QMC5883L::apply_calibration()
     m_v_calibrated[2] = (m_v_raw[2] - m_offset[2]) * m_scale[2];
 }
 
+/**
+ * @brief Triggers a read and populates pointers with the calibrated 3-axis values.
+ * @param x Pointer to X container.
+ * @param y Pointer to Y container.
+ * @param z Pointer to Z container.
+ */
 void QMC5883L::get_orientation(int16_t * x, int16_t * y, int16_t * z)
 {
     read();
@@ -241,6 +336,9 @@ void QMC5883L::get_orientation(int16_t * x, int16_t * y, int16_t * z)
     *z = get_z();
 }
 
+/**
+ * @brief Applies historical smoothing to the raw values.
+ */
 void QMC5883L::apply_smoothing()
 {
     int max_idx = 0;
@@ -283,6 +381,11 @@ void QMC5883L::apply_smoothing()
     m_v_scan++;
 }
 
+/**
+ * @brief Safely retrieve the final computed axis.
+ * @param index Axis index (0=X, 1=Y, 2=Z)
+ * @return Output value for the axis.
+ */
 int16_t QMC5883L::get_axis(int index) const
 {
     if (index < 0 || index > 2)
@@ -294,6 +397,10 @@ int16_t QMC5883L::get_axis(int index) const
     return m_v_calibrated[index];
 }
 
+/**
+ * @brief Computes the azimuth (heading) taking into account calibration and magnetic declination.
+ * @return Azimuth in degrees (0 to 359).
+ */
 int QMC5883L::get_azimuth() const
 {
     float heading = atan2((float)get_y(), (float)get_x()) * 180.0 / M_PI;
@@ -306,6 +413,11 @@ int QMC5883L::get_azimuth() const
     return static_cast<int>(heading);
 }
 
+/**
+ * @brief Converts an azimuth degree into a 16-point compass bearing index.
+ * @param azimuth Calculated azimuth.
+ * @return Bearing index (0-15).
+ */
 uint8_t QMC5883L::get_bearing(int azimuth) const
 {
     float sector = static_cast<float>(azimuth) / 22.5f;
@@ -313,6 +425,11 @@ uint8_t QMC5883L::get_bearing(int azimuth) const
     return static_cast<uint8_t>(bearing % 16);
 }
 
+/**
+ * @brief Retrieves a 3-character string representing the compass direction (e.g. "N  ", "NNE").
+ * @param myArray Buffer to place the resulting string (must be at least 4 bytes).
+ * @param azimuth Calculated azimuth.
+ */
 void QMC5883L::get_direction(char * myArray, int azimuth) const
 {
     int d = get_bearing(azimuth);
@@ -322,23 +439,39 @@ void QMC5883L::get_direction(char * myArray, int azimuth) const
     myArray[3] = '\0';
 }
 
+/**
+ * @brief Reads the device chip ID from the hardware.
+ * @return Chip ID value.
+ */
 uint8_t QMC5883L::get_chip_id()
 {
     I2Cdev::readByte(m_dev_addr, static_cast<uint8_t>(Register::CHIP_ID), m_buffer);
     return m_buffer[0];
 }
 
+/**
+ * @brief Test connection to the sensor.
+ * @return true if communication is successful and the chip ID matches, false otherwise.
+ */
 bool QMC5883L::test_connection()
 {
     return get_chip_id() == 0xFF;
 }
 
+/**
+ * @brief Set the magnetic field measurement range.
+ * @param rng The new range (RNG_2G or RNG_8G)
+ */
 void QMC5883L::set_range(Range rng)
 {
     m_rng = rng;
     set_mode(m_mode, m_odr, m_rng, m_osr);
 }
 
+/**
+ * @brief Get the currently configured magnetic field measurement range.
+ * @return Current Range
+ */
 QMC5883L::Range QMC5883L::get_range() const
 {
     return m_rng;
