@@ -52,17 +52,6 @@ void setup_i2c()
     ESP_LOGI(TAG, "I2C Initialized");
 }
 
-void setup_nvs()
-{
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-}
-
 void imu_update_task(void * pvParameters)
 {
     TickType_t xLastWakeTime;
@@ -121,7 +110,9 @@ void heartbeat_task(void * pvParam)
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Starting Oxebots SSL Firmware...");
-    setup_nvs();
+
+    ESP_ERROR_CHECK(NVSManager::init());
+
     setup_i2c();
 
     data_mutex = xSemaphoreCreateMutex();
@@ -153,7 +144,7 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Checking wheel encoders...");
     w_state_estimator.load_or_calibrate(5000);
 
-    // 2. Magnetometer Calibration
+    // Magnetometer Calibration
     ESP_LOGI(TAG, "Checking magnetometer calibration...");
 
     if (imu.load_or_calibrate_mag(10) != ESP_OK)

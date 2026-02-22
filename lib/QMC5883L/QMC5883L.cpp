@@ -172,23 +172,32 @@ esp_err_t QMC5883L::load_calibration_from_nvs()
     size_t req_size = sizeof(data);
 
     esp_err_t err = NVSManager::load_blob(NVS_NS, NVS_KEY_BLOB, data, &req_size);
-    if (err == ESP_OK && req_size == sizeof(data))
+    if (err == ESP_OK)
     {
-        m_offset[0] = data[0];
-        m_offset[1] = data[1];
-        m_offset[2] = data[2];
-        m_scale[0] = data[3];
-        m_scale[1] = data[4];
-        m_scale[2] = data[5];
-        ESP_LOGI(TAG, "Loaded magnetometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]", m_offset[0],
-                 m_offset[1], m_offset[2], m_scale[0], m_scale[1], m_scale[2]);
-        return ESP_OK;
+        if (req_size == sizeof(data))
+        {
+            m_offset[0] = data[0];
+            m_offset[1] = data[1];
+            m_offset[2] = data[2];
+            m_scale[0] = data[3];
+            m_scale[1] = data[4];
+            m_scale[2] = data[5];
+            ESP_LOGI(TAG, "Loaded magnetometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]", m_offset[0],
+                     m_offset[1], m_offset[2], m_scale[0], m_scale[1], m_scale[2]);
+            return ESP_OK;
+        }
+        else
+        {
+            ESP_LOGE(TAG, "NVS Blob size mismatch! Expected %zu, got %zu", sizeof(data), req_size);
+            return ESP_ERR_NVS_INVALID_LENGTH;
+        }
     }
-
-    if (err == ESP_ERR_NVS_NOT_FOUND)
+    else if (err == ESP_ERR_NVS_NOT_FOUND)
         ESP_LOGW(TAG, "Magnetometer calibration not found in NVS.");
+    else
+        ESP_LOGE(TAG, "Error reading calibration from NVS: %s", esp_err_to_name(err));
 
-    return err != ESP_OK ? err : ESP_FAIL;
+    return err;
 }
 
 bool QMC5883L::is_calibrated() const
@@ -203,7 +212,8 @@ bool QMC5883L::is_calibrated() const
 
 void QMC5883L::read()
 {
-    if (I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX_L), 6, m_buffer) == 6)
+    if (I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX_L), sizeof(m_buffer), m_buffer) ==
+        sizeof(m_buffer))
     {
         m_v_raw[0] = (int16_t)(((uint16_t)m_buffer[1] << 8) | m_buffer[0]);
         m_v_raw[1] = (int16_t)(((uint16_t)m_buffer[3] << 8) | m_buffer[2]);

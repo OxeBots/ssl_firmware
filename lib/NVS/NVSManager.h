@@ -18,6 +18,12 @@ class NVSManager
 {
    public:
     /**
+     * @brief Initializes the NVS flash partition.
+     * @return ESP_OK on success.
+     */
+    static esp_err_t init();
+
+    /**
      * @brief Set callbacks to suspend/resume sensitive hardware (like ADC continuous mode)
      * to prevent flash contention during NVS read/write operations.
      */
@@ -42,10 +48,6 @@ class NVSManager
      * @brief Loads a binary blob from NVS safely.
      */
     static esp_err_t load_blob(const char * ns, const char * key, void * data, size_t * length);
-
-    NVSManager(const NVSManager &) = delete;
-
-    NVSManager & operator=(const NVSManager &) = delete;
 
    private:
     static std::function<void()> m_suspend_cb;

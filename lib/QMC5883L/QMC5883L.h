@@ -145,24 +145,24 @@ class QMC5883L
 
    private:
     uint8_t m_dev_addr;
-    uint8_t m_buffer[6];
+    uint8_t m_buffer[6] = {0};
 
     // Settings
-    float m_magnetic_declination_degrees = 0;
+    float m_magnetic_declination_degrees = 0.0f;
     bool m_smooth_use = false;
     uint8_t m_smooth_steps = 5;
     bool m_smooth_advanced = false;
 
-    Mode m_mode;
-    OutputDataRate m_odr;
-    Range m_rng;
-    Oversampling m_osr;
+    Mode m_mode = Mode::CONTINUOUS;
+    OutputDataRate m_odr = OutputDataRate::ODR_200HZ;
+    Range m_rng = Range::RNG_8G;
+    Oversampling m_osr = Oversampling::OSR_512;
 
     // Raw Data
     int16_t m_v_raw[3] = {0, 0, 0};
 
     // Smoothing Data
-    int16_t m_v_history[10][3];
+    int16_t m_v_history[10][3] = {{0}};
     int m_v_scan = 0;
     int32_t m_v_totals[3] = {0, 0, 0};
     int16_t m_v_smooth[3] = {0, 0, 0};
@@ -171,7 +171,7 @@ class QMC5883L
     // Calibration Data
     float m_offset[3] = {0.f, 0.f, 0.f};
     float m_scale[3] = {1.f, 1.f, 1.f};
-    int16_t m_v_calibrated[3];
+    int16_t m_v_calibrated[3] = {0, 0, 0};
     void apply_calibration();
     int16_t get_axis(int index) const;
 
@@ -179,8 +179,8 @@ class QMC5883L
     bool m_calib_active = false;
     uint64_t m_calib_start_time = 0;
     uint32_t m_calib_duration_us = 0;
-    int16_t m_calib_min[3];
-    int16_t m_calib_max[3];
+    int16_t m_calib_min[3] = {0, 0, 0};
+    int16_t m_calib_max[3] = {0, 0, 0};
 
     // Constants
     const char m_bearings[16][3] = {{' ', ' ', 'N'},  //

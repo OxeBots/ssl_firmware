@@ -35,18 +35,10 @@
  */
 class IMUGY85
 {
-    /**
-     * @brief Gyroscope Full Scale Range options.
-     * @note The ITG-3200 supports only +/- 2000 dps.
-     */
     enum Gscale
     {
         GFS_2000DPS = ITG3200_FULLSCALE_2000
     };
-
-    /**
-     * @brief Accelerometer Full Scale Range options.
-     */
     enum Ascale
     {
         AFS_2G = 0,
@@ -59,38 +51,37 @@ class IMUGY85
     uint8_t m_a_scale = AFS_16G;
     bool m_a_full_res = true;
 
-    float m_a_res, m_g_res, m_m_res;
+    float m_a_res = 0.0f, m_g_res = 0.0f, m_m_res = 0.0f;
 
-    int16_t m_accel_count[3];
-    int16_t m_gyro_count[3];
-    int16_t m_mag_count[3];
+    int16_t m_accel_count[3] = {0, 0, 0};
+    int16_t m_gyro_count[3] = {0, 0, 0};
+    int16_t m_mag_count[3] = {0, 0, 0};
 
     bool m_use_magnetometer_fusion = false;
-    FusionOffset m_offset;
-    FusionAhrs m_ahrs;
-    FusionAhrsSettings m_settings;
+    FusionOffset m_offset = {};
+    FusionAhrs m_ahrs = {};
+    FusionAhrsSettings m_settings = {};
 
-    // Fusion Calibration Data
-    FusionMatrix m_gyro_misalignment;
-    FusionVector m_gyro_sensitivity;
-    FusionVector m_gyro_offset;
-    FusionMatrix m_accel_misalignment;
-    FusionVector m_accel_sensitivity;
-    FusionVector m_accel_offset;
-    FusionMatrix m_soft_iron_matrix;
-    FusionVector m_hard_iron_offset;
+    FusionMatrix m_gyro_misalignment = {};
+    FusionVector m_gyro_sensitivity = {};
+    FusionVector m_gyro_offset = {};
+    FusionMatrix m_accel_misalignment = {};
+    FusionVector m_accel_sensitivity = {};
+    FusionVector m_accel_offset = {};
+    FusionMatrix m_soft_iron_matrix = {};
+    FusionVector m_hard_iron_offset = {};
 
-    double m_dt = 0.0f;         ///< Integration interval for filter (seconds)
-    int64_t m_last_update = 0;  ///< Last update time in microseconds
-    int64_t m_now = 0;          ///< Current time in microseconds
+    double m_dt = 0.0f;
+    int64_t m_last_update = 0;
+    int64_t m_now = 0;
 
-    float m_ax, m_ay, m_az;  ///< Latest accelerometer values (g)
-    float m_gx, m_gy, m_gz;  ///< Latest gyroscope values (deg/s)
-    float m_mx, m_my, m_mz;  ///< Latest magnetometer values (mG)
+    float m_ax = 0.0f, m_ay = 0.0f, m_az = 0.0f;
+    float m_gx = 0.0f, m_gy = 0.0f, m_gz = 0.0f;
+    float m_mx = 0.0f, m_my = 0.0f, m_mz = 0.0f;
 
-    double m_pitch = 0;  ///< Calculated Pitch angle (degrees)
-    double m_roll = 0;   ///< Calculated Roll angle (degrees)
-    double m_yaw = 0;    ///< Calculated Yaw angle (degrees)
+    double m_pitch = 0.0;
+    double m_roll = 0.0;
+    double m_yaw = 0.0;
 
    public:
     ADXL345 accel;
