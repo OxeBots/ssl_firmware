@@ -1,7 +1,15 @@
+/**
+ * @file wheel_state_estimator.cpp
+ * @brief High-level manager for multiple AS5600 encoders, handling ADC reading, EKF filtering, and calibration.
+ */
+
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "WheelStateEstimator";
 
+/**
+ * @brief Returns the instance of the WheelStateEstimator.
+ */
 WheelStateEstimator & WheelStateEstimator::get_instance()
 {
     static WheelStateEstimator instance;
@@ -34,6 +42,12 @@ WheelStateEstimator::~WheelStateEstimator()
         vTaskDelete(m_task_handle);
 }
 
+/**
+ * @brief Initializes the underlying ADC hardware and creates AS5600 objects.
+ * @param channels Vector of ADC channels to initialize.
+ * @param attenuation The ADC attenuation setting.
+ * @return ESP_OK on success.
+ */
 esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
                                     adc_atten_t attenuation)
 {
@@ -110,6 +124,9 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
     return ESP_OK;
 }
 
+/**
+ * @brief Pauses the ADC task to allow for configuration/I2C operations.
+ */
 void WheelStateEstimator::suspend()
 {
     if (m_initialized && !m_is_suspended)
@@ -120,6 +137,9 @@ void WheelStateEstimator::suspend()
     }
 }
 
+/**
+ * @brief Resumes the ADC task.
+ */
 void WheelStateEstimator::resume()
 {
     if (m_initialized && m_is_suspended)
@@ -131,6 +151,10 @@ void WheelStateEstimator::resume()
     }
 }
 
+/**
+ * @brief Loads calibration from NVS. If missing, runs the interactive calibration routine.
+ * @param duration_ms Time to block and wait for calibration if missing.
+ */
 esp_err_t WheelStateEstimator::load_or_calibrate(uint32_t duration_ms)
 {
     bool missing_calibration = false;
@@ -155,6 +179,11 @@ esp_err_t WheelStateEstimator::load_or_calibrate(uint32_t duration_ms)
     return ESP_OK;
 }
 
+/**
+ * @brief Performs range calibration (Min/Max Voltage) and saves to NVS.
+ * Blocks for 'duration_ms' or until all sensors hit FULL_RANGE_THRESHOLD_MV.
+ * @param stop_on_stable If true, stops early if full range (0-3.3V) is detected.
+ */
 esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop_on_stable)
 {
     for (auto & ch : m_enc_channels)
@@ -172,6 +201,7 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
     while (xTaskGetTickCount() < end_tick)
     {
         int stable_count = 0;
+
         for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
         {
             auto * enc = m_enc_channels[i].encoder.get();
@@ -215,6 +245,10 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
     return (success_count == NUM_ENC_CHANNELS) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * @brief Retrieves the latest filtered angles (in radians) for all encoders.
+ * @return Array of angles in radians. If mutex is unavailable, returns last known values without blocking.
+ */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad()
 {
     std::array<float, NUM_ENC_CHANNELS> angles;
@@ -228,9 +262,14 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
     return angles;
 }
 
+/**
+ * @brief Retrieves the latest filtered angles (in degrees) for all encoders.
+ * @return Array of angles in degrees. If mutex is unavailable, returns last known values without blocking.
+ */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg()
 {
     std::array<float, NUM_ENC_CHANNELS> angles;
+
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) angles[i] = m_enc_channels[i].encoder->get_angle_deg();
@@ -240,6 +279,10 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg(
     return angles;
 }
 
+/**
+ * @brief Retrieves the latest filtered velocities (in RPM) for all encoders.
+ * @return Array of velocities in RPM. If mutex is unavailable, returns last known values without blocking.
+ */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
 {
     std::array<float, NUM_ENC_CHANNELS> rpms;
@@ -252,6 +295,11 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
     return rpms;
 }
 
+/**
+ * @brief Retrieves the latest filtered accelerations (in rps^2) for all encoders.
+ * @return Array of accelerations in rps^2. If mutex is unavailable, returns last known values without blocking.
+ * @note Acceleration is derived from the EKF state and may be noisy; use with caution.
+ */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_acceleration_rps2()
 {
     std::array<float, NUM_ENC_CHANNELS> accels;
@@ -264,11 +312,26 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_accelerati
     return accels;
 }
 
+/**
+ * @brief Static wrapper to launch the ADC task from FreeRTOS.
+ * @param param Pointer to the WheelStateEstimator instance.
+ */
 void WheelStateEstimator::s_adc_task_wrapper(void * param)
 {
     static_cast<WheelStateEstimator *>(param)->adc_task();
 }
 
+/**
+ * @brief ISR callback for ADC conversion complete events.
+ *
+ * Executed from IRAM context when the ADC buffer is filled. Notifies the
+ * `adc_task` to wake up and process the data.
+ *
+ * @param handle ADC continuous driver handle.
+ * @param edata Event data containing the conversion results.
+ * @param user_data Pointer to the WheelStateEstimator instance.
+ * @return true if a high-priority task (the ADC task) was woken up.
+ */
 bool IRAM_ATTR WheelStateEstimator::s_adc_callback(adc_continuous_handle_t handle,
                                                    const adc_continuous_evt_data_t * edata, void * user_data)
 {
@@ -278,6 +341,13 @@ bool IRAM_ATTR WheelStateEstimator::s_adc_callback(adc_continuous_handle_t handl
     return (mustYield == pdTRUE);
 }
 
+/**
+ * @brief Main task loop that processes continuous ADC readings.
+ *
+ * Waits for notifications from the ADC ISR, reads the raw data buffer,
+ * and dispatches readings to the appropriate AS5600 encoder instances
+ * for filtering and state estimation.
+ */
 void WheelStateEstimator::adc_task()
 {
     static uint8_t result_buffer[ADC_BUFFER_SIZE * NUM_ENC_CHANNELS];
@@ -311,6 +381,14 @@ void WheelStateEstimator::adc_task()
     }
 }
 
+/**
+ * @brief Configures the I2C registers for a SPECIFIC sensor channel.
+ * @warning Stops the ADC task during execution.
+ * @warning YOU MUST ENSURE ONLY ONE SENSOR IS CONNECTED TO I2C BUS (Addr 0x36).
+ * @param channel_idx The index (0-3) of the wheel to configure.
+ * @param settings The configuration settings to apply.
+ * @return ESP_OK on success, ESP_ERR_TIMEOUT if sensor not found.
+ */
 esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings)
 {
     if (channel_idx >= NUM_ENC_CHANNELS)
@@ -327,6 +405,7 @@ esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const 
     if (enc && enc->init_i2c() == ESP_OK)
     {
         ret = apply_i2c_settings(enc, settings);
+
         if (ret == ESP_OK)
         {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -351,6 +430,12 @@ esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const 
     return ret;
 }
 
+/**
+ * @brief Writes configuration settings to the AS5600 via I2C.
+ * @param enc Pointer to the AS5600 encoder instance.
+ * @param settings The configuration parameters to apply.
+ * @return ESP_OK on success.
+ */
 esp_err_t WheelStateEstimator::apply_i2c_settings(AS5600 * enc, const AS5600Settings & settings)
 {
     if (enc->set_output_stage(settings.output_stage) != ESP_OK)
@@ -362,6 +447,12 @@ esp_err_t WheelStateEstimator::apply_i2c_settings(AS5600 * enc, const AS5600Sett
     return ESP_OK;
 }
 
+/**
+ * @brief Reads back AS5600 registers to verify they match the desired settings.
+ * @param enc Pointer to the AS5600 encoder instance.
+ * @param settings The configuration parameters expected.
+ * @return ESP_OK if the readback values match.
+ */
 esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Settings & settings)
 {
     AS5600::OutputStage read_stage;
@@ -375,6 +466,7 @@ esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Set
     }
 
     bool match = true;
+
     if (read_stage != settings.output_stage)
     {
         ESP_LOGE(TAG, "Verify Failed: Output Stage mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.output_stage,
@@ -388,6 +480,7 @@ esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Set
                  (uint8_t)read_slow);
         match = false;
     }
+
     if (read_fast != settings.fast_filter)
     {
         ESP_LOGE(TAG, "Verify Failed: Fast Filter mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.fast_filter,
@@ -398,6 +491,13 @@ esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Set
     return match ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
+/**
+ * @brief Permanently burns configuration settings into the AS5600 OTP memory.
+ * @warning This operation is irreversible.
+ * @param enc Pointer to the AS5600 encoder instance.
+ * @param settings Configuration object containing the `burn_settings` flag.
+ * @return ESP_OK on success.
+ */
 esp_err_t WheelStateEstimator::process_otp_burn(AS5600 * enc, const AS5600Settings & settings)
 {
     if (!settings.burn_settings)

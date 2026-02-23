@@ -1,11 +1,11 @@
 /**
- * @file nrf24l01.h
- * @brief C++ wrapper for the mirf nRF24L01 library, configured as a receiver using IRQ interrupts.
+ * @file NRF24L01.h
+ * @brief C++ wrapper driver for the mirf nRF24L01 library.
  *
  */
 
-#ifndef NRF24L01_HPP
-#define NRF24L01_HPP
+#ifndef _NRF24L01_H_
+#define _NRF24L01_H_
 
 #include <driver/gpio.h>
 #include <esp_log.h>
@@ -13,29 +13,31 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
+#include <cstring>
+
+#include "esp_log.h"
 #include "mirf.h"
 
 // Define the type for our data-received callback function
 typedef void (*DataReceivedCallback)(uint8_t * data, uint8_t len);  // Function pointer
 
 /**
- * @class Nrf24Receiver
- * @brief A C++ wrapper for the mirf nRF24L01 library, configured as a receiver
- * using IRQ interrupts.
+ * @class NRF24L01
+ * @brief A C++ wrapper driver for the mirf nRF24L01 library.
  */
-class Nrf24Receiver
+class NRF24L01
 {
    public:
     /**
-     * @brief Construct a new Nrf24Receiver object.
+     * @brief Construct a new NRF24L01 object.
      * @param irq The GPIO pin number connected to the NRF24L01's IRQ pin.
      */
-    explicit Nrf24Receiver(gpio_num_t irq);
+    explicit NRF24L01(gpio_num_t irq);
 
     /**
-     * @brief Destroy the Nrf24Receiver object.
+     * @brief Destroy the NRF24L01 object.
      */
-    ~Nrf24Receiver();
+    ~NRF24L01();
 
     /**
      * @brief Initializes the NRF24L01 module.
@@ -57,7 +59,7 @@ class Nrf24Receiver
      */
     bool start(DataReceivedCallback callback);
 
-    /** 
+    /**
      * @brief Sends data non-blocking via NRF24L01.
      * @param data Pointer to the data buffer to send.
      * @param len Length of the data to send (max 32 bytes).
@@ -67,13 +69,13 @@ class Nrf24Receiver
    private:
     /**
      * @brief Static ISR handler for the IRQ pin, activates the receiver task.
-     * @param dev Pointer to the Nrf24Receiver instance.
+     * @param dev Pointer to the NRF24L01 instance.
      */
     static void IRAM_ATTR isr_handler(void * dev);
 
     /**
      * @brief Static function to launch the FreeRTOS task.
-     * @param dev Pointer to the Nrf24Receiver instance.
+     * @param dev Pointer to the NRF24L01 instance.
      */
     static void task_wrapper(void * dev);
 
@@ -92,4 +94,4 @@ class Nrf24Receiver
     uint8_t m_payloadSize;                  // Stored payload size
 };
 
-#endif  // NRF24L01_HPP
+#endif  // _NRF24L01_H_

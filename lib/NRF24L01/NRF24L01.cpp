@@ -1,18 +1,14 @@
-#include "nrf24l01.h"
+#include "NRF24L01.h"
 
-#include <cstring>
+static const char * TAG = "NRF24L01";
 
-#include "esp_log.h"
-
-static const char * TAG = "NRF24_CLASS";
-
-Nrf24Receiver::Nrf24Receiver(gpio_num_t irq)
+NRF24L01::NRF24L01(gpio_num_t irq)
 : m_irqPin(irq), m_taskHandle(NULL), m_interruptQueue(NULL), m_onDataReceived(nullptr), m_payloadSize(32)
 {
     memset(&m_dev, 0, sizeof(NRF24_t));
 }
 
-Nrf24Receiver::~Nrf24Receiver()
+NRF24L01::~NRF24L01()
 {
     if (m_taskHandle)
         vTaskDelete(m_taskHandle);
@@ -29,7 +25,7 @@ Nrf24Receiver::~Nrf24Receiver()
     Nrf24_deinit(&m_dev);
 }
 
-esp_err_t Nrf24Receiver::init(uint8_t channel, uint8_t payloadSize, const char * tx_addr, const char * rx_addr)
+esp_err_t NRF24L01::init(uint8_t channel, uint8_t payloadSize, const char * tx_addr, const char * rx_addr)
 {
     m_payloadSize = payloadSize;
 
@@ -104,7 +100,7 @@ esp_err_t Nrf24Receiver::init(uint8_t channel, uint8_t payloadSize, const char *
 
     // Hook isr handler for specific gpio pin
     // Note: gpio_install_isr_service is called in main_esp32.cpp
-    ret = gpio_isr_handler_add(m_irqPin, Nrf24Receiver::isr_handler, (void *)this);
+    ret = gpio_isr_handler_add(m_irqPin, NRF24L01::isr_handler, (void *)this);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to add ISR handler");
@@ -114,7 +110,7 @@ esp_err_t Nrf24Receiver::init(uint8_t channel, uint8_t payloadSize, const char *
     return ESP_OK;
 }
 
-bool Nrf24Receiver::start(DataReceivedCallback callback)
+bool NRF24L01::start(DataReceivedCallback callback)
 {
     if (callback == nullptr)
     {
@@ -124,7 +120,7 @@ bool Nrf24Receiver::start(DataReceivedCallback callback)
     m_onDataReceived = callback;
 
     // Start the receiver task
-    BaseType_t task_created = xTaskCreate(&Nrf24Receiver::task_wrapper,  // Function to call
+    BaseType_t task_created = xTaskCreate(&NRF24L01::task_wrapper,  // Function to call
                                           "nrf24_receiver_task",         // Task name
                                           4096,                          // Stack size
                                           this,                          // Parameter to pass (this instance)
@@ -142,26 +138,26 @@ bool Nrf24Receiver::start(DataReceivedCallback callback)
 }
 
 // Static ISR handler
-void IRAM_ATTR Nrf24Receiver::isr_handler(void * dev)
+void IRAM_ATTR NRF24L01::isr_handler(void * dev)
 {
     // `dev` is the `this` pointer passed during gpio_isr_handler_add
-    Nrf24Receiver * instance = static_cast<Nrf24Receiver *>(dev);
+    NRF24L01 * instance = static_cast<NRF24L01 *>(dev);
     uint32_t gpio_num = instance->m_irqPin;
     // Send the pin number to the queue
     xQueueSendFromISR(instance->m_interruptQueue, &gpio_num, NULL);
 }
 
 // Static task trampoline
-void Nrf24Receiver::task_wrapper(void * dev)
+void NRF24L01::task_wrapper(void * dev)
 {
     // `dev` is the `this` pointer
-    Nrf24Receiver * instance = static_cast<Nrf24Receiver *>(dev);
+    NRF24L01 * instance = static_cast<NRF24L01 *>(dev);
     // Call the member function
     instance->receiver_task();
 }
 
 // Member function task
-void Nrf24Receiver::receiver_task()
+void NRF24L01::receiver_task()
 {
     ESP_LOGI(TAG, "Receiver task started. Listening for data...");
     uint32_t io_num;
@@ -206,7 +202,7 @@ void Nrf24Receiver::receiver_task()
     }
 }
 
-void Nrf24Receiver::send_data(const uint8_t * data, uint8_t len)
+void NRF24L01::send_data(const uint8_t * data, uint8_t len)
 {
     if (len > 32)
     {

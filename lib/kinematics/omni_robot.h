@@ -39,38 +39,18 @@ constexpr std::array<double, 4> WHEELS_ANGLE_OFFSET = {
 class OmnidirectionalRobot
 {
    private:
-    const double wheel_radius;    // Wheel radius (m)
-    const double wheel_distance;  // Distance from center to wheels (m)
+    const double m_wheel_radius;
+    const double m_wheel_distance;
 
-    vt::numeric_matrix<4, 3> H;       // Inverse Kinematics matrix
-    vt::numeric_matrix<3, 4> H_pinv;  // Pseudoinverse of H for Forward Kinematics
+    vt::numeric_matrix<4, 3> m_H;
+    vt::numeric_matrix<3, 4> m_H_pinv;
 
    public:
-    /**
-     * @brief Constructor for OmnidirectionalRobot
-     *
-     * @param r Wheel radius in meters (must be > 0)
-     * @param d Distance from center to wheels in meters (must be > 0)
-     */
     OmnidirectionalRobot(double r, double d);
 
-    /**
-     * @brief Compute wheel angular velocities from body velocities (inverse
-     * kinematics)
-     *
-     * @param body_velocities [ω_z (rad/s), v_x (m/s), v_y (m/s)]
-     * @return vt::numeric_vector<4> Wheel angular velocities [rad/s]
-     */
-    vt::numeric_vector<4> computeWheelVelocities(const vt::numeric_vector<3> & body_velocities) const;
+    vt::numeric_vector<4> compute_wheel_velocities(const vt::numeric_vector<3> & body_velocities) const;
 
-    /**
-     * @brief Compute body velocities from wheel angular velocities (forward
-     * kinematics)
-     *
-     * @param wheel_velocities Wheel angular velocities [rad/s]
-     * @return vt::numeric_vector<3> [ω_z (rad/s), v_x (m/s), v_y (m/s)]
-     */
-    vt::numeric_vector<3> computeBodyVelocities(const vt::numeric_vector<4> & wheel_velocities) const;
+    vt::numeric_vector<3> compute_body_velocities(const vt::numeric_vector<4> & wheel_velocities) const;
 
     OmnidirectionalRobot(const OmnidirectionalRobot &) = delete;
     OmnidirectionalRobot & operator=(const OmnidirectionalRobot &) = delete;

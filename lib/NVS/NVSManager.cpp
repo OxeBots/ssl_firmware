@@ -1,3 +1,7 @@
+/**
+ * @file NVSManager.cpp
+ * @brief Singleton manager for non-volatile storage (NVS) operations, ensuring hardware safety.
+ */
 #include "NVSManager.h"
 
 static const char * TAG = "NVSManager";
@@ -5,6 +9,10 @@ static const char * TAG = "NVSManager";
 std::function<void()> NVSManager::m_suspend_cb = nullptr;
 std::function<void()> NVSManager::m_resume_cb = nullptr;
 
+/**
+ * @brief Initializes the NVS flash partition.
+ * @return ESP_OK on success.
+ */
 esp_err_t NVSManager::init()
 {
     esp_err_t ret = nvs_flash_init();
@@ -18,12 +26,22 @@ esp_err_t NVSManager::init()
     return ret;
 }
 
+/**
+ * @brief Set callbacks to suspend/resume sensitive hardware (like ADC continuous mode)
+ * to prevent flash contention during NVS read/write operations.
+ * @param suspend_cb Function to call before NVS access.
+ * @param resume_cb Function to call after NVS access.
+ */
 void NVSManager::set_adc_callbacks(std::function<void()> suspend_cb, std::function<void()> resume_cb)
 {
     m_suspend_cb = suspend_cb;
     m_resume_cb = resume_cb;
 }
 
+/**
+ * @brief Executes an NVS operation while wrapping it in the suspend/resume callbacks.
+ * @param func Lambda or function to execute.
+ */
 void NVSManager::execute_safe(const std::function<void()> & func)
 {
     if (m_suspend_cb)
@@ -35,6 +53,13 @@ void NVSManager::execute_safe(const std::function<void()> & func)
         m_resume_cb();
 }
 
+/**
+ * @brief Saves a 32-bit integer to NVS safely.
+ * @param ns Namespace string.
+ * @param key Key string.
+ * @param value Integer value to save.
+ * @return ESP_OK on success.
+ */
 esp_err_t NVSManager::save_i32(const char * ns, const char * key, int32_t value)
 {
     esp_err_t err = ESP_OK;
@@ -59,6 +84,13 @@ esp_err_t NVSManager::save_i32(const char * ns, const char * key, int32_t value)
     return err;
 }
 
+/**
+ * @brief Loads a 32-bit integer from NVS safely.
+ * @param ns Namespace string.
+ * @param key Key string.
+ * @param value Pointer to store loaded value.
+ * @return ESP_OK on success.
+ */
 esp_err_t NVSManager::load_i32(const char * ns, const char * key, int32_t * value)
 {
     esp_err_t err = ESP_OK;
@@ -73,9 +105,18 @@ esp_err_t NVSManager::load_i32(const char * ns, const char * key, int32_t * valu
             nvs_close(handle);
         }
     });
+
     return err;
 }
 
+/**
+ * @brief Saves a binary blob to NVS safely.
+ * @param ns Namespace string.
+ * @param key Key string.
+ * @param data Pointer to the binary data.
+ * @param length Size of the binary data.
+ * @return ESP_OK on success.
+ */
 esp_err_t NVSManager::save_blob(const char * ns, const char * key, const void * data, size_t length)
 {
     esp_err_t err = ESP_OK;
@@ -101,6 +142,14 @@ esp_err_t NVSManager::save_blob(const char * ns, const char * key, const void * 
     return err;
 }
 
+/**
+ * @brief Loads a binary blob from NVS safely.
+ * @param ns Namespace string.
+ * @param key Key string.
+ * @param data Pointer to store the loaded binary data.
+ * @param length Pointer to the size of the binary data buffer.
+ * @return ESP_OK on success.
+ */
 esp_err_t NVSManager::load_blob(const char * ns, const char * key, void * data, size_t * length)
 {
     esp_err_t err = ESP_OK;

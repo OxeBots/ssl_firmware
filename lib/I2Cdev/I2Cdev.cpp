@@ -1,36 +1,39 @@
-// I2Cdev library collection - Main I2C device class
-// Abstracts bit and byte I2C R/W functions into a convenient class
-// EFM32 stub port by Nicolas Baldeck <nicolas@pioupiou.fr>
-// Ported to ESP-IDF i2c_master driver by Erick Suzart <ericksuzart@gmail.com>
-// Based on Arduino's I2Cdev by Jeff Rowberg <jeff@rowberg.net>
-//
-// Changelog:
-//      2015-01-02 - Initial release
-//      2025-11-29 - Ported to ESP-IDF i2c_master driver
-
-/* ============================================
-I2Cdev device library code is placed under the MIT license
-Copyright (c) 2015 Jeff Rowberg, Nicolas Baldeck
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-===============================================
-*/
+/** I2Cdev library collection - Main I2C device class
+ * Abstracts bit and byte I2C R/W functions into a convenient class
+ * EFM32 stub port by Nicolas Baldeck <nicolas@pioupiou.fr>
+ * Ported to ESP-IDF i2c_master driver by Erick Suzart <ericksuzart@gmail.com>
+ * Based on Arduino's I2Cdev by Jeff Rowberg <jeff@rowberg.net>
+ *
+ * Changelog:
+ *      2015-01-02 - Initial release
+ *      2025-11-29 - Ported to ESP-IDF i2c_master driver
+ *
+ * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not equal to the
+ * original.
+ *
+ *  ============================================
+ * I2Cdev device library code is placed under the MIT license
+ * Copyright (c) 2011 Jeff Rowberg
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ * ===============================================
+ */
 
 #include "I2Cdev.h"
 

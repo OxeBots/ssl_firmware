@@ -1,9 +1,12 @@
+/**
+ * @file wheel_ekf.cpp
+ * @brief A dedicated class for the wheel's state estimation using an EKF.
+ * This class is pure math and has no hardware dependencies.
+ */
 #include "wheel_ekf.h"
 
-#include "esp_timer.h"
-
-#include "vt_kalman"
-#include "vt_linalg"
+#include <vt_kalman>
+#include <vt_linalg>
 
 static constexpr int STATE_DIM = 3;
 static constexpr int MEAS_DIM = 1;
@@ -65,15 +68,17 @@ struct WheelKalmanFilter::KalmanState
     static vt::numeric_matrix<1, 3> Hj_func(const StateVector &) { return vt::make_numeric_matrix<1, 3>({{1, 0, 0}}); }
 };
 
-// --- Class Method Implementations ---
-
 WheelKalmanFilter::WheelKalmanFilter()
 {
     m_state = std::make_unique<KalmanState>();
 }
 
-WheelKalmanFilter::~WheelKalmanFilter() = default;  // Default destructor is fine
+WheelKalmanFilter::~WheelKalmanFilter() = default;
 
+/**
+ * @brief Updates the filter with a new angle measurement.
+ * @param measured_angle The new angle in radians.
+ */
 void WheelKalmanFilter::update(float measured_angle_rad)
 {
     int64_t now = esp_timer_get_time();
@@ -100,17 +105,28 @@ void WheelKalmanFilter::update(float measured_angle_rad)
     m_state->filter.update(vt::make_numeric_vector({corrected_measurement}));
 }
 
-// --- State Getters ---
+/**
+ * @brief Retrieves the filtered angle.
+ * @return Angle in radians.
+ */
 float WheelKalmanFilter::get_angle_rad() const
 {
     return m_state->filter.state_vector[0];
 }
 
+/**
+ * @brief Retrieves the filtered angular velocity.
+ * @return Velocity in rad/s.
+ */
 float WheelKalmanFilter::get_velocity_rad_s() const
 {
     return m_state->filter.state_vector[1];
 }
 
+/**
+ * @brief Retrieves the filtered angular acceleration.
+ * @return Acceleration in rad/s^2.
+ */
 float WheelKalmanFilter::get_acceleration_rad_s2() const
 {
     return m_state->filter.state_vector[2];

@@ -49,32 +49,8 @@ class WheelStateEstimator
     WheelStateEstimator();
     ~WheelStateEstimator();
 
-    /**
-     * @brief Main task loop that processes continuous ADC readings.
-     *
-     * Waits for notifications from the ADC ISR, reads the raw data buffer,
-     * and dispatches readings to the appropriate AS5600 encoder instances
-     * for filtering and state estimation.
-     */
     void adc_task();
-
-    /**
-     * @brief Static wrapper to launch the ADC task from FreeRTOS.
-     * @param param Pointer to the WheelStateEstimator singleton instance.
-     */
     static void s_adc_task_wrapper(void * param);
-
-    /**
-     * @brief ISR callback for ADC conversion complete events.
-     *
-     * Executed from IRAM context when the ADC buffer is filled. Notifies the
-     * `adc_task` to wake up and process the data.
-     *
-     * @param handle ADC continuous driver handle.
-     * @param edata Event data containing the conversion results.
-     * @param user_data Pointer to the WheelStateEstimator instance.
-     * @return true if a high-priority task (the ADC task) was woken up.
-     */
     static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t * edata,
                                          void * user_data);
 
@@ -87,13 +63,8 @@ class WheelStateEstimator
     adc_continuous_handle_t m_adc_handle;
     TaskHandle_t m_task_handle;
 
-    // Store EncoderChannel objects for each wheel index (0-3)
     std::array<EncoderChannel, NUM_ENC_CHANNELS> m_enc_channels;
-
-    // Lookup table to map ADC channel numbers to EncoderChannel pointers for quick access in ISR
     std::array<const EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
-
-    // Mutex to protect shared access to encoder data between ADC task and main task
     SemaphoreHandle_t m_data_mutex;
 
    public:
@@ -102,45 +73,16 @@ class WheelStateEstimator
     WheelStateEstimator(const WheelStateEstimator &) = delete;
     WheelStateEstimator & operator=(const WheelStateEstimator &) = delete;
 
-    /**
-     * @brief Initializes the underlying ADC hardware and creates AS5600 objects.
-     * @param channels Array of ADC channels to initialize.
-     * @return ESP_OK on success.
-     */
     esp_err_t init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
                    adc_atten_t attenuation = ADC_ATTEN_DB_12);
 
-    /**
-     * @brief Pauses the ADC task.
-     */
     void suspend();
-
-    /**
-     * @brief Resumes the ADC task.
-     */
     void resume();
 
-    /**
-     * @brief Loads calibration from NVS via encoder instances. If missing, runs the calibration routine.
-     */
     esp_err_t load_or_calibrate(uint32_t duration_ms = 5000);
-
-    /**
-     * @brief Performs range calibration interactively and saves to NVS.
-     */
     esp_err_t force_calibration(uint32_t duration_ms, bool stop_on_stable = true);
-
-    /**
-     * @brief Configures the I2C registers for a SPECIFIC sensor channel.
-     * @warning Stops the ADC task during execution.
-     * @warning YOU MUST ENSURE ONLY ONE SENSOR IS CONNECTED TO I2C BUS (Addr 0x36).
-     * @param channel_idx The index (0-3) of the wheel to configure.
-     * @param settings The configuration settings to apply.
-     * @return ESP_OK on success, ESP_ERR_TIMEOUT if sensor not found.
-     */
     esp_err_t configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings = AS5600Settings());
 
-    // --- Getters ---
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_deg();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_rpm();
