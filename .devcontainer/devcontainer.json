@@ -32,7 +32,8 @@
     ],
     "runArgs": [
         "--privileged",
-        "--ipc=host"
+        "--ipc=host",
+        "--network=host"
     ],
     "features": {},
     "postAttachCommand": "sudo service udev restart"

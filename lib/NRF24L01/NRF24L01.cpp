@@ -1,50 +1,65 @@
+/**
+ * @file NRF24L01.cpp
+ * @brief C++ wrapper driver for the mirf nRF24L01 library.
+ */
+
 #include "NRF24L01.h"
 
 static const char * TAG = "NRF24L01";
 
+/**
+ * @brief Construct a new NRF24L01 object.
+ * @param irq The GPIO pin number connected to the NRF24L01's IRQ pin.
+ */
 NRF24L01::NRF24L01(gpio_num_t irq)
-: m_irqPin(irq), m_taskHandle(NULL), m_interruptQueue(NULL), m_onDataReceived(nullptr), m_payloadSize(32)
+: m_irq_pin(irq), m_task_handle(NULL), m_interrupt_queue(NULL), m_tx_queue(NULL), m_on_data_received(nullptr), m_payload_size(32)
 {
     memset(&m_dev, 0, sizeof(NRF24_t));
 }
 
+/**
+ * @brief Destroy the NRF24L01 object.
+ */
 NRF24L01::~NRF24L01()
 {
-    if (m_taskHandle)
-        vTaskDelete(m_taskHandle);
-
-    if (m_interruptQueue)
-        vQueueDelete(m_interruptQueue);
-
-    if (m_txQueue)
-        vQueueDelete(m_txQueue);
+    if (m_task_handle) vTaskDelete(m_task_handle);
+    if (m_interrupt_queue) vQueueDelete(m_interrupt_queue);
+    if (m_tx_queue) vQueueDelete(m_tx_queue);
 
     // Note: ISR handler removal is managed by main_esp32.cpp
     // which calls gpio_uninstall_isr_service()
-    gpio_isr_handler_remove(m_irqPin);
+    gpio_isr_handler_remove(m_irq_pin);
     Nrf24_deinit(&m_dev);
 }
 
-esp_err_t NRF24L01::init(uint8_t channel, uint8_t payloadSize, const char * tx_addr, const char * rx_addr)
+/**
+ * @brief Initializes the NRF24L01 module, forcibly overriding default pins.
+ * @param channel RF Channel (0-125).
+ * @param payload_size The fixed payload size (1-32 bytes).
+ * @param tx_addr The 5-byte transmit address.
+ * @param rx_addr The 5-byte receive address.
+ * @return esp_err_t ESP_OK on success, or an error from the mirf library.
+ */
+esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr)
 {
-    m_payloadSize = payloadSize;
+    m_payload_size = payload_size;
 
-    // 1. Initialize SPI and base NRF24 device
+    // Give the module time to stabilize voltage before sending SPI commands
+    
     Nrf24_init(&m_dev);
 
-    // 2. Configure channel and payload size
-    Nrf24_config(&m_dev, channel, payloadSize);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Match the Python script's settings: 250Kbps
+    Nrf24_config(&m_dev, channel, m_payload_size);
+
     ESP_LOGI(TAG, "Setting Data Rate to 250Kbps");
-    Nrf24_SetSpeedDataRates(&m_dev, 2);  // 2 = RF24_250KBPS
+    Nrf24_SetSpeedDataRates(&m_dev, 2); 
 
     esp_err_t ret = Nrf24_setRADDR(&m_dev, (uint8_t *)rx_addr);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(pcTaskGetName(NULL), "nrf24l01 not installed");
-        while (true)
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+        ESP_LOGE(TAG, "nrf24l01 not installed / failed to set RADDR (Check Wiring & add 10uF Capacitor!)");
+        return ret;
     }
 
     // Configure ACK Handshake
@@ -58,162 +73,123 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payloadSize, const char * tx_a
         ESP_LOGE(TAG, "Failed to set TADDR/RADDR_P0. NRF24 not found?");
         return ret;
     }
+    
     ESP_LOGI(TAG, "Using Pipe 0. RX_ADDR_P0 and TX_ADDR set to: %s", tx_addr);
 
-    Nrf24_setRetransmitCount(&m_dev, 10);  // Up to 10 retransmits
-    Nrf24_setRetransmitDelay(&m_dev, 4);   // 4 * 250us = 1250us (0x4 in upper nibble)
+    Nrf24_setRetransmitCount(&m_dev, CONFIG_RETRANSMIT_COUNT); 
+    Nrf24_setRetransmitDelay(&m_dev, CONFIG_RETRANSMIT_DELAY);   
 
-    // 3. Print details to confirm settings
     ESP_LOGI(TAG, "NRF24L01 Receiver Initialized:");
     Nrf24_printDetails(&m_dev);
 
-    // 4. Configure GPIO interrupt for IRQ pin
-    // Create a queue to handle gpio event from isr
-    m_interruptQueue = xQueueCreate(10, sizeof(uint32_t));
-    if (m_interruptQueue == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to create interrupt queue");
-        return ESP_FAIL;
-    }
-
-    // 5. Configure TX Queue
-    m_txQueue = xQueueCreate(10, m_payloadSize * sizeof(uint8_t));
-    if (m_txQueue == NULL)
-    {
-        ESP_LOGE(TAG, "Failed to create TX queue");
-        return ESP_FAIL;
-    }
+    m_interrupt_queue = xQueueCreate(10, sizeof(uint32_t));
+    m_tx_queue = xQueueCreate(10, m_payload_size * sizeof(uint8_t));
+    if (m_interrupt_queue == NULL || m_tx_queue == NULL) return ESP_FAIL;
 
     gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_NEGEDGE;  // Interrupt on falling edge (IRQ active LOW)
-    io_conf.pin_bit_mask = (1ULL << m_irqPin);
+    io_conf.intr_type = GPIO_INTR_NEGEDGE;
+    io_conf.pin_bit_mask = (1ULL << m_irq_pin);
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;  // Enable pull-up
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
 
     ret = gpio_config(&io_conf);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to configure IRQ GPIO");
-        return ret;
-    }
+    if (ret != ESP_OK) return ret;
 
-    // Hook isr handler for specific gpio pin
-    // Note: gpio_install_isr_service is called in main_esp32.cpp
-    ret = gpio_isr_handler_add(m_irqPin, NRF24L01::isr_handler, (void *)this);
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to add ISR handler");
-        return ret;
-    }
+    // Must be pre-initialized by gpio_install_isr_service() in main.cpp
+    ret = gpio_isr_handler_add(m_irq_pin, NRF24L01::isr_handler, (void *)this);
+    if (ret != ESP_OK) return ret;
 
     return ESP_OK;
 }
 
-bool NRF24L01::start(DataReceivedCallback callback)
+/**
+ * @brief Starts the receiver task.
+ * @param callback The function to call when new data is received.
+ * @return true if the task started successfully, false otherwise.
+ */
+bool NRF24L01::start(data_received_callback_t callback)
 {
-    if (callback == nullptr)
-    {
-        ESP_LOGE(TAG, "Callback function cannot be null");
-        return false;
-    }
-    m_onDataReceived = callback;
+    if (!callback) return false;
+    m_on_data_received = callback;
 
-    // Start the receiver task
-    BaseType_t task_created = xTaskCreate(&NRF24L01::task_wrapper,  // Function to call
-                                          "nrf24_receiver_task",         // Task name
-                                          4096,                          // Stack size
-                                          this,                          // Parameter to pass (this instance)
-                                          5,                             // Priority
-                                          &m_taskHandle                  // Task handle
-    );
-
-    if (task_created != pdPASS)
-    {
-        ESP_LOGE(TAG, "Failed to create receiver task");
-        return false;
-    }
-
-    return true;
+    BaseType_t task_created = xTaskCreate(&NRF24L01::task_wrapper, "nrf24_receiver_task", 4096, this, 5, &m_task_handle);
+    return task_created == pdPASS;
 }
 
-// Static ISR handler
+/**
+ * @brief Static ISR handler for the IRQ pin, triggers task queue.
+ */
 void IRAM_ATTR NRF24L01::isr_handler(void * dev)
 {
-    // `dev` is the `this` pointer passed during gpio_isr_handler_add
-    NRF24L01 * instance = static_cast<NRF24L01 *>(dev);
-    uint32_t gpio_num = instance->m_irqPin;
-    // Send the pin number to the queue
-    xQueueSendFromISR(instance->m_interruptQueue, &gpio_num, NULL);
+    auto * instance = static_cast<NRF24L01 *>(dev);
+    uint32_t gpio_num = instance->m_irq_pin;
+    xQueueSendFromISR(instance->m_interrupt_queue, &gpio_num, NULL);
 }
 
-// Static task trampoline
+/**
+ * @brief Static function to launch the FreeRTOS task.
+ */
 void NRF24L01::task_wrapper(void * dev)
 {
-    // `dev` is the `this` pointer
-    NRF24L01 * instance = static_cast<NRF24L01 *>(dev);
-    // Call the member function
-    instance->receiver_task();
+    static_cast<NRF24L01 *>(dev)->receiver_task();
 }
 
-// Member function task
+/**
+ * @brief Background task for draining RX FIFO and pumping TX queue.
+ */
 void NRF24L01::receiver_task()
 {
     ESP_LOGI(TAG, "Receiver task started. Listening for data...");
     uint32_t io_num;
-    uint8_t buffer[m_payloadSize];
-    uint8_t tx_buffer[m_payloadSize];
+    uint8_t buffer[32]; // Fixed to hardware maximum
+    uint8_t tx_buffer[32];
 
     while (true)
     {
-        // Wait for the ISR to notify us of an event
-        if (xQueueReceive(m_interruptQueue, &io_num, portMAX_DELAY))
+        if (xQueueReceive(m_interrupt_queue, &io_num, portMAX_DELAY))
         {
-            if (io_num == (uint32_t)m_irqPin)
+            if (io_num == static_cast<uint32_t>(m_irq_pin))
             {
-                // --- Drain the ENTIRE RX FIFO ---
                 // Read all available packets
                 while (Nrf24_dataReady(&m_dev))
                 {
-                    // Data is available, read it.
                     Nrf24_getData(&m_dev, buffer);
-
-                    // Pass the data to the callback function
-                    if (m_onDataReceived)
-                        m_onDataReceived(buffer, m_payloadSize);
+                    if (m_on_data_received) m_on_data_received(buffer, m_payload_size);
                 }
 
-                // --- Send all queued responses ---
-                // Now that the RX FIFO is empty and we're in a clean state,
-                // send all the pong-backs that we queued.
-                while (xQueueReceive(m_txQueue, &tx_buffer, 0))
+                // Send queued responses
+                while (xQueueReceive(m_tx_queue, &tx_buffer, 0))
                 {
-                    // There is data to send
-                    ESP_LOGI(TAG, "Sending pong-back...");
                     Nrf24_send(&m_dev, tx_buffer);
-
-                    if (Nrf24_isSend(&m_dev, 100))
-                        ESP_LOGI(TAG, "Pong-back sent successfully.");
-                    else
-                        ESP_LOGW(TAG, "Pong-back send failed.");
+                    if (!Nrf24_isSend(&m_dev, 100)) {
+                        ESP_LOGW(TAG, "Pong-back failed / No ACK received.");
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * @brief Safely stages data for outbound radio transmission.
+ * @param data Byte array representing the payload.
+ * @param len Size of data. Max 32 bytes.
+ */
 void NRF24L01::send_data(const uint8_t * data, uint8_t len)
 {
-    if (len > 32)
+    if (len > m_payload_size)
     {
-        ESP_LOGE(TAG, "Data length exceeds 32 bytes. Cannot send.");
+        ESP_LOGE(TAG, "Data length (%d) exceeds configured payload size (%d). Dropping packet.", len, m_payload_size);
         return;
     }
 
-    // Add the data to the TX queue
-    if (xQueueSend(m_txQueue, data, pdMS_TO_TICKS(100)) != pdPASS)
+    // Always pad packet to expected m_payload_size to prevent FreeRTOS boundary reading bugs
+    uint8_t safe_buffer[32] = {0};
+    memcpy(safe_buffer, data, len);
+
+    if (xQueueSend(m_tx_queue, safe_buffer, pdMS_TO_TICKS(100)) != pdPASS)
     {
         ESP_LOGE(TAG, "Failed to enqueue data for transmission");
-        return;
     }
 }

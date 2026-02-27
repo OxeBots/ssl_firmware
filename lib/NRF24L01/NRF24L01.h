@@ -3,7 +3,6 @@
  * @brief C++ wrapper driver for the mirf nRF24L01 library.
  *
  */
-
 #ifndef _NRF24L01_H_
 #define _NRF24L01_H_
 
@@ -15,83 +14,32 @@
 
 #include <cstring>
 
-#include "esp_log.h"
 #include "mirf.h"
 
-// Define the type for our data-received callback function
-typedef void (*DataReceivedCallback)(uint8_t * data, uint8_t len);  // Function pointer
+typedef void (*data_received_callback_t)(uint8_t * data, uint8_t len);
 
-/**
- * @class NRF24L01
- * @brief A C++ wrapper driver for the mirf nRF24L01 library.
- */
 class NRF24L01
 {
    public:
-    /**
-     * @brief Construct a new NRF24L01 object.
-     * @param irq The GPIO pin number connected to the NRF24L01's IRQ pin.
-     */
     explicit NRF24L01(gpio_num_t irq);
-
-    /**
-     * @brief Destroy the NRF24L01 object.
-     */
     ~NRF24L01();
 
-    /**
-     * @brief Initializes the NRF24L01 module.
-     * NOTE: This relies on the SPI/CE/CSN pins being set in sdkconfig
-     *  as required by mirf.c. Run `pio run -t menuconfig` to set these.
-     *
-     * @param channel RF Channel (0-125).
-     * @param payloadSize The fixed payload size (1-32 bytes).
-     * @param tx_addr The 5-byte transmit address.
-     * @param rx_addr The 5-byte receive address.
-     * @return esp_err_t ESP_OK on success, or an error from the mirf library.
-     */
-    esp_err_t init(uint8_t channel, uint8_t payloadSize, const char * tx_addr, const char * rx_addr);
-
-    /**
-     * @brief Starts the receiver task.
-     * @param callback The function to call when new data is received.
-     * @return true if the task started successfully, false otherwise.
-     */
-    bool start(DataReceivedCallback callback);
-
-    /**
-     * @brief Sends data non-blocking via NRF24L01.
-     * @param data Pointer to the data buffer to send.
-     * @param len Length of the data to send (max 32 bytes).
-     */
+    esp_err_t init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr);
+    bool start(data_received_callback_t callback);
     void send_data(const uint8_t * data, uint8_t len);
 
    private:
-    /**
-     * @brief Static ISR handler for the IRQ pin, activates the receiver task.
-     * @param dev Pointer to the NRF24L01 instance.
-     */
     static void IRAM_ATTR isr_handler(void * dev);
-
-    /**
-     * @brief Static function to launch the FreeRTOS task.
-     * @param dev Pointer to the NRF24L01 instance.
-     */
     static void task_wrapper(void * dev);
-
-    /**
-     * The main FreeRTOS task loop for receiving data.
-     */
     void receiver_task();
 
-   private:
-    NRF24_t m_dev;                          // The underlying C struct for the mirf device
-    gpio_num_t m_irqPin;                    // IRQ pin
-    TaskHandle_t m_taskHandle;              // Handle for the receiver task
-    QueueHandle_t m_interruptQueue;         // Queue to signal from ISR to task
-    QueueHandle_t m_txQueue;                // Queue for outgoing data
-    DataReceivedCallback m_onDataReceived;  // Callback function for received data
-    uint8_t m_payloadSize;                  // Stored payload size
+    NRF24_t m_dev;
+    gpio_num_t m_irq_pin;
+    TaskHandle_t m_task_handle;
+    QueueHandle_t m_interrupt_queue;
+    QueueHandle_t m_tx_queue;
+    data_received_callback_t m_on_data_received;
+    uint8_t m_payload_size;
 };
 
 #endif  // _NRF24L01_H_

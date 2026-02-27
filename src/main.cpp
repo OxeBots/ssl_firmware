@@ -1,3 +1,4 @@
+#include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
@@ -9,6 +10,7 @@
 
 #include "BL48250.h"
 #include "IMUGY85.h"
+#include "NRF24L01.h"
 #include "NVSManager.h"
 #include "mirf.h"
 #include "omni_robot.h"
@@ -23,6 +25,7 @@ i2c_master_bus_handle_t bus_handle;
 #define SERIAL_PRINT_RATE_HZ 20
 
 IMUGY85 imu;
+NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
 SemaphoreHandle_t data_mutex;
 
 // Shared Data Container
@@ -82,29 +85,106 @@ void imu_update_task(void * pvParameters)
     }
 }
 
-void heartbeat_task(void * pvParam)
+// void heartbeat_task(void * pvParam)
+// {
+//     ledc_timer_config_t timer_config = {.speed_mode = LEDC_LOW_SPEED_MODE,
+//                                         .duty_resolution = LEDC_TIMER_10_BIT,
+//                                         .timer_num = LEDC_TIMER_0,
+//                                         .freq_hz = 1,
+//                                         .clk_cfg = LEDC_AUTO_CLK,
+//                                         .deconfigure = false};
+
+//     ledc_timer_config(&timer_config);
+
+//     ledc_channel_config_t channel_config = {.gpio_num = (gpio_num_t)CONFIG_BLINK_GPIO,
+//                                             .speed_mode = LEDC_LOW_SPEED_MODE,
+//                                             .channel = LEDC_CHANNEL_0,
+//                                             .intr_type = LEDC_INTR_DISABLE,
+//                                             .timer_sel = LEDC_TIMER_0,
+//                                             .duty = 1UL << (timer_config.duty_resolution - 1),
+//                                             .hpoint = 0,
+//                                             .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
+//                                             .flags = {.output_invert = 0}};
+
+//     ledc_channel_config(&channel_config);
+//     vTaskDelete(nullptr);
+// }
+
+// -------------------------------------------------------------
+// NRF24L01 Protocol Callback
+// Protocol Frame: [Length Byte] [Payload (N Bytes)] [Checksum]
+// Checksum Rule: Length ^ (Payload[0] ^ Payload[1] ... Payload[N])
+// -------------------------------------------------------------
+void handle_radio_data(uint8_t * data, uint8_t len)
 {
-    ledc_timer_config_t timer_config = {.speed_mode = LEDC_LOW_SPEED_MODE,
-                                        .duty_resolution = LEDC_TIMER_10_BIT,
-                                        .timer_num = LEDC_TIMER_0,
-                                        .freq_hz = 1,
-                                        .clk_cfg = LEDC_AUTO_CLK,
-                                        .deconfigure = false};
+    if (len < 2)
+        return;
 
-    ledc_timer_config(&timer_config);
+    // Extract the raw packet into a string so we can debug exactly what the USB adapter sent
+    char hex_str[100] = {0};
+    for(int i = 0; i < 32; i++) {
+        sprintf(&hex_str[i * 3], "%02X ", data[i]);
+    }
 
-    ledc_channel_config_t channel_config = {.gpio_num = (gpio_num_t)CONFIG_BLINK_GPIO,
-                                            .speed_mode = LEDC_LOW_SPEED_MODE,
-                                            .channel = LEDC_CHANNEL_0,
-                                            .intr_type = LEDC_INTR_DISABLE,
-                                            .timer_sel = LEDC_TIMER_0,
-                                            .duty = 1UL << (timer_config.duty_resolution - 1),
-                                            .hpoint = 0,
-                                            .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
-                                            .flags = {.output_invert = 0}};
+    uint8_t payload_len = data[0];
+    // Enforce maximum 26 bytes to leave room for the 4-byte "ACK:" prefix
+    if (payload_len == 0 || payload_len > 26)
+    {
+        ESP_LOGW("RADIO", "Invalid Packet Length: %d. Raw Dump: %s", payload_len, hex_str);
+        return;
+    }
 
-    ledc_channel_config(&channel_config);
-    vTaskDelete(nullptr);
+    // Verify Checksum
+    uint8_t checksum = payload_len;
+    for (uint8_t i = 0; i < payload_len; i++)
+    {
+        checksum ^= data[1 + i];
+    }
+
+    uint8_t received_checksum = data[1 + payload_len];
+    if (checksum != received_checksum)
+    {
+        ESP_LOGW("RADIO", "Checksum mismatch! Expected: 0x%02X, Got: 0x%02X", checksum, received_checksum);
+        return;
+    }
+
+    // Extract payload securely
+    char payload_str[27] = {0};  // 26 chars + 1 null terminator
+    memcpy(payload_str, &data[1], payload_len);
+    ESP_LOGI("RADIO", "[RX] Received Valid Packet: %s", payload_str);
+
+    // Handle generic commands matching string contents
+    if (strcmp(payload_str, "f") == 0)
+        ESP_LOGI("RADIO", "Action Triggered: FORWARD");
+    else if (strcmp(payload_str, "b") == 0)
+        ESP_LOGI("RADIO", "Action Triggered: BACKWARD");
+    else if (strcmp(payload_str, "l") == 0)
+        ESP_LOGI("RADIO", "Action Triggered: LEFT");
+    else if (strcmp(payload_str, "r") == 0)
+        ESP_LOGI("RADIO", "Action Triggered: RIGHT");
+    else if (strcmp(payload_str, "s") == 0)
+        ESP_LOGI("RADIO", "Action Triggered: STOP");
+    else if (strcmp(payload_str, "led_on") == 0)
+        ESP_LOGI("RADIO", "Action Triggered: LED_ON");
+
+    // Create ACK Packet using standard Protocol structure
+    char ack_msg[31];  // "ACK:" (4) + payload (up to 26) + null terminator (1) = 31 bytes
+    snprintf(ack_msg, sizeof(ack_msg), "ACK:%s", payload_str);
+
+    uint8_t ack_packet[32] = {0};
+    uint8_t ack_len = strlen(ack_msg);
+    ack_packet[0] = ack_len;
+
+    uint8_t ack_checksum = ack_len;
+    for (uint8_t i = 0; i < ack_len; i++)
+    {
+        ack_packet[1 + i] = (uint8_t)ack_msg[i];
+        ack_checksum ^= ack_packet[1 + i];
+    }
+    ack_packet[1 + ack_len] = ack_checksum;
+
+    radio.send_data(ack_packet, 32);
+    ESP_LOGI("RADIO", "[TX] Queued ACK for: %s", payload_str);
 }
 
 extern "C" void app_main(void)
@@ -112,6 +192,9 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Starting Oxebots SSL Firmware...");
 
     ESP_ERROR_CHECK(NVSManager::init());
+
+    // Mandatory ISR setup required by FreeRTOS GPIO Interrupts
+    gpio_install_isr_service(0);
 
     setup_i2c();
 
@@ -123,9 +206,19 @@ extern "C" void app_main(void)
 
     WheelStateEstimator & w_state_estimator = WheelStateEstimator::get_instance();
 
-    // Tie the central NVSManager locks to the wheel estimator's task to safely halt the ADC during flash commits
     NVSManager::set_adc_callbacks([&w_state_estimator]() { w_state_estimator.suspend(); },
                                   [&w_state_estimator]() { w_state_estimator.resume(); });
+
+    // Initialize Radio Module
+    ESP_LOGI(TAG, "Initializing Radio Communication...");
+    if (radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK)
+    {
+        radio.start(handle_radio_data);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Radio initialization failed! Proceeding without radio link.");
+    }
 
     ESP_LOGI(TAG, "Initializing Wheel State Estimator...");
     ESP_ERROR_CHECK(w_state_estimator.init(wheel_adc_channels, ADC_ATTEN_DB_12));
@@ -134,18 +227,15 @@ extern "C" void app_main(void)
     imu.init();
     struct SharedData local_data;
 
-    xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
+    // xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
     xTaskCreate(imu_update_task, "IMU Update", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
 
     ESP_LOGI(TAG, "Starting sensor calibration check...");
 
-    // Wheel Calibration
-    // w_state_estimator.configure_encoder_i2c(0);  // one-time config
     ESP_LOGI(TAG, "Checking wheel encoders...");
     w_state_estimator.load_or_calibrate(5000);
 
-    // Magnetometer Calibration
-    ESP_LOGI(TAG, "Checking magnetometer calibration...");
+    // ESP_LOGI(TAG, "Checking magnetometer calibration...");
 
     if (imu.load_or_calibrate_mag(10) != ESP_OK)
         ESP_LOGE(TAG, "Magnetometer calibration failed or timed out!");
@@ -184,7 +274,7 @@ extern "C" void app_main(void)
         printf(">m.y:%.2f\n", local_data.my);
         printf(">m.z:%.2f\n", local_data.mz);
         printf(">m.a:%.2f\n", local_data.azimuth);
-        printf("Mag dir: %s\n", local_data.mag_dir);
+        printf(">m.dir: %s\n", local_data.mag_dir);
 
         printf(">pose.roll:%.2f\n", local_data.roll);
         printf(">pose.pitch:%.2f\n", local_data.pitch);
@@ -197,7 +287,7 @@ extern "C" void app_main(void)
         printf(">3D|IMU:R:%.4f:%.4f:%.4f:S:cube:W:3:H:1.5:D:4:C:grey|g\n",
                rad_roll,   // X Rotation
                rad_pitch,  // Y Rotation
-               rad_yaw    // Z Rotation
+               rad_yaw     // Z Rotation
         );
 
         vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));
