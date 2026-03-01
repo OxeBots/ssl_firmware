@@ -1,31 +1,38 @@
 import argparse
 import sys
-import threading
 import time
+import platform
+import os
+import subprocess
+
+try:
+    import ssl_robot_protocol_bp
+except ImportError:
+    print("Generating Python bitproto module...")
+    try:
+        subprocess.run(
+            ["bitproto", "py", "proto/ssl_robot_protocol.bitproto", "."], check=True
+        )
+        import ssl_robot_protocol_bp
+    except Exception as e:
+        print(
+            f"Failed to generate bitproto python module. Ensure bitproto is installed: pip install bitproto. Error: {e}"
+        )
+        sys.exit(1)
 
 import serial
 import serial.tools.list_ports
 
 
-# Added: Class to hold ANSI color codes
 class Colors:
     RED = "\033[91m"
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
     BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
     BOLD = "\033[1m"
     RESET = "\033[0m"
-
-
-# try to import pynput
-try:
-    from pynput import keyboard
-except ImportError:
-    print(f"{Colors.RED}Error: 'pynput' library is missing.{Colors.RESET}")
-    print(
-        f"Please run: {Colors.YELLOW}pip install pynput{Colors.RESET} or {Colors.YELLOW}sudo apt install python3-pynput{Colors.RESET}"
-    )
-    sys.exit(1)
 
 
 class nRF24L01_Controller:
@@ -45,9 +52,7 @@ class nRF24L01_Controller:
         )
 
         if self.ser.is_open:
-            print(
-                f"{Colors.GREEN}Connected to {port} at {baudrate} baud{Colors.RESET}"
-            )
+            print(f"{Colors.GREEN}Connected to {port} at {baudrate} baud{Colors.RESET}")
 
     @staticmethod
     def auto_connect(baudrate=115200, timeout=2):
@@ -67,11 +72,8 @@ class nRF24L01_Controller:
         ports = serial.tools.list_ports.comports()
         for port in ports:
             if port.vid == TARGET_VID and port.pid == TARGET_PID:
-                print(
-                    f"{Colors.GREEN}Found device at: {port.device}{Colors.RESET}"
-                )
+                print(f"{Colors.GREEN}Found device at: {port.device}{Colors.RESET}")
                 try:
-                    # Return a new instance of this class
                     return nRF24L01_Controller(
                         port=port.device, baudrate=baudrate, timeout=timeout
                     )
@@ -83,9 +85,6 @@ class nRF24L01_Controller:
 
         print(
             f"\n{Colors.RED}Error: Could not find nRF24L01 USB adapter.{Colors.RESET}"
-        )
-        print(
-            f"{Colors.RED}Please ensure the device is plugged in.{Colors.RESET}"
         )
         return None
 
@@ -130,24 +129,14 @@ class nRF24L01_Controller:
 
         return text
 
-    def send_command(self, command, wait_time=0.1):
-        """Send serial command and return the response"""
-        self.ser.reset_input_buffer()
-        self.ser.write((command + "\r\n").encode("ascii"))
-        time.sleep(wait_time)
-        response = self.ser.read(self.ser.in_waiting)
-        return response.decode("ascii", errors="ignore")
-
     def send_at_command(self, command, wait_time=0.1):
         """Send AT command and read response"""
         print(f"{Colors.BLUE}>>> {command}{Colors.RESET}")
 
-        # Clear buffer and send command
         self.ser.reset_input_buffer()
         self.ser.write((command + "\r\n").encode("ascii"))
         self.ser.flush()
 
-        # Wait and read response
         time.sleep(wait_time)
 
         response = b""
@@ -221,44 +210,20 @@ class nRF24L01_Controller:
     def set_receive_address(self, address_bytes):
         """Set receive pipe address using AT+RXA command"""
         if len(address_bytes) != 5:
-            print(
-                f"{Colors.RED}Error: Address must be exactly 5 bytes{Colors.RESET}"
-            )
             return False
 
         addr_str = ",".join([f"0x{byte:02X}" for byte in address_bytes])
         response = self.send_at_command(f"AT+RXA={addr_str}", wait_time=3)
-
-        if "successful" in response.lower():
-            print(
-                f"{Colors.GREEN}✓ Receive address set to {[hex(x) for x in address_bytes]}{Colors.RESET}"
-            )
-            return True
-        else:
-            print(f"{Colors.RED}✗ Failed to set receive address{Colors.RESET}")
-            return False
+        return "successful" in response.lower()
 
     def set_transmit_address(self, address_bytes):
         """Set transmit pipe address using AT+TXA command"""
         if len(address_bytes) != 5:
-            print(
-                f"{Colors.RED}Error: Address must be exactly 5 bytes{Colors.RESET}"
-            )
             return False
 
         addr_str = ",".join([f"0x{byte:02X}" for byte in address_bytes])
         response = self.send_at_command(f"AT+TXA={addr_str}", wait_time=3)
-
-        if "successful" in response.lower():
-            print(
-                f"{Colors.GREEN}✓ Transmit address set to {[hex(x) for x in address_bytes]}{Colors.RESET}"
-            )
-            return True
-        else:
-            print(
-                f"{Colors.RED}✗ Failed to set transmit address{Colors.RESET}"
-            )
-            return False
+        return "successful" in response.lower()
 
     def set_addresses(self, rx_address, tx_address):
         """Set both receive and transmit addresses"""
@@ -270,58 +235,39 @@ class nRF24L01_Controller:
             f"{Colors.BLUE}  TX (send to): {[hex(x) for x in tx_address]}{Colors.RESET}"
         )
 
-        success1 = self.set_receive_address(rx_address)
-        success2 = self.set_transmit_address(tx_address)
-
-        return success1 and success2
+        return self.set_receive_address(rx_address) and self.set_transmit_address(
+            tx_address
+        )
 
     def set_frequency(self, frequency_ghz):
         """Set operating frequency in GHz (e.g., 2.404 for 2.404GHz)"""
         if not 2.400 <= frequency_ghz <= 2.525:
-            print(
-                f"{Colors.RED}Error: Frequency must be between 2.400 and 2.525 GHz{Colors.RESET}"
-            )
             return False
 
-        # Format frequency to always have 3 decimal places
         formatted_freq = f"{frequency_ghz:.3f}"
-        print(
-            f"\n{Colors.BLUE}Setting frequency to {formatted_freq} GHz{Colors.RESET}"
-        )
-
+        print(f"\n{Colors.BLUE}Setting frequency to {formatted_freq} GHz{Colors.RESET}")
         response = self.send_at_command(f"AT+FREQ={formatted_freq}")
-
-        if "successful" in response.lower():
-            print(
-                f"{Colors.GREEN}✓ Frequency set to {formatted_freq} GHz{Colors.RESET}"
-            )
-            return True
-        else:
-            print(f"{Colors.RED}✗ Frequency change failed{Colors.RESET}")
-            return False
+        return "successful" in response.lower()
 
     def set_data_rate(self, rate):
         """Set data rate (1=250Kbps, 2=1Mbps, 3=2Mbps)"""
         if rate not in [1, 2, 3]:
-            print(
-                f"{Colors.RED}Error: Data rate must be 1 (250Kbps), 2 (1Mbps), or 3 (2Mbps){Colors.RESET}"
-            )
             return False
 
         rates = {1: "250Kbps", 2: "1Mbps", 3: "2Mbps"}
-        print(
-            f"\n{Colors.BLUE}Setting data rate to {rates[rate]}{Colors.RESET}"
-        )
-
+        print(f"\n{Colors.BLUE}Setting data rate to {rates[rate]}{Colors.RESET}")
         response = self.send_at_command(f"AT+RATE={rate}")
-        if "successful" in response.lower():
-            print(
-                f"{Colors.GREEN}✓ Data rate set to {rates[rate]}{Colors.RESET}"
-            )
-            return True
-        else:
-            print(f"{Colors.RED}✗ Data rate change failed{Colors.RESET}")
-            return False
+        return "successful" in response.lower()
+
+    def send_data(self, command_bytes):
+        """
+        Send raw bitproto bytes.
+        DO NOT ZERO PAD! The dongle automatically counts our UART bytes,
+        prepends the length inside the RF packet, and fires it over the air!
+        """
+        self.ser.reset_input_buffer()
+        self.ser.write(command_bytes)
+        self.ser.flush()
 
     def set_baudrate(self, new_baud):
         """Change baud rate (1-7 for different rates)"""
@@ -355,62 +301,52 @@ class nRF24L01_Controller:
             print(f"{Colors.RED}✗ Baud rate change failed{Colors.RESET}")
             return False
 
-    def send_data(self, data):
-        """Send data through wireless serial"""
-        if len(data) > 31:
-            data = data[:31]
-            print(
-                f"{Colors.YELLOW}Note: Data truncated to 31 bytes{Colors.RESET}"
-            )
-        self.ser.write(data.encode())
-
     def receive_data(self, timeout=0.5):
-        """Receive data with proper parsing"""
-        print(
-            f"\n{Colors.BLUE}Listening for data ({timeout}s)...{Colors.RESET}"
-        )
+        """
+        Receive exact length of Telemetry packet.
+        The USB dongle strips its internal length byte and pushes raw payload to us.
+        """
         start_time = time.time()
+        buffer = bytearray()
+
+        expected_len = ssl_robot_protocol_bp.RobotTelemetry.BYTES_LENGTH
 
         while time.time() - start_time < timeout:
             if self.ser.in_waiting > 0:
-                received = self.ser.read(self.ser.in_waiting)
+                chunk = self.ser.read(self.ser.in_waiting)
+                buffer.extend(chunk)
 
-                # Parse data (first byte is length)
-                if len(received) >= 1:
-                    length_byte = received[0]
+                # USB DONGLE QUIRK:
+                # The adapter spits out a 6-byte success status code (02 00 00 00 00 00)
+                # immediately after it finishes transmitting our command. We MUST strip it!
+                while len(buffer) >= 6 and buffer.startswith(
+                    b"\x02\x00\x00\x00\x00\x00"
+                ):
+                    buffer = buffer[6:]
 
-                    if 0 < length_byte <= len(received) - 1:
-                        actual_data = received[1 : 1 + length_byte]
-                        try:
-                            decoded = actual_data.decode("ascii")
-                            print(
-                                f"{Colors.GREEN}✓ Received: '{decoded}' ({length_byte} bytes){Colors.RESET}"
-                            )
-                            return decoded
-                        except AttributeError:
-                            hex_str = " ".join(
-                                [f"{b:02x}" for b in actual_data]
-                            )
-                            print(
-                                f"{Colors.GREEN}✓ Received (hex): {hex_str}{Colors.RESET}"
-                            )
-                            return hex_str
-                    else:
-                        try:
-                            decoded = received.decode("ascii", errors="ignore")
-                            print(
-                                f"{Colors.GREEN}✓ Received: '{decoded}'{Colors.RESET}"
-                            )
-                            return decoded
-                        except AttributeError:
-                            hex_str = " ".join([f"{b:02x}" for b in received])
-                            print(
-                                f"{Colors.GREEN}✓ Received (hex): {hex_str}{Colors.RESET}"
-                            )
-                            return hex_str
-                time.sleep(0.1)
+                if len(buffer) >= expected_len:
+                    packet = buffer[:expected_len]
+                    try:
+                        telemetry = ssl_robot_protocol_bp.RobotTelemetry()
+                        telemetry.decode(packet)
+                        print(
+                            f"\r{Colors.GREEN}✓ [RX Telemetry] Timestamp: {telemetry.timestamp} | Batt: {telemetry.battery_percentage}% | Kicker: {telemetry.kicker_voltage / 100:.2f}V{Colors.RESET}"
+                            + " " * 15
+                        )
+                        return telemetry
+                    except Exception as e:
+                        print(
+                            f"\n{Colors.RED}[DEBUG RX] Decode error: {e}{Colors.RESET}"
+                        )
 
-        print(f"{Colors.YELLOW}✗ No data received{Colors.RESET}")
+                    # Drop parsed bytes to resync
+                    buffer = buffer[expected_len:]
+            else:
+                time.sleep(0.01)
+
+        print(
+            f"\n{Colors.YELLOW}[DEBUG RX] Timeout reached. No valid telemetry decoded.{Colors.RESET}"
+        )
         return None
 
     def close(self):
@@ -420,92 +356,68 @@ class nRF24L01_Controller:
             print(f"{Colors.BLUE}Serial connection closed{Colors.RESET}")
 
 
-class RobotJoystick:
+class CLIController:
+    """A blocking, synchronous CLI command loop for testing the Bitproto protocol"""
+
     def __init__(self, device):
         self.device = device
-        self.last_command = None
         self.running = True
 
-        # Define key mappings
-        self.key_map = {
-            "w": "f",
-            "s": "b",
-            "a": "l",
-            "d": "r",
-            "l": "o",
-            "k": "k",
-            "space": "s",
-        }
-
-    def on_press(self, key):
-        try:
-            # Handle standard keys (a, w, s, d)
-            char = key.char.lower() if hasattr(key, "char") else None
-        except AttributeError:
-            char = None
-
-        # Handle special keys
-        if key == keyboard.Key.space:
-            command = "s"
-        elif key == keyboard.Key.esc:
-            print(f"\n{Colors.YELLOW}Exiting...{Colors.RESET}")
-            self.running = False
-            return False  # Stop listener
-        elif char in self.key_map:
-            command = self.key_map[char]
-        else:
-            return  # Ignore unmapped keys
-
-        # Only send if the command changed (prevents flooding serial buffer)
-        if command != self.last_command:
-            print(
-                f"\r{Colors.BLUE}Sending: {command: <15}{Colors.RESET}",
-                end="",
-                flush=True,
-            )
-            self.device.send_data(command)
-            self.last_command = command
-
-    def on_release(self, key):
-        # When W, A, S, or D are released, send stop.
-        # Note: This logic stops if ANY mapped key is released.
-        try:
-            char = key.char.lower() if hasattr(key, "char") else None
-        except AttributeError:
-            char = None
-
-        if char in ["w", "s", "a", "d"] and self.last_command in [
-            "f",
-            "b",
-            "l",
-            "r",
-        ]:
-            # Only stop if we are currently moving (don't stop if we just toggled LED)
-            print(
-                f"\r{Colors.YELLOW}Sending: stop           {Colors.RESET}",
-                end="",
-                flush=True,
-            )
-            self.device.send_data("s")
-            self.last_command = "stop"
-
     def start(self):
-        print(f"\n{Colors.BOLD}=== ROBOT JOYSTICK CONTROL ==={Colors.RESET}")
-        print(f" {Colors.GREEN}[W]{Colors.RESET} Forward")
-        print(f" {Colors.GREEN}[S]{Colors.RESET} Backward")
-        print(f" {Colors.GREEN}[A]{Colors.RESET} Left")
-        print(f" {Colors.GREEN}[D]{Colors.RESET} Right")
-        print(
-            f" {Colors.GREEN}[L]{Colors.RESET} LED On  / {Colors.GREEN}[K]{Colors.RESET} LED Off"
-        )
-        print(f" {Colors.RED}[ESC]{Colors.RESET} Quit")
-        print("=" * 40 + "\n")
+        print(f"\n{Colors.BOLD}=== ROBOT CLI CONTROL ==={Colors.RESET}")
+        print("Type a command like: {x: 1000, y: 500, kick: 128}")
+        print("Type 'q' or 'quit' to exit.")
+        print("=========================\n")
 
-        # Collect events until released
-        with keyboard.Listener(
-            on_press=self.on_press, on_release=self.on_release
-        ) as listener:
-            listener.join()
+        while self.running:
+            try:
+                cmd_input = input(f"\n{Colors.BLUE}Cmd > {Colors.RESET}").strip()
+                if cmd_input.lower() in ["q", "quit", "exit"]:
+                    break
+                if not cmd_input:
+                    continue
+
+                cmd_input = cmd_input.strip("{} ")
+                pairs = [p.strip() for p in cmd_input.split(",")]
+
+                x, y, kick = 0, 0, 0
+                for p in pairs:
+                    if ":" in p:
+                        k, v = p.split(":", 1)
+                        k = k.strip(" \"'")
+                        if k == "x":
+                            x = int(v.strip())
+                        elif k == "y":
+                            y = int(v.strip())
+                        elif k == "kick":
+                            kick = int(v.strip())
+
+                cmd = ssl_robot_protocol_bp.RobotCommand()
+
+                # Keep timestamp under 32-bit limits
+                timestamp_val = int(time.time() * 1000) % (2**31 - 1)
+                cmd.timestamp = timestamp_val
+                cmd.target_pose.x = x
+                cmd.target_pose.y = y
+                cmd.kick_velocity = kick
+
+                encoded = cmd.encode()
+
+                print(
+                    f"{Colors.CYAN}Sending -> Timestamp={timestamp_val}, x={x}, y={y}, kick={kick} {Colors.RESET}",
+                    end="",
+                    flush=True,
+                )
+
+                self.device.send_data(encoded)
+
+                # Await a response from the robot firmware via NRF24 USB dongle
+                self.device.receive_data(timeout=0.5)
+
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print(f"{Colors.RED}Error: {e}{Colors.RESET}")
 
 
 def main():
@@ -514,11 +426,7 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "-p",
-        "--port",
-        type=str,
-        default="auto",
-        help="Serial port device. Use 'auto' to auto-detect by VID/PID.",
+        "-p", "--port", type=str, default="auto", help="Serial port device."
     )
     parser.add_argument(
         "-b", "--baud", type=int, default=115200, help="Serial baud rate."
@@ -528,7 +436,7 @@ def main():
         "--freq",
         type=float,
         default=2.401,
-        help="Communication frequency in GHz (e.g., 2.401 to 2.525)",
+        help="Communication frequency in GHz.",
     )
     parser.add_argument(
         "-r",
@@ -538,20 +446,19 @@ def main():
         choices=[1, 2, 3],
         help="Air data rate: 1 (250Kbps), 2 (1Mbps), 3 (2Mbps)",
     )
-
     parser.add_argument(
-        "-a",
-        "--address",
-        type=str,
-        default="ESP32",
-        help="5-byte address string for the target device (e.g., 'ESP32').",
+        "-a", "--address", type=str, default="ESP32", help="5-byte address string."
+    )
+    parser.add_argument(
+        "--skip-config",
+        action="store_true",
+        help="Skip sending AT config commands to the USB adapter.",
     )
 
     args = parser.parse_args()
 
     device = None
     try:
-        # Initialize the controller
         print(
             f"{Colors.BOLD}=== nRF24L01 Wireless Module Controller ==={Colors.RESET}\n"
         )
@@ -559,49 +466,33 @@ def main():
         if args.port.lower() == "auto":
             device = nRF24L01_Controller.auto_connect(baudrate=args.baud)
         else:
-            # Connect to the specified port
-            print(
-                f"{Colors.BLUE}Attempting to connect to specified port: {args.port}{Colors.RESET}"
-            )
             device = nRF24L01_Controller(port=args.port, baudrate=args.baud)
 
-        # Exit if connection failed
         if not device:
             return
 
-        # Configure the module using values from argparse
-        print(f"\n{Colors.BOLD}CONFIGURING MODULE:{Colors.RESET}")
+        if not args.skip_config:
+            print(f"\n{Colors.BOLD}CONFIGURING MODULE:{Colors.RESET}")
+            if len(args.address) != 5:
+                print(
+                    f"{Colors.RED}Error: Address must be exactly 5 characters long.{Colors.RESET}"
+                )
+                return
 
-        if len(args.address) != 5:
+            address_bytes = list(args.address.encode("ascii"))
+            rx_address_bytes = [int(ord(c)) for c in "ADMIN"]
+            device.set_addresses(rx_address_bytes, address_bytes)
+
+            esp32_freq_ghz = 2.400 + (76 * 0.001)
+            device.set_frequency(esp32_freq_ghz)
+            device.set_data_rate(args.rate)
+            device.get_system_info()
+        else:
             print(
-                f"{Colors.RED}Error: Address must be exact  ly 5 characters long.{Colors.RESET}"
+                f"\n{Colors.YELLOW}Skipping USB Adapter AT-Configuration...{Colors.RESET}"
             )
-            return
 
-        # Convert the address string to a list of byte values (integers)
-        address_bytes = list(args.address.encode("ascii"))
-
-        # Set both RX (adapter's) and TX (target's) addresses
-        # We set RX to something different so it doesn't just listen to itself
-        rx_address_bytes = [int(ord(c)) for c in "ADMIN"]
-        device.set_addresses(rx_address_bytes, address_bytes)
-
-        # Use arguments for frequency and rate
-        # NOTE: The firmware is hardcoded to channel 76 (2.476 GHz)
-        # We must match that here.
-        esp32_freq_ghz = 2.400 + (76 * 0.001)  # Channel 76
-        print(
-            f"{Colors.YELLOW}Warning: Overriding frequency to {esp32_freq_ghz:.3f} GHz to match ESP32 channel 76.{Colors.RESET}"
-        )
-        device.set_frequency(esp32_freq_ghz)
-        device.set_data_rate(args.rate)
-
-        # Verify configuration
-        print(f"\n{Colors.BOLD}UPDATED MODULE STATUS:{Colors.RESET}")
-        device.get_system_info()
-
-        # Start Joystick Loop
-        joystick = RobotJoystick(device)
+        joystick = CLIController(device)
         joystick.start()
 
     except KeyboardInterrupt:

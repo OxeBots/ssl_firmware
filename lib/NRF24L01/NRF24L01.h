@@ -15,8 +15,9 @@
 #include <cstring>
 
 #include "mirf.h"
+#include "ssl_robot_protocol_bp.h"
 
-typedef void (*data_received_callback_t)(uint8_t * data, uint8_t len);
+typedef void (*data_received_callback_t)(const RobotCommand * cmd);
 
 class NRF24L01
 {
@@ -26,7 +27,7 @@ class NRF24L01
 
     esp_err_t init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr);
     bool start(data_received_callback_t callback);
-    void send_data(const uint8_t * data, uint8_t len);
+    void send_telemetry(const RobotTelemetry * telemetry);
 
    private:
     static void IRAM_ATTR isr_handler(void * dev);

@@ -14,13 +14,13 @@
 #include "NVSManager.h"
 #include "mirf.h"
 #include "omni_robot.h"
+#include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "MAIN";
 
 i2c_master_bus_handle_t bus_handle;
 
-// Tasks Configuration
 #define IMU_TASK_RATE_HZ 100
 #define SERIAL_PRINT_RATE_HZ 20
 
@@ -28,7 +28,6 @@ IMUGY85 imu;
 NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
 SemaphoreHandle_t data_mutex;
 
-// Shared Data Container
 struct SharedData
 {
     double ax, ay, az;
@@ -111,80 +110,32 @@ void imu_update_task(void * pvParameters)
 // }
 
 // -------------------------------------------------------------
-// NRF24L01 Protocol Callback
-// Protocol Frame: [Length Byte] [Payload (N Bytes)] [Checksum]
-// Checksum Rule: Length ^ (Payload[0] ^ Payload[1] ... Payload[N])
+// NRF24L01 Protocol Callback via Bitproto
 // -------------------------------------------------------------
-void handle_radio_data(uint8_t * data, uint8_t len)
+void handle_radio_command(const RobotCommand * cmd)
 {
-    if (len < 2)
-        return;
+    ESP_LOGI("RADIO", "Cmd Received. X=%d Y=%d Theta=%d. Kick=%d. TS=%lu", cmd->target_pose.x, cmd->target_pose.y,
+             cmd->target_pose.angle, cmd->kick_velocity, cmd->timestamp);
 
-    // Extract the raw packet into a string so we can debug exactly what the USB adapter sent
-    char hex_str[100] = {0};
-    for(int i = 0; i < 32; i++) {
-        sprintf(&hex_str[i * 3], "%02X ", data[i]);
-    }
+    RobotTelemetry tel;
+    memset(&tel, 0, sizeof(RobotTelemetry));
 
-    uint8_t payload_len = data[0];
-    // Enforce maximum 26 bytes to leave room for the 4-byte "ACK:" prefix
-    if (payload_len == 0 || payload_len > 26)
-    {
-        ESP_LOGW("RADIO", "Invalid Packet Length: %d. Raw Dump: %s", payload_len, hex_str);
-        return;
-    }
+    // Echo back the timestamp so we can verify perfect byte-alignment on the PC side
+    tel.timestamp = cmd->timestamp;
 
-    // Verify Checksum
-    uint8_t checksum = payload_len;
-    for (uint8_t i = 0; i < payload_len; i++)
-    {
-        checksum ^= data[1 + i];
-    }
+    tel.robot_pose.x = 0;
+    tel.robot_pose.y = 0;
+    tel.robot_pose.angle = static_cast<int16_t>(imu_data.yaw * 100);
 
-    uint8_t received_checksum = data[1 + payload_len];
-    if (checksum != received_checksum)
-    {
-        ESP_LOGW("RADIO", "Checksum mismatch! Expected: 0x%02X, Got: 0x%02X", checksum, received_checksum);
-        return;
-    }
+    tel.battery_percentage = 95;
+    tel.kicker_voltage = 1650;
+    tel.error_flags = 0;
+    tel.uptime_minutes = (xTaskGetTickCount() * portTICK_PERIOD_MS) / 60000;
 
-    // Extract payload securely
-    char payload_str[27] = {0};  // 26 chars + 1 null terminator
-    memcpy(payload_str, &data[1], payload_len);
-    ESP_LOGI("RADIO", "[RX] Received Valid Packet: %s", payload_str);
+    // Small delay ensures CH340 adapter switches fully back to RX mode
+    vTaskDelay(pdMS_TO_TICKS(2));
 
-    // Handle generic commands matching string contents
-    if (strcmp(payload_str, "f") == 0)
-        ESP_LOGI("RADIO", "Action Triggered: FORWARD");
-    else if (strcmp(payload_str, "b") == 0)
-        ESP_LOGI("RADIO", "Action Triggered: BACKWARD");
-    else if (strcmp(payload_str, "l") == 0)
-        ESP_LOGI("RADIO", "Action Triggered: LEFT");
-    else if (strcmp(payload_str, "r") == 0)
-        ESP_LOGI("RADIO", "Action Triggered: RIGHT");
-    else if (strcmp(payload_str, "s") == 0)
-        ESP_LOGI("RADIO", "Action Triggered: STOP");
-    else if (strcmp(payload_str, "led_on") == 0)
-        ESP_LOGI("RADIO", "Action Triggered: LED_ON");
-
-    // Create ACK Packet using standard Protocol structure
-    char ack_msg[31];  // "ACK:" (4) + payload (up to 26) + null terminator (1) = 31 bytes
-    snprintf(ack_msg, sizeof(ack_msg), "ACK:%s", payload_str);
-
-    uint8_t ack_packet[32] = {0};
-    uint8_t ack_len = strlen(ack_msg);
-    ack_packet[0] = ack_len;
-
-    uint8_t ack_checksum = ack_len;
-    for (uint8_t i = 0; i < ack_len; i++)
-    {
-        ack_packet[1 + i] = (uint8_t)ack_msg[i];
-        ack_checksum ^= ack_packet[1 + i];
-    }
-    ack_packet[1 + ack_len] = ack_checksum;
-
-    radio.send_data(ack_packet, 32);
-    ESP_LOGI("RADIO", "[TX] Queued ACK for: %s", payload_str);
+    radio.send_telemetry(&tel);
 }
 
 extern "C" void app_main(void)
@@ -205,15 +156,13 @@ extern "C" void app_main(void)
       static_cast<adc_channel_t>(CONFIG_MOTOR_BR_ENC_CHANNEL), static_cast<adc_channel_t>(CONFIG_MOTOR_FR_ENC_CHANNEL)};
 
     WheelStateEstimator & w_state_estimator = WheelStateEstimator::get_instance();
-
     NVSManager::set_adc_callbacks([&w_state_estimator]() { w_state_estimator.suspend(); },
                                   [&w_state_estimator]() { w_state_estimator.resume(); });
 
-    // Initialize Radio Module
     ESP_LOGI(TAG, "Initializing Radio Communication...");
     if (radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK)
     {
-        radio.start(handle_radio_data);
+        radio.start(handle_radio_command);
     }
     else
     {

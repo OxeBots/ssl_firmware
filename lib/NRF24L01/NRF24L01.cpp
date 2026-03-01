@@ -12,7 +12,12 @@ static const char * TAG = "NRF24L01";
  * @param irq The GPIO pin number connected to the NRF24L01's IRQ pin.
  */
 NRF24L01::NRF24L01(gpio_num_t irq)
-: m_irq_pin(irq), m_task_handle(NULL), m_interrupt_queue(NULL), m_tx_queue(NULL), m_on_data_received(nullptr), m_payload_size(32)
+: m_irq_pin(irq),
+  m_task_handle(NULL),
+  m_interrupt_queue(NULL),
+  m_tx_queue(NULL),
+  m_on_data_received(nullptr),
+  m_payload_size(32)
 {
     memset(&m_dev, 0, sizeof(NRF24_t));
 }
@@ -22,9 +27,12 @@ NRF24L01::NRF24L01(gpio_num_t irq)
  */
 NRF24L01::~NRF24L01()
 {
-    if (m_task_handle) vTaskDelete(m_task_handle);
-    if (m_interrupt_queue) vQueueDelete(m_interrupt_queue);
-    if (m_tx_queue) vQueueDelete(m_tx_queue);
+    if (m_task_handle)
+        vTaskDelete(m_task_handle);
+    if (m_interrupt_queue)
+        vQueueDelete(m_interrupt_queue);
+    if (m_tx_queue)
+        vQueueDelete(m_tx_queue);
 
     // Note: ISR handler removal is managed by main_esp32.cpp
     // which calls gpio_uninstall_isr_service()
@@ -33,7 +41,7 @@ NRF24L01::~NRF24L01()
 }
 
 /**
- * @brief Initializes the NRF24L01 module, forcibly overriding default pins.
+ * @brief Initializes the NRF24L01 module.
  * @param channel RF Channel (0-125).
  * @param payload_size The fixed payload size (1-32 bytes).
  * @param tx_addr The 5-byte transmit address.
@@ -44,16 +52,13 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
 {
     m_payload_size = payload_size;
 
-    // Give the module time to stabilize voltage before sending SPI commands
-    
     Nrf24_init(&m_dev);
-
     vTaskDelay(pdMS_TO_TICKS(100));
 
     Nrf24_config(&m_dev, channel, m_payload_size);
 
     ESP_LOGI(TAG, "Setting Data Rate to 250Kbps");
-    Nrf24_SetSpeedDataRates(&m_dev, 2); 
+    Nrf24_SetSpeedDataRates(&m_dev, 2);
 
     esp_err_t ret = Nrf24_setRADDR(&m_dev, (uint8_t *)rx_addr);
     if (ret != ESP_OK)
@@ -73,18 +78,19 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
         ESP_LOGE(TAG, "Failed to set TADDR/RADDR_P0. NRF24 not found?");
         return ret;
     }
-    
+
     ESP_LOGI(TAG, "Using Pipe 0. RX_ADDR_P0 and TX_ADDR set to: %s", tx_addr);
 
-    Nrf24_setRetransmitCount(&m_dev, CONFIG_RETRANSMIT_COUNT); 
-    Nrf24_setRetransmitDelay(&m_dev, CONFIG_RETRANSMIT_DELAY);   
+    Nrf24_setRetransmitCount(&m_dev, CONFIG_RETRANSMIT_COUNT);
+    Nrf24_setRetransmitDelay(&m_dev, CONFIG_RETRANSMIT_DELAY);
 
     ESP_LOGI(TAG, "NRF24L01 Receiver Initialized:");
     Nrf24_printDetails(&m_dev);
 
     m_interrupt_queue = xQueueCreate(10, sizeof(uint32_t));
     m_tx_queue = xQueueCreate(10, m_payload_size * sizeof(uint8_t));
-    if (m_interrupt_queue == NULL || m_tx_queue == NULL) return ESP_FAIL;
+    if (m_interrupt_queue == NULL || m_tx_queue == NULL)
+        return ESP_FAIL;
 
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
@@ -94,11 +100,13 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
 
     ret = gpio_config(&io_conf);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK)
+        return ret;
 
     // Must be pre-initialized by gpio_install_isr_service() in main.cpp
     ret = gpio_isr_handler_add(m_irq_pin, NRF24L01::isr_handler, (void *)this);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK)
+        return ret;
 
     return ESP_OK;
 }
@@ -110,10 +118,12 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
  */
 bool NRF24L01::start(data_received_callback_t callback)
 {
-    if (!callback) return false;
+    if (!callback)
+        return false;
     m_on_data_received = callback;
 
-    BaseType_t task_created = xTaskCreate(&NRF24L01::task_wrapper, "nrf24_receiver_task", 4096, this, 5, &m_task_handle);
+    BaseType_t task_created =
+      xTaskCreate(&NRF24L01::task_wrapper, "nrf24_receiver_task", 4096, this, 5, &m_task_handle);
     return task_created == pdPASS;
 }
 
@@ -142,7 +152,7 @@ void NRF24L01::receiver_task()
 {
     ESP_LOGI(TAG, "Receiver task started. Listening for data...");
     uint32_t io_num;
-    uint8_t buffer[32]; // Fixed to hardware maximum
+    uint8_t buffer[32];
     uint8_t tx_buffer[32];
 
     while (true)
@@ -151,20 +161,36 @@ void NRF24L01::receiver_task()
         {
             if (io_num == static_cast<uint32_t>(m_irq_pin))
             {
-                // Read all available packets
                 while (Nrf24_dataReady(&m_dev))
                 {
                     Nrf24_getData(&m_dev, buffer);
-                    if (m_on_data_received) m_on_data_received(buffer, m_payload_size);
+
+                    // The USB Dongle automatically prepends the payload length in byte 0.
+                    uint8_t payload_len = buffer[0];
+
+                    // Safely validate bounds before decoding
+                    if (payload_len > 0 && payload_len <= 31)
+                    {
+                        RobotCommand cmd;
+                        // Read bitproto payload starting AFTER the dongle's length byte
+                        DecodeRobotCommand(&cmd, &buffer[1]);
+                        if (m_on_data_received)
+                            m_on_data_received(&cmd);
+                    }
+                    else
+                    {
+                        ESP_LOGW(TAG, "Dropped packet. Invalid dongle length byte: %d", payload_len);
+                    }
                 }
 
                 // Send queued responses
                 while (xQueueReceive(m_tx_queue, &tx_buffer, 0))
                 {
                     Nrf24_send(&m_dev, tx_buffer);
-                    if (!Nrf24_isSend(&m_dev, 100)) {
-                        ESP_LOGW(TAG, "Pong-back failed / No ACK received.");
-                    }
+                    if (!Nrf24_isSend(&m_dev, 100))
+                        ESP_LOGW(TAG, "Telemetry sent (No Auto-ACK from USB adapter)");
+                    else
+                        ESP_LOGI(TAG, "Telemetry sent and ACKed by USB adapter");
                 }
             }
         }
@@ -172,21 +198,19 @@ void NRF24L01::receiver_task()
 }
 
 /**
- * @brief Safely stages data for outbound radio transmission.
- * @param data Byte array representing the payload.
- * @param len Size of data. Max 32 bytes.
+ * @brief Safely stages bitproto Telemetry data for outbound radio transmission.
  */
-void NRF24L01::send_data(const uint8_t * data, uint8_t len)
+void NRF24L01::send_telemetry(const RobotTelemetry * telemetry)
 {
-    if (len > m_payload_size)
-    {
-        ESP_LOGE(TAG, "Data length (%d) exceeds configured payload size (%d). Dropping packet.", len, m_payload_size);
-        return;
-    }
-
-    // Always pad packet to expected m_payload_size to prevent FreeRTOS boundary reading bugs
     uint8_t safe_buffer[32] = {0};
-    memcpy(safe_buffer, data, len);
+    uint8_t bitproto_len = BYTES_LENGTH_ROBOT_TELEMETRY;
+
+    // We MUST prepend the length of the payload in byte 0.
+    // The dongle will strip this byte and push exactly this many bytes over UART.
+    safe_buffer[0] = bitproto_len;
+
+    // Encode Bitproto data starting at byte 1
+    EncodeRobotTelemetry((RobotTelemetry *)telemetry, &safe_buffer[1]);
 
     if (xQueueSend(m_tx_queue, safe_buffer, pdMS_TO_TICKS(100)) != pdPASS)
     {

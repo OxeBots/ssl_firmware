@@ -1,0 +1,61 @@
+// ssl_robot_protocol.bitproto
+// Robot receives RobotCommand, responds with RobotTelemetry.
+
+proto ssl_robot_protocol;
+
+// Timestamp in milliseconds (int32 covers ~24 days at 1ms resolution)
+type Timestamp = int32;
+
+// Scaled position: millimeters from origin (range ±32.767 m)
+type PositionScaled = int16;
+
+// Scaled angle: 0.01 degree per unit (range ±327.67°)
+type AngleScaled = int16;
+
+// Scaled linear velocity: 1 mm/s per unit (range ±32.767 m/s)
+type LinearVelocityScaled = int16;
+
+// Scaled angular velocity: 0.01 rad/s per unit (range ±327.67 rad/s)
+type AngularVelocityScaled = int16;
+
+// Pose message using scaled integers
+message Pose {
+    PositionScaled x = 1;                  // X coordinate (mm)
+    PositionScaled y = 2;                  // Y coordinate (mm)
+    AngleScaled angle = 3;                 // Orientation (0.01°)
+    LinearVelocityScaled x_v = 4;          // Linear velocity in X (mm/s)
+    LinearVelocityScaled y_v = 5;          // Linear velocity in Y (mm/s)
+    AngularVelocityScaled angular_vel = 6; // Angular velocity (0.01 rad/s)
+}
+
+// Command sent from base station to robot
+message RobotCommand {
+    Timestamp timestamp = 1;        // 4 bytes
+    Pose target_pose = 2;           // 6×2 = 12 bytes
+    Pose vision_pose = 3;           // 12 bytes
+    uint8 kick_velocity = 4;        // 1 byte, 0 = no kick, 1–255 = strength
+    // Total = 4+12+12+1 = 29 bytes (plus optional type byte = 30)
+}
+
+// Telemetry sent from robot back to base station
+message RobotTelemetry {
+    Timestamp timestamp = 1;         // 4 bytes
+    Pose robot_pose = 2;             // 12 bytes
+    uint8 battery_percentage = 3;    // 0–100%
+    uint16 kicker_voltage = 4;       // Voltage in 0.01V units (e.g., 1650 = 16.50 V)
+    uint16 error_flags = 5;          // Bitmask of error conditions (see below)
+    uint8 uptime_minutes = 6;        // Uptime in minutes (0–255)
+    // Total = 4+12+1+2+2+1 = 22 bytes (plus type byte = 23)
+}
+
+// Error flag definitions (for error_flags)
+// Bit 0 (0x0001): Communication loss with base station
+// Bit 1 (0x0002): IMU failure
+// Bit 2 (0x0004): TOF sensor failure
+// Bit 3 (0x0008): Battery undervoltage
+// Bit 4 (0x0010): Battery overvoltage
+// Bit 5 (0x0020): Kicker capacitor not charging
+// Bit 6 (0x0040): Encoder reading invalid (any encoder)
+// Bit 7 (0x0080): Temperature warning
+// Bits 8–11 (0x0100, 0x0200, 0x0400, 0x0800): Motor 0,1,2,3 fault respectively
+// Bits 12–15 reserved for future use

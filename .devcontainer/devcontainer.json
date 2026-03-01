@@ -20,7 +20,8 @@
                 "jbenden.c-cpp-flylint",
                 "jeff-hykin.better-cpp-syntax",
                 "nordic-semiconductor.nrf-kconfig",
-                "alexnesnes.teleplot"
+                "alexnesnes.teleplot",
+                "hit9.bitproto"
             ]
         }
     },
