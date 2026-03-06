@@ -1,13 +1,5 @@
 #include "mirf.h"
 
-#include <driver/gpio.h>
-#include <driver/spi_master.h>
-#include <string.h>
-
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
 #define TAG "NRF24"
 
 // SPI Stuff
@@ -574,6 +566,7 @@ void Nrf24_printDetails(NRF24_t * dev)
     uint8_t retransmit = Nrf24_getRetransmitDelay(dev);
     int16_t delay = (retransmit + 1) * 250;
     printf("Retransmit\t = %d us\n", delay);
+    printf("Retransmit Count = %d\n", Nrf24_getRetransmitCount(dev));
 }
 
 #define _BV(x) (1 << (x))

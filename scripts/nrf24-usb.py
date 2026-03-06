@@ -261,8 +261,7 @@ class nRF24L01_Controller:
 
     def send_data(self, command_bytes):
         """
-        Send raw bitproto bytes.
-        DO NOT ZERO PAD! The dongle automatically counts our UART bytes,
+        Send raw bytes. DO NOT ZERO PAD! The dongle automatically counts our UART bytes,
         prepends the length inside the RF packet, and fires it over the air!
         """
         self.ser.reset_input_buffer()
@@ -303,8 +302,8 @@ class nRF24L01_Controller:
 
     def receive_data(self, timeout=0.5):
         """
-        Receive exact length of Telemetry packet.
-        The USB dongle strips its internal length byte and pushes raw payload to us.
+        Receive exact length of the Telemetry packet.
+        The USB dongle strips its internal length byte and pushes the raw payload to UART.
         """
         start_time = time.time()
         buffer = bytearray()
@@ -342,7 +341,7 @@ class nRF24L01_Controller:
                     # Drop parsed bytes to resync
                     buffer = buffer[expected_len:]
             else:
-                time.sleep(0.01)
+                time.sleep(0.001)  # 1ms delay
 
         print(
             f"\n{Colors.YELLOW}[DEBUG RX] Timeout reached. No valid telemetry decoded.{Colors.RESET}"
@@ -411,8 +410,8 @@ class CLIController:
 
                 self.device.send_data(encoded)
 
-                # Await a response from the robot firmware via NRF24 USB dongle
-                self.device.receive_data(timeout=0.5)
+                # Await a response from the robot firmware via NRF24 USB dongle, on average it takes 20ms. We will wait up to 200ms to be safe.
+                self.device.receive_data(timeout=0.200)
 
             except KeyboardInterrupt:
                 break

@@ -114,13 +114,11 @@ void imu_update_task(void * pvParameters)
 // -------------------------------------------------------------
 void handle_radio_command(const RobotCommand * cmd)
 {
-    ESP_LOGI("RADIO", "Cmd Received. X=%d Y=%d Theta=%d. Kick=%d. TS=%lu", cmd->target_pose.x, cmd->target_pose.y,
-             cmd->target_pose.angle, cmd->kick_velocity, cmd->timestamp);
-
+    
     RobotTelemetry tel;
     memset(&tel, 0, sizeof(RobotTelemetry));
-
-    // Echo back the timestamp so we can verify perfect byte-alignment on the PC side
+    
+    // Echo back the timestamp so we can verify byte-alignment on the PC side
     tel.timestamp = cmd->timestamp;
 
     tel.robot_pose.x = 0;
@@ -131,10 +129,6 @@ void handle_radio_command(const RobotCommand * cmd)
     tel.kicker_voltage = 1650;
     tel.error_flags = 0;
     tel.uptime_minutes = (xTaskGetTickCount() * portTICK_PERIOD_MS) / 60000;
-
-    // Small delay ensures CH340 adapter switches fully back to RX mode
-    vTaskDelay(pdMS_TO_TICKS(2));
-
     radio.send_telemetry(&tel);
 }
 

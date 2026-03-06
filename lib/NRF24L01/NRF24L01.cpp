@@ -57,8 +57,15 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
 
     Nrf24_config(&m_dev, channel, m_payload_size);
 
-    ESP_LOGI(TAG, "Setting Data Rate to 250Kbps");
-    Nrf24_SetSpeedDataRates(&m_dev, 2);
+#ifdef CONFIG_RF_RATIO_250K
+    Nrf24_SetSpeedDataRates(&m_dev, RF24_250KBPS);
+#elif defined(CONFIG_RF_RATIO_1M)
+    Nrf24_SetSpeedDataRates(&m_dev, RF24_1MBPS);
+#elif defined(CONFIG_RF_RATIO_2M)
+    Nrf24_SetSpeedDataRates(&m_dev, RF24_2MBPS);
+#else
+#error "Invalid RF Data Rate. Check menuconfig settings."
+#endif
 
     esp_err_t ret = Nrf24_setRADDR(&m_dev, (uint8_t *)rx_addr);
     if (ret != ESP_OK)
@@ -213,7 +220,5 @@ void NRF24L01::send_telemetry(const RobotTelemetry * telemetry)
     EncodeRobotTelemetry((RobotTelemetry *)telemetry, &safe_buffer[1]);
 
     if (xQueueSend(m_tx_queue, safe_buffer, pdMS_TO_TICKS(100)) != pdPASS)
-    {
         ESP_LOGE(TAG, "Failed to enqueue data for transmission");
-    }
 }
