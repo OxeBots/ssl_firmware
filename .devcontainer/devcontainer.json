@@ -21,7 +21,9 @@
                 "jeff-hykin.better-cpp-syntax",
                 "nordic-semiconductor.nrf-kconfig",
                 "alexnesnes.teleplot",
-                "hit9.bitproto"
+                "hit9.bitproto",
+                "ms-python.python",
+                "charliermarsh.ruff"
             ]
         }
     },

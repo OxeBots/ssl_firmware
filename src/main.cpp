@@ -19,6 +19,41 @@
 
 static const char * TAG = "MAIN";
 
+// NVS namespace / key for robot configuration
+static constexpr const char * ROBOT_CFG_NVS_NS = "robot_cfg";
+static constexpr const char * ROBOT_CFG_KEY_ID = "robot_id";
+
+// Runtime robot ID — loaded from NVS at startup, updated via config messages
+static uint8_t g_robot_id = 0;
+
+// ---------------------------------------------------------------------------
+// Deferred NVS write queue — radio callback posts here, a dedicated NVS task
+// commits immediately.  Using a separate task avoids the mutex priority
+// inheritance crash (xTaskPriorityDisinherit).
+// ---------------------------------------------------------------------------
+struct NvsWriteRequest
+{
+    char ns[16];
+    char key[16];
+    int32_t value;
+};
+static QueueHandle_t g_nvs_write_queue = nullptr;
+
+static void nvs_writer_task(void * /*arg*/)
+{
+    NvsWriteRequest req;
+    while (true)
+    {
+        if (xQueueReceive(g_nvs_write_queue, &req, portMAX_DELAY) == pdTRUE)
+        {
+            // Use save_i32_direct to bypass the ADC suspend/resume callbacks.
+            // Those callbacks use ESP-IDF IPC calls that are unsafe from this
+            // task context and cause xTaskPriorityDisinherit crashes.
+            NVSManager::save_i32_direct(req.ns, req.key, req.value);
+        }
+    }
+}
+
 i2c_master_bus_handle_t bus_handle;
 
 #define IMU_TASK_RATE_HZ 100
@@ -84,42 +119,47 @@ void imu_update_task(void * pvParameters)
     }
 }
 
-// void heartbeat_task(void * pvParam)
-// {
-//     ledc_timer_config_t timer_config = {.speed_mode = LEDC_LOW_SPEED_MODE,
-//                                         .duty_resolution = LEDC_TIMER_10_BIT,
-//                                         .timer_num = LEDC_TIMER_0,
-//                                         .freq_hz = 1,
-//                                         .clk_cfg = LEDC_AUTO_CLK,
-//                                         .deconfigure = false};
-
-//     ledc_timer_config(&timer_config);
-
-//     ledc_channel_config_t channel_config = {.gpio_num = (gpio_num_t)CONFIG_BLINK_GPIO,
-//                                             .speed_mode = LEDC_LOW_SPEED_MODE,
-//                                             .channel = LEDC_CHANNEL_0,
-//                                             .intr_type = LEDC_INTR_DISABLE,
-//                                             .timer_sel = LEDC_TIMER_0,
-//                                             .duty = 1UL << (timer_config.duty_resolution - 1),
-//                                             .hpoint = 0,
-//                                             .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
-//                                             .flags = {.output_invert = 0}};
-
-//     ledc_channel_config(&channel_config);
-//     vTaskDelete(nullptr);
-// }
-
-// -------------------------------------------------------------
-// NRF24L01 Protocol Callback via Bitproto
-// -------------------------------------------------------------
-void handle_radio_command(const RobotCommand * cmd)
+static void load_robot_id_from_nvs()
 {
-    
+    int32_t stored_id = 0;
+    esp_err_t err = NVSManager::load_i32(ROBOT_CFG_NVS_NS, ROBOT_CFG_KEY_ID, &stored_id);
+
+    if (err == ESP_OK)
+    {
+        g_robot_id = static_cast<uint8_t>(stored_id);
+        ESP_LOGI(TAG, "Loaded robot ID from NVS: %d", g_robot_id);
+    }
+    else
+    {
+        g_robot_id = 0;
+        ESP_LOGW(TAG, "No robot ID in NVS — defaulting to ID 0.");
+    }
+}
+
+static void save_robot_id_to_nvs(uint8_t id)
+{
+    // Post to the deferred queue so the main loop does the actual NVS write.
+    // Direct NVS calls from the radio receiver task cause mutex priority
+    // inheritance crashes (xTaskPriorityDisinherit assert in tasks.c).
+    NvsWriteRequest req{};
+    strncpy(req.ns, ROBOT_CFG_NVS_NS, sizeof(req.ns) - 1);
+    strncpy(req.key, ROBOT_CFG_KEY_ID, sizeof(req.key) - 1);
+    req.value = static_cast<int32_t>(id);
+
+    if (xQueueSend(g_nvs_write_queue, &req, pdMS_TO_TICKS(100)) == pdTRUE)
+        ESP_LOGI(TAG, "Queued NVS write: robot_id=%d", id);
+    else
+        ESP_LOGE(TAG, "NVS write queue full — robot_id=%d not persisted!", id);
+}
+
+static void send_telemetry_response(uint32_t echo_timestamp)
+{
     RobotTelemetry tel;
     memset(&tel, 0, sizeof(RobotTelemetry));
-    
-    // Echo back the timestamp so we can verify byte-alignment on the PC side
-    tel.timestamp = cmd->timestamp;
+
+    tel.header.msg_type = MSG_TYPE_TELEMETRY;
+    tel.header.robot_id = g_robot_id;
+    tel.header.timestamp = echo_timestamp;
 
     tel.robot_pose.x = 0;
     tel.robot_pose.y = 0;
@@ -128,8 +168,130 @@ void handle_radio_command(const RobotCommand * cmd)
     tel.battery_percentage = 95;
     tel.kicker_voltage = 1650;
     tel.error_flags = 0;
-    tel.uptime_minutes = (xTaskGetTickCount() * portTICK_PERIOD_MS) / 60000;
-    radio.send_telemetry(&tel);
+
+    uint8_t buf[BYTES_LENGTH_ROBOT_TELEMETRY] = {0};
+    EncodeRobotTelemetry(&tel, buf);
+    radio.send_raw(buf, BYTES_LENGTH_ROBOT_TELEMETRY);
+}
+
+static void handle_config_message(const RobotConfig * cfg)
+{
+    const uint8_t target = cfg->header.robot_id;
+
+    if (target != g_robot_id && target != ROBOT_ID_BROADCAST)
+    {
+        ESP_LOGD(TAG, "Config ignored — addressed to robot %d, we are %d.", target, g_robot_id);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Handling config flags=0x%02X param=%d", cfg->config_flags, cfg->param);
+
+    if (cfg->config_flags & CONFIG_FLAG_SET_ID)
+    {
+        uint8_t new_id = static_cast<uint8_t>(cfg->param & 0xFF);
+        if (new_id > ROBOT_ID_MAX)
+        {
+            ESP_LOGE(TAG, "CONFIG_FLAG_SET_ID: requested ID %d exceeds ROBOT_ID_MAX (%d). Rejected.", new_id,
+                     ROBOT_ID_MAX);
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Setting robot ID: %d → %d", g_robot_id, new_id);
+            g_robot_id = new_id;
+            save_robot_id_to_nvs(g_robot_id);
+            ESP_LOGW(TAG, "Robot ID changed.");
+        }
+    }
+
+    if (cfg->config_flags & CONFIG_FLAG_RUN_CALIBRATION)
+    {
+        ESP_LOGI(TAG, "CONFIG_FLAG_RUN_CALIBRATION: triggering wheel encoder calibration.");
+        WheelStateEstimator::get_instance().load_or_calibrate(5000);
+        // TODO: calibrate all subsystems, not just encoders
+    }
+
+    if (cfg->config_flags & CONFIG_FLAG_RESET_NVS)
+    {
+        ESP_LOGW(TAG, "CONFIG_FLAG_RESET_NVS: resetting robot ID to 0.");
+        g_robot_id = 0;
+        save_robot_id_to_nvs(g_robot_id);
+        // TODO: erase all NVS keys, not just robot ID
+    }
+}
+
+static void handle_radio_packet(const uint8_t * payload, uint8_t len)
+{
+    // Every valid packet must start with a Header (5 bytes).
+    if (len < BYTES_LENGTH_HEADER)
+    {
+        ESP_LOGW(TAG, "Packet too short for header (%d bytes). Discarding.", len);
+        return;
+    }
+
+    // IMPORTANT: bitproto C decoders use bitwise OR to write decoded bits into
+    // struct fields — they never zero the destination first.  Every Decode*
+    // call must therefore target a zero-initialised struct, otherwise garbage
+    // stack bits bleed into fields whose encoded value contains zeros.
+    Header hdr;
+    memset(&hdr, 0, sizeof(Header));
+    DecodeHeader(&hdr, const_cast<uint8_t *>(payload));
+
+    const uint8_t msg_type = hdr.msg_type;
+    const uint8_t robot_id = hdr.robot_id;
+
+    switch (msg_type)
+    {
+        case MSG_TYPE_COMMAND:
+            if (len < BYTES_LENGTH_ROBOT_COMMAND)
+            {
+                ESP_LOGW(TAG, "MSG_TYPE_COMMAND: packet too short (%d / %d bytes).", len, BYTES_LENGTH_ROBOT_COMMAND);
+                return;
+            }
+
+            if (robot_id != g_robot_id && robot_id != ROBOT_ID_BROADCAST)
+            {
+                ESP_LOGD(TAG, "Command ignored — addressed to robot %d, we are %d.", robot_id, g_robot_id);
+                return;
+            }
+
+            RobotCommand cmd;
+            memset(&cmd, 0, sizeof(RobotCommand));
+            DecodeRobotCommand(&cmd, const_cast<uint8_t *>(payload));
+
+            ESP_LOGI(TAG, "CMD robot=%d ts=%lu x=%d y=%d kick=%d", cmd.header.robot_id,
+                     (unsigned long)cmd.header.timestamp, cmd.target_pose.x, cmd.target_pose.y, cmd.kick_velocity);
+
+            // TODO: feed cmd into motion controller here
+
+            if (robot_id == ROBOT_ID_BROADCAST)
+                return;  // Broadcast: execute without reply
+
+            send_telemetry_response(cmd.header.timestamp);
+            break;
+
+        case MSG_TYPE_CONFIG:
+            if (len < BYTES_LENGTH_ROBOT_CONFIG)
+            {
+                ESP_LOGW(TAG, "MSG_TYPE_CONFIG: packet too short (%d / %d bytes).", len, BYTES_LENGTH_ROBOT_CONFIG);
+                return;
+            }
+
+            // Config messages do not generate a reply
+            RobotConfig cfg;
+            memset(&cfg, 0, sizeof(RobotConfig));
+            DecodeRobotConfig(&cfg, const_cast<uint8_t *>(payload));
+            handle_config_message(&cfg);
+            break;
+
+        case MSG_TYPE_TELEMETRY:
+            // Another robot's telemetry reply received on the shared channel — ignore.
+            ESP_LOGD(TAG, "Received telemetry from robot %d — not our concern, ignoring.", robot_id);
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unknown msg_type=0x%02X — discarding.", msg_type);
+            break;
+    }
 }
 
 extern "C" void app_main(void)
@@ -137,6 +299,9 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Starting Oxebots SSL Firmware...");
 
     ESP_ERROR_CHECK(NVSManager::init());
+
+    load_robot_id_from_nvs();
+    ESP_LOGI(TAG, "Robot ID: %d", g_robot_id);
 
     // Mandatory ISR setup required by FreeRTOS GPIO Interrupts
     gpio_install_isr_service(0);
@@ -153,39 +318,35 @@ extern "C" void app_main(void)
     NVSManager::set_adc_callbacks([&w_state_estimator]() { w_state_estimator.suspend(); },
                                   [&w_state_estimator]() { w_state_estimator.resume(); });
 
+    g_nvs_write_queue = xQueueCreate(8, sizeof(NvsWriteRequest));
+    configASSERT(g_nvs_write_queue);
+
     ESP_LOGI(TAG, "Initializing Radio Communication...");
     if (radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK)
-    {
-        radio.start(handle_radio_command);
-    }
+        radio.start(handle_radio_packet);
     else
-    {
         ESP_LOGE(TAG, "Radio initialization failed! Proceeding without radio link.");
-    }
 
     ESP_LOGI(TAG, "Initializing Wheel State Estimator...");
     ESP_ERROR_CHECK(w_state_estimator.init(wheel_adc_channels, ADC_ATTEN_DB_12));
 
     ESP_LOGI(TAG, "Initializing IMU...");
     imu.init();
-    struct SharedData local_data;
-
-    // xTaskCreate(heartbeat_task, "LED Blink", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
-    xTaskCreate(imu_update_task, "IMU Update", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
-
-    ESP_LOGI(TAG, "Starting sensor calibration check...");
 
     ESP_LOGI(TAG, "Checking wheel encoders...");
     w_state_estimator.load_or_calibrate(5000);
-
-    // ESP_LOGI(TAG, "Checking magnetometer calibration...");
 
     if (imu.load_or_calibrate_mag(10) != ESP_OK)
         ESP_LOGE(TAG, "Magnetometer calibration failed or timed out!");
     else
         ESP_LOGI(TAG, "Magnetometer is ready.");
 
-    // Main log loop
+    struct SharedData local_data;
+
+    // Tasks
+    xTaskCreate(nvs_writer_task, "nvs_task", 4096, nullptr, 4, nullptr);
+    xTaskCreate(imu_update_task, "imu_task", configMINIMAL_STACK_SIZE * 2, nullptr, 5, nullptr);
+
     while (true)
     {
         const std::array<float, NUM_ENC_CHANNELS> angles_rad = w_state_estimator.get_filtered_angle_rad();

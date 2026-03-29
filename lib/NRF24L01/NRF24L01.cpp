@@ -1,6 +1,8 @@
 /**
  * @file NRF24L01.cpp
  * @brief C++ wrapper driver for the mirf nRF24L01 library.
+ *
+ * Transport-only layer: sends and receives raw byte payloads.
  */
 
 #include "NRF24L01.h"
@@ -23,7 +25,7 @@ NRF24L01::NRF24L01(gpio_num_t irq)
 }
 
 /**
- * @brief Destroy the NRF24L01 object.
+ * @brief Destroy the NRF24L01 object and free resources.
  */
 NRF24L01::~NRF24L01()
 {
@@ -34,19 +36,17 @@ NRF24L01::~NRF24L01()
     if (m_tx_queue)
         vQueueDelete(m_tx_queue);
 
-    // Note: ISR handler removal is managed by main_esp32.cpp
-    // which calls gpio_uninstall_isr_service()
     gpio_isr_handler_remove(m_irq_pin);
     Nrf24_deinit(&m_dev);
 }
 
 /**
  * @brief Initializes the NRF24L01 module.
- * @param channel RF Channel (0-125).
+ * @param channel      RF Channel (0-125).
  * @param payload_size The fixed payload size (1-32 bytes).
- * @param tx_addr The 5-byte transmit address.
- * @param rx_addr The 5-byte receive address.
- * @return esp_err_t ESP_OK on success, or an error from the mirf library.
+ * @param tx_addr      The 5-byte transmit address.
+ * @param rx_addr      The 5-byte receive address.
+ * @return ESP_OK on success, or an error from the mirf library.
  */
 esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr)
 {
@@ -74,11 +74,7 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
         return ret;
     }
 
-    // Configure ACK Handshake
-    // To make Auto-Acknowledgement work, the TX_ADDR must be set
-    // to the same tx_addr as the receiving pipe.
-    // The `Nrf24_setTADDR` function sets BOTH `TX_ADDR` and `RX_ADDR_P0`.
-    // We will use Pipe 0 for receiving.
+    // TX_ADDR must match RX_ADDR_P0 for Auto-ACK to work.
     ret = Nrf24_setTADDR(&m_dev, (uint8_t *)tx_addr);
     if (ret != ESP_OK)
     {
@@ -110,7 +106,7 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
     if (ret != ESP_OK)
         return ret;
 
-    // Must be pre-initialized by gpio_install_isr_service() in main.cpp
+    // gpio_install_isr_service() must be called in main.cpp before this.
     ret = gpio_isr_handler_add(m_irq_pin, NRF24L01::isr_handler, (void *)this);
     if (ret != ESP_OK)
         return ret;
@@ -119,9 +115,9 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
 }
 
 /**
- * @brief Starts the receiver task.
- * @param callback The function to call when new data is received.
- * @return true if the task started successfully, false otherwise.
+ * @brief Starts the background receiver task.
+ * @param callback Called with raw bytes whenever a packet arrives.
+ * @return true if the task started successfully.
  */
 bool NRF24L01::start(data_received_callback_t callback)
 {
@@ -135,7 +131,7 @@ bool NRF24L01::start(data_received_callback_t callback)
 }
 
 /**
- * @brief Static ISR handler for the IRQ pin, triggers task queue.
+ * @brief Static ISR handler for the IRQ pin — triggers receiver task via queue.
  */
 void IRAM_ATTR NRF24L01::isr_handler(void * dev)
 {
@@ -145,7 +141,7 @@ void IRAM_ATTR NRF24L01::isr_handler(void * dev)
 }
 
 /**
- * @brief Static function to launch the FreeRTOS task.
+ * @brief Static trampoline to launch the FreeRTOS receiver task.
  */
 void NRF24L01::task_wrapper(void * dev)
 {
@@ -153,7 +149,12 @@ void NRF24L01::task_wrapper(void * dev)
 }
 
 /**
- * @brief Background task for draining RX FIFO and pumping TX queue.
+ * @brief Background task: drains the RX FIFO and flushes the TX queue.
+ *
+ * On RX: strips the dongle's prepended length byte, then passes the raw
+ * payload bytes directly to the application callback — no protocol parsing.
+ *
+ * On TX: sends whatever raw frames the application enqueued via send_raw().
  */
 void NRF24L01::receiver_task()
 {
@@ -168,36 +169,33 @@ void NRF24L01::receiver_task()
         {
             if (io_num == static_cast<uint32_t>(m_irq_pin))
             {
+                // Drain all pending RX packets
                 while (Nrf24_dataReady(&m_dev))
                 {
                     Nrf24_getData(&m_dev, buffer);
 
-                    // The USB Dongle automatically prepends the payload length in byte 0.
+                    // byte 0 is the dongle's payload-length prefix
                     uint8_t payload_len = buffer[0];
 
-                    // Safely validate bounds before decoding
-                    if (payload_len > 0 && payload_len <= 31)
+                    if (payload_len > 0 && payload_len <= 31 && m_on_data_received)
                     {
-                        RobotCommand cmd;
-                        // Read bitproto payload starting AFTER the dongle's length byte
-                        DecodeRobotCommand(&cmd, &buffer[1]);
-                        if (m_on_data_received)
-                            m_on_data_received(&cmd);
+                        // Deliver raw bytes starting after the length byte
+                        m_on_data_received(&buffer[1], payload_len);
                     }
                     else
                     {
-                        ESP_LOGW(TAG, "Dropped packet. Invalid dongle length byte: %d", payload_len);
+                        ESP_LOGW(TAG, "Dropped packet — invalid length byte: %d", payload_len);
                     }
                 }
 
-                // Send queued responses
+                // Flush queued TX frames
                 while (xQueueReceive(m_tx_queue, &tx_buffer, 0))
                 {
                     Nrf24_send(&m_dev, tx_buffer);
                     if (!Nrf24_isSend(&m_dev, 100))
-                        ESP_LOGW(TAG, "Telemetry sent (No Auto-ACK from USB adapter)");
+                        ESP_LOGW(TAG, "TX sent (no Auto-ACK from USB adapter)");
                     else
-                        ESP_LOGI(TAG, "Telemetry sent and ACKed by USB adapter");
+                        ESP_LOGI(TAG, "TX sent and ACKed by USB adapter");
                 }
             }
         }
@@ -205,20 +203,34 @@ void NRF24L01::receiver_task()
 }
 
 /**
- * @brief Safely stages bitproto Telemetry data for outbound radio transmission.
+ * @brief Enqueue raw bytes for over-the-air transmission.
+ *
+ * Builds a 32-byte RF frame by placing the payload length in byte 0 (dongle
+ * convention) and copying the caller's data into bytes 1..len.  The rest of
+ * the frame is zero-padded.  The caller must NOT include the length byte or
+ * any padding — just the meaningful protocol payload.
+ *
+ * @param data  Pointer to payload bytes.
+ * @param len   Payload length (must be ≤ 31).
+ * @return ESP_OK on success.
  */
-void NRF24L01::send_telemetry(const RobotTelemetry * telemetry)
+esp_err_t NRF24L01::send_raw(const uint8_t * data, uint8_t len)
 {
-    uint8_t safe_buffer[32] = {0};
-    uint8_t bitproto_len = BYTES_LENGTH_ROBOT_TELEMETRY;
+    if (len > 31)
+    {
+        ESP_LOGE(TAG, "send_raw: payload too large (%d bytes, max 31)", len);
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    // We MUST prepend the length of the payload in byte 0.
-    // The dongle will strip this byte and push exactly this many bytes over UART.
-    safe_buffer[0] = bitproto_len;
+    uint8_t frame[32] = {0};
+    frame[0] = len;                // dongle length prefix
+    memcpy(&frame[1], data, len);  // protocol payload
 
-    // Encode Bitproto data starting at byte 1
-    EncodeRobotTelemetry((RobotTelemetry *)telemetry, &safe_buffer[1]);
+    if (xQueueSend(m_tx_queue, frame, pdMS_TO_TICKS(100)) != pdPASS)
+    {
+        ESP_LOGE(TAG, "send_raw: TX queue full");
+        return ESP_FAIL;
+    }
 
-    if (xQueueSend(m_tx_queue, safe_buffer, pdMS_TO_TICKS(100)) != pdPASS)
-        ESP_LOGE(TAG, "Failed to enqueue data for transmission");
+    return ESP_OK;
 }

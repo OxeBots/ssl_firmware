@@ -2,6 +2,9 @@
  * @file NRF24L01.h
  * @brief C++ wrapper driver for the mirf nRF24L01 library.
  *
+ * This driver is transport-only. It passes raw byte payloads to/from the
+ * application layer without any knowledge of the protocol message format.
+ * All encoding, decoding, and dispatch logic lives in main.cpp.
  */
 #ifndef _NRF24L01_H_
 #define _NRF24L01_H_
@@ -15,9 +18,8 @@
 #include <cstring>
 
 #include "mirf.h"
-#include "ssl_robot_protocol_bp.h"
 
-typedef void (*data_received_callback_t)(const RobotCommand * cmd);
+typedef void (*data_received_callback_t)(const uint8_t * payload, uint8_t len);
 
 class NRF24L01
 {
@@ -27,7 +29,7 @@ class NRF24L01
 
     esp_err_t init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr);
     bool start(data_received_callback_t callback);
-    void send_telemetry(const RobotTelemetry * telemetry);
+    esp_err_t send_raw(const uint8_t * data, uint8_t len);
 
    private:
     static void IRAM_ATTR isr_handler(void * dev);

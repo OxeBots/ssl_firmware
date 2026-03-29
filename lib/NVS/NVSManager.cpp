@@ -78,7 +78,36 @@ esp_err_t NVSManager::save_i32(const char * ns, const char * key, int32_t value)
         }
     });
 
-    if (err != ESP_OK)
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Saved i32  [%s/%s] = %ld", ns, key, (long)value);
+    else
+        ESP_LOGE(TAG, "Failed to save i32 [%s/%s]: %s", ns, key, esp_err_to_name(err));
+
+    return err;
+}
+
+/**
+ * @brief Saves a 32-bit integer directly to NVS without calling the ADC
+ *        suspend/resume callbacks.  Safe to call from any task context that
+ *        does not hold ADC continuous driver resources.
+ */
+esp_err_t NVSManager::save_i32_direct(const char * ns, const char * key, int32_t value)
+{
+    esp_err_t err = ESP_OK;
+    nvs_handle_t handle;
+
+    err = nvs_open(ns, NVS_READWRITE, &handle);
+    if (err == ESP_OK)
+    {
+        err = nvs_set_i32(handle, key, value);
+        if (err == ESP_OK)
+            err = nvs_commit(handle);
+        nvs_close(handle);
+    }
+
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Saved i32  [%s/%s] = %ld (direct)", ns, key, (long)value);
+    else
         ESP_LOGE(TAG, "Failed to save i32 [%s/%s]: %s", ns, key, esp_err_to_name(err));
 
     return err;
@@ -136,7 +165,9 @@ esp_err_t NVSManager::save_blob(const char * ns, const char * key, const void * 
         }
     });
 
-    if (err != ESP_OK)
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "Saved blob [%s/%s] (%zu bytes)", ns, key, length);
+    else
         ESP_LOGE(TAG, "Failed to save blob [%s/%s]: %s", ns, key, esp_err_to_name(err));
 
     return err;

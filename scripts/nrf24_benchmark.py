@@ -1,10 +1,24 @@
+"""
+nrf24_benchmark.py — NRF24L01 multi-robot round-robin benchmark.
+
+Sends RobotCommand packets to two configurable robots in a round-robin
+fashion, waits for each telemetry reply, and reports per-robot statistics.
+
+Usage:
+    python nrf24_benchmark.py                          # robots 0 & 1 (defaults)
+    python nrf24_benchmark.py --robot0 2 --robot1 5
+    python nrf24_benchmark.py -n 200 -t 0.1
+"""
+
 import time
 import argparse
 import sys
 import importlib.util
 import ssl_robot_protocol_bp
 
-# Dynamically import your existing nrf24-usb.py despite the hyphen in the filename
+# ---------------------------------------------------------------------------
+# Dynamically import nrf24-usb.py (hyphen in filename requires this approach)
+# ---------------------------------------------------------------------------
 try:
     spec = importlib.util.spec_from_file_location("nrf24_module", "nrf24-usb.py")
     nrf = importlib.util.module_from_spec(spec)
@@ -15,81 +29,189 @@ except FileNotFoundError:
     sys.exit(1)
 
 
-def run_benchmark(device, num_packets, timeout_sec):
-    print(f"\n{nrf.Colors.BOLD}=== STARTING BENCHMARK ==={nrf.Colors.RESET}")
-    print(
-        f"Sending {num_packets} packets with a {timeout_sec * 1000:.0f}ms RX timeout...\n"
-    )
+# ---------------------------------------------------------------------------
+# Per-robot statistics
+# ---------------------------------------------------------------------------
 
-    success_count = 0
-    rtt_list = []
 
-    # Silence the continuous print statements from the original receive_data method
-    # by temporarily suppressing stdout if desired, but we will rely on capturing the output.
+class RobotStats:
+    def __init__(self, robot_id):
+        self.robot_id = robot_id
+        self.sent = 0
+        self.received = 0
+        self.rtt_list = []
 
-    test_start_time = time.time()
+    def record_success(self, rtt_ms):
+        self.received += 1
+        self.rtt_list.append(rtt_ms)
+
+    def success_rate(self):
+        return (self.received / self.sent * 100) if self.sent > 0 else 0.0
+
+    def print_report(self, total_time_sec):
+        c = nrf.Colors
+        rate = self.success_rate()
+        color = c.GREEN if rate >= 95 else (c.YELLOW if rate >= 80 else c.RED)
+
+        print(f"\n  Robot ID:        {self.robot_id}")
+        print(f"  Packets Sent:    {self.sent}")
+        print(f"  Packets Recv:    {self.received}")
+        print(f"  Success Rate:    {color}{rate:.2f}%{c.RESET}")
+        if self.rtt_list:
+            print(f"  Min RTT:         {min(self.rtt_list):.2f} ms")
+            print(f"  Max RTT:         {max(self.rtt_list):.2f} ms")
+            print(
+                f"  Avg RTT:         {sum(self.rtt_list) / len(self.rtt_list):.2f} ms"
+            )
+        if total_time_sec > 0:
+            print(
+                f"  Throughput:      {self.received / total_time_sec:.2f} packets/sec"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Round-robin benchmark loop
+# ---------------------------------------------------------------------------
+
+# After this many consecutive misses a robot is marked unreachable and its
+# receive window is skipped for the rest of the benchmark run, preventing
+# cascading buffer pollution that corrupts the other robot's results.
+UNREACHABLE_THRESHOLD = 10
+
+
+def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
+    c = nrf.Colors
+    print(f"\n{c.BOLD}=== STARTING ROUND-ROBIN BENCHMARK ==={c.RESET}")
+    print(f"Robots:      {robot0_id}  ↔  {robot1_id}")
+    print(f"Total pkts:  {num_packets}  ({num_packets // 2} per robot)")
+    print(f"RX timeout:  {timeout_sec * 1000:.0f} ms\n")
+
+    stats = {robot0_id: RobotStats(robot0_id), robot1_id: RobotStats(robot1_id)}
+    consecutive = {robot0_id: 0, robot1_id: 0}  # consecutive miss counter
+    unreachable = {robot0_id: False, robot1_id: False}
+    robot_ids = [robot0_id, robot1_id]
+
+    test_start = time.time()
 
     for i in range(num_packets):
+        target_id = robot_ids[i % 2]
+        stat = stats[target_id]
+        stat.sent += 1
+
+        # Use uint32-safe timestamp
+        send_ms = int(time.time() * 1000) & 0xFFFFFFFF
+
         cmd = ssl_robot_protocol_bp.RobotCommand()
-        send_ms = int(time.time() * 1000) % (2**31 - 1)
-        cmd.timestamp = send_ms
+        cmd.header = nrf._make_header(nrf.MSG_TYPE_COMMAND, target_id, send_ms)
         cmd.target_pose.x = i % 1000
         cmd.target_pose.y = 0
         cmd.kick_velocity = 0
 
-        encoded = cmd.encode()
-
         t0 = time.perf_counter()
-        device.send_data(encoded)
+        device.send_data(cmd.encode())
 
-        # Override the original print function inside the loop to avoid terminal spam
-        # You can monitor progress with a simple counter
-        sys.stdout.write(f"\rProgress: {i + 1}/{num_packets}")
+        r0_label = (
+            f"{c.RED}UNREACHABLE{c.RESET}"
+            if unreachable[robot0_id]
+            else f"{stats[robot0_id].received}/{stats[robot0_id].sent}"
+        )
+        r1_label = (
+            f"{c.RED}UNREACHABLE{c.RESET}"
+            if unreachable[robot1_id]
+            else f"{stats[robot1_id].received}/{stats[robot1_id].sent}"
+        )
+        sys.stdout.write(
+            f"\r[{i + 1}/{num_packets}] → Robot {target_id}  "
+            f"(R{robot0_id}: {r0_label}  R{robot1_id}: {r1_label})"
+        )
         sys.stdout.flush()
+
+        if unreachable[target_id]:
+            # Wait for the dongle's TX cycle to complete before the next send.
+            # The NRF24L01 is half-duplex: sending the next packet before the
+            # previous TX is fully settled corrupts the radio state.
+            time.sleep(timeout_sec)
+            # Clear any unexpected bytes (e.g. dongle status code) so they
+            # don't pollute the next receive window.
+            device.ser.reset_input_buffer()
+            continue
 
         telemetry = device.receive_data(timeout=timeout_sec)
         t1 = time.perf_counter()
 
-        if telemetry and telemetry.timestamp == send_ms:
-            success_count += 1
-            rtt_list.append((t1 - t0) * 1000)  # Convert to ms
+        # Always flush after a receive window — clears any partial bytes or
+        # late-arriving dongle status codes before the next send.
+        device.ser.reset_input_buffer()
 
-    test_end_time = time.time()
-    total_time = test_end_time - test_start_time
+        if (
+            telemetry is not None
+            and telemetry.header.timestamp == send_ms
+            and telemetry.header.robot_id == target_id
+        ):
+            stat.record_success((t1 - t0) * 1000)
+            consecutive[target_id] = 0
+        else:
+            consecutive[target_id] += 1
+            if (
+                not unreachable[target_id]
+                and consecutive[target_id] >= UNREACHABLE_THRESHOLD
+            ):
+                unreachable[target_id] = True
+                print(
+                    f"\n{c.YELLOW}[WARN] Robot {target_id} marked UNREACHABLE "
+                    f"after {UNREACHABLE_THRESHOLD} consecutive misses. "
+                    f"Skipping its receive window for remaining packets.{c.RESET}"
+                )
 
-    print("\n\n" + "=" * 40)
-    print(f"{nrf.Colors.BOLD}BENCHMARK RESULTS{nrf.Colors.RESET}")
-    print("=" * 40)
+    test_end = time.time()
+    total_time = test_end - test_start
 
-    success_rate = (success_count / num_packets) * 100
-    print(f"Packets Sent:      {num_packets}")
-    print(f"Packets Received:  {success_count}")
+    # ------------------------------------------------------------------
+    # Print final report
+    # ------------------------------------------------------------------
+    c = nrf.Colors
+    print("\n\n" + "=" * 50)
+    print(f"{c.BOLD}BENCHMARK RESULTS{c.RESET}")
+    print("=" * 50)
+    print(f"Total time:  {total_time:.2f} s")
+    print(f"Total sent:  {num_packets}  ({num_packets // 2} per robot)")
 
-    if success_rate >= 95:
-        color = nrf.Colors.GREEN
-    elif success_rate >= 80:
-        color = nrf.Colors.YELLOW
-    else:
-        color = nrf.Colors.RED
+    combined_recv = sum(s.received for s in stats.values())
+    combined_rate = combined_recv / num_packets * 100
+    oc = (
+        c.GREEN if combined_rate >= 95 else (c.YELLOW if combined_rate >= 80 else c.RED)
+    )
+    print(
+        f"Overall:     {oc}{combined_recv}/{num_packets}  ({combined_rate:.2f}%){c.RESET}"
+    )
 
-    print(f"Success Rate:      {color}{success_rate:.2f}%{nrf.Colors.RESET}")
+    print(f"\n{'─' * 50}")
+    print(f"{c.BOLD}Per-Robot Breakdown{c.RESET}")
+    print(f"{'─' * 50}")
+    for rid in [robot0_id, robot1_id]:
+        stats[rid].print_report(total_time)
 
-    if success_count > 0:
-        print(f"Min Latency (RTT): {min(rtt_list):.2f} ms")
-        print(f"Max Latency (RTT): {max(rtt_list):.2f} ms")
-        print(f"Avg Latency (RTT): {sum(rtt_list) / len(rtt_list):.2f} ms")
+    print("=" * 50 + "\n")
 
-    print(f"Total Time Taken:  {total_time:.2f} seconds")
-    print(f"Throughput:        {success_count / total_time:.2f} packets/sec")
-    print("=" * 40 + "\n")
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NRF24L01 USB Adapter Benchmark")
+    parser = argparse.ArgumentParser(
+        description="NRF24L01 Multi-Robot Round-Robin Benchmark",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument("-p", "--port", type=str, default="auto", help="Serial port")
     parser.add_argument("-b", "--baud", type=int, default=115200, help="Baud rate")
     parser.add_argument(
-        "-n", "--packets", type=int, default=500, help="Number of packets to test"
+        "-n",
+        "--packets",
+        type=int,
+        default=500,
+        help="Total packets (split evenly between the two robots)",
     )
     parser.add_argument(
         "-t",
@@ -106,23 +228,46 @@ def main():
         choices=[1, 2, 3],
         help="1=250K, 2=1M, 3=2M",
     )
-
+    parser.add_argument("--robot0", type=int, default=0, help="First robot ID  (0–10)")
+    parser.add_argument("--robot1", type=int, default=1, help="Second robot ID (0–10)")
     args = parser.parse_args()
 
-    if args.port.lower() == "auto":
-        device = nrf.nRF24L01_Controller.auto_connect(baudrate=args.baud)
-    else:
-        device = nrf.nRF24L01_Controller(port=args.port, baudrate=args.baud)
+    # Validate robot IDs
+    for rid, label in [(args.robot0, "--robot0"), (args.robot1, "--robot1")]:
+        if rid > nrf.ROBOT_ID_MAX or rid == nrf.ROBOT_ID_BROADCAST:
+            print(
+                f"Error: {label}={rid} is out of range. "
+                f"Valid IDs are 0–{nrf.ROBOT_ID_MAX} "
+                f"(broadcast {nrf.ROBOT_ID_BROADCAST} is reserved)."
+            )
+            sys.exit(1)
+
+    if args.robot0 == args.robot1:
+        print("Error: --robot0 and --robot1 must be different robot IDs.")
+        sys.exit(1)
+
+    # Ensure even split
+    if args.packets % 2 != 0:
+        args.packets += 1
+        print(
+            f"{nrf.Colors.YELLOW}Note: packet count rounded up to {args.packets}.{nrf.Colors.RESET}"
+        )
+
+    # Connect
+    device = (
+        nrf.nRF24L01_Controller.auto_connect(baudrate=args.baud)
+        if args.port.lower() == "auto"
+        else nrf.nRF24L01_Controller(port=args.port, baudrate=args.baud)
+    )
 
     if not device:
         sys.exit(1)
 
-    # Configure Dongle
     print(f"\n{nrf.Colors.CYAN}Applying Benchmark Configurations...{nrf.Colors.RESET}")
     device.set_data_rate(args.rate)
+    time.sleep(1)
 
-    time.sleep(1)  # Let adapter settle
-    run_benchmark(device, args.packets, args.timeout)
+    run_benchmark(device, args.robot0, args.robot1, args.packets, args.timeout)
     device.close()
 
 

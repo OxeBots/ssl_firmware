@@ -22,6 +22,7 @@ class NVSManager
     static void set_adc_callbacks(std::function<void()> suspend_cb, std::function<void()> resume_cb);
 
     static esp_err_t save_i32(const char * ns, const char * key, int32_t value);
+    static esp_err_t save_i32_direct(const char * ns, const char * key, int32_t value);
     static esp_err_t load_i32(const char * ns, const char * key, int32_t * value);
 
     static esp_err_t save_blob(const char * ns, const char * key, const void * data, size_t length);
