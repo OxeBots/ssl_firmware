@@ -114,10 +114,10 @@ void WheelController::control_task() {
 
             float output = m_pid_outputs[i];
             if (output >= 0) {
-                dirs[i] = config::driver::MOTOR_FORWARD;
+                dirs[i] = config::driver::MOTOR_CW;
                 duties[i] = static_cast<uint32_t>(output);
             } else {
-                dirs[i] = config::driver::MOTOR_BACKWARD;
+                dirs[i] = config::driver::MOTOR_CCW;
                 duties[i] = static_cast<uint32_t>(-output);
             }
         }
@@ -150,16 +150,16 @@ void WheelController::tune_pid() {
         
         std::array<uint32_t, 4> duties = {0, 0, 0, 0};
         std::array<uint8_t, 4> dirs = {
-            config::driver::MOTOR_FORWARD, config::driver::MOTOR_FORWARD, 
-            config::driver::MOTOR_FORWARD, config::driver::MOTOR_FORWARD
+            config::driver::MOTOR_CW, config::driver::MOTOR_CW, 
+            config::driver::MOTOR_CW, config::driver::MOTOR_CW
         };
 
         if (output >= 0) {
             duties[0] = static_cast<uint32_t>(output);
-            dirs[0] = config::driver::MOTOR_FORWARD;
+            dirs[0] = config::driver::MOTOR_CW;
         } else {
             duties[0] = static_cast<uint32_t>(-output);
-            dirs[0] = config::driver::MOTOR_BACKWARD;
+            dirs[0] = config::driver::MOTOR_CCW;
         }
 
         m_driver->set_duties(duties, dirs);

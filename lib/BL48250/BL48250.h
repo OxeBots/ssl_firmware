@@ -29,8 +29,8 @@ namespace driver
 constexpr float BL48250_MAX_VEL_RPM = 3800.0;
 constexpr float BL48250_MAX_VEL_RAD = (BL48250_MAX_VEL_RPM * 2.0 * M_PI / 60.0);  // rad/s
 constexpr float BL48250_MIN_VEL = 0.0;
-constexpr uint8_t MOTOR_FORWARD = 1;
-constexpr uint8_t MOTOR_BACKWARD = 0;
+constexpr uint8_t MOTOR_CW = 1;
+constexpr uint8_t MOTOR_CCW = 0;
 }  // namespace driver
 }  // namespace config
 
@@ -78,7 +78,7 @@ class BL48250
     /**
      * @brief Set raw PWM duty cycles and directions for all 4 motors simultaneously
      * @param duties std::array<uint32_t, 4> containing raw PWM duty cycle values
-     * @param directions std::array<uint8_t, 4> containing direction values (MOTOR_FORWARD or MOTOR_BACKWARD)
+     * @param directions std::array<uint8_t, 4> containing direction values (MOTOR_CW or MOTOR_CCW)
      */
     void set_duties(const std::array<uint32_t, 4> & duties, const std::array<uint8_t, 4> & directions);
 

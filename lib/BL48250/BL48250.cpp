@@ -46,9 +46,9 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
 
         gpio_reset_pin(motor_dir_pins_[i]);
         gpio_set_direction(motor_dir_pins_[i], GPIO_MODE_OUTPUT_OD);
-        gpio_set_level(motor_dir_pins_[i], MOTOR_FORWARD);
+        gpio_set_level(motor_dir_pins_[i], MOTOR_CW);
 
-        directions_[i] = MOTOR_FORWARD;
+        directions_[i] = MOTOR_CW;
         duty_cycles_[i] = 0;
     }
 }
@@ -95,7 +95,7 @@ void BL48250::debugPrint() const
     {
         ESP_LOGI(TAG, "\nMotor %d:", i + 1);
         ESP_LOGI(TAG, "  PWM: GPIO %-2d (Ch %d)", motor_pwm_pins_[i], motor_channels_[i]);
-        ESP_LOGI(TAG, "\n  DIR: GPIO %-2d -> %s", motor_dir_pins_[i], directions_[i] ? "FORWARD" : "BACKWARD");
+        ESP_LOGI(TAG, "\n  DIR: GPIO %-2d -> %s", motor_dir_pins_[i], directions_[i] ? "CW" : "CCW");
         ESP_LOGI(TAG, "\n  Duty: %-5u (%.1f%%)", duty_cycles_[i], (duty_cycles_[i] * 100.0) / max_duty_);
     }
     ESP_LOGI(TAG, "\n-----------------------");
