@@ -64,6 +64,8 @@ i2c_master_bus_handle_t bus_handle;
 
 IMUGY85 imu;
 NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
+OmnidirectionalRobot robot(config::kinematic::OMNI_WHEEL_RADIUS, config::kinematic::OMNI_WHEEL_DISTANCE);
+
 SemaphoreHandle_t data_mutex;
 
 struct SharedData
@@ -264,7 +266,20 @@ static void handle_radio_packet(const uint8_t * payload, uint8_t len)
             ESP_LOGI(TAG, "CMD robot=%d ts=%lu x=%d y=%d kick=%d", cmd.header.robot_id,
                      (unsigned long)cmd.header.timestamp, cmd.target_pose.x, cmd.target_pose.y, cmd.kick_velocity);
 
-            // TODO: feed cmd into motion controller here
+            {
+                // TODO: change this temporary velocity handling after position control is implemented.
+                vt::numeric_vector<3> target_body_vel;
+                target_body_vel(0) = cmd.target_pose.x_v / 1000.0f;         // mm/s to m/s
+                target_body_vel(1) = cmd.target_pose.y_v / 1000.0f;         // mm/s to m/s
+                target_body_vel(2) = cmd.target_pose.angular_vel / 100.0f;  // 0.01 rad/s to rad/s
+
+                vt::numeric_vector<4> target_wheel_vels = robot.compute_wheel_velocities(target_body_vel);
+
+                std::array<float, 4> target_vels_arr = {
+                  static_cast<float>(target_wheel_vels(0)), static_cast<float>(target_wheel_vels(1)),
+                  static_cast<float>(target_wheel_vels(2)), static_cast<float>(target_wheel_vels(3))};
+                WheelController::get_instance().set_target_velocities(target_vels_arr);
+            }
 
             if (robot_id == ROBOT_ID_BROADCAST)
                 return;  // Broadcast: execute without reply
@@ -352,50 +367,50 @@ extern "C" void app_main(void)
 
     while (true)
     {
-        const std::array<float, NUM_ENC_CHANNELS> angles_rad = w_state_estimator.get_filtered_angle_rad();
-        const std::array<float, NUM_ENC_CHANNELS> angles_deg = w_state_estimator.get_filtered_angle_deg();
-        const std::array<float, NUM_ENC_CHANNELS> rpms = w_state_estimator.get_filtered_rpm();
-        const std::array<float, NUM_ENC_CHANNELS> accels = w_state_estimator.get_filtered_acceleration_rps2();
+        // const std::array<float, NUM_ENC_CHANNELS> angles_rad = w_state_estimator.get_filtered_angle_rad();
+        // const std::array<float, NUM_ENC_CHANNELS> angles_deg = w_state_estimator.get_filtered_angle_deg();
+        // const std::array<float, NUM_ENC_CHANNELS> rpms = w_state_estimator.get_filtered_rpm();
+        // const std::array<float, NUM_ENC_CHANNELS> accels = w_state_estimator.get_filtered_acceleration_rps2();
 
-        for (int i = 0; i < NUM_ENC_CHANNELS; ++i)
-        {
-            printf(">w_%d_rad:%f\n", i + 1, angles_rad[i]);
-            printf(">w_%d_deg:%f\n", i + 1, angles_deg[i]);
-            printf(">w_%d_rpm:%f\n", i + 1, rpms[i]);
-            printf(">w_%d_acc:%f\n", i + 1, accels[i]);
-        }
+        // for (int i = 0; i < NUM_ENC_CHANNELS; ++i)
+        // {
+        //     printf(">w_%d_rad:%f\n", i + 1, angles_rad[i]);
+        //     printf(">w_%d_deg:%f\n", i + 1, angles_deg[i]);
+        //     printf(">w_%d_rpm:%f\n", i + 1, rpms[i]);
+        //     printf(">w_%d_acc:%f\n", i + 1, accels[i]);
+        // }
 
-        if (xSemaphoreTake(data_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
-        {
-            local_data = imu_data;
-            xSemaphoreGive(data_mutex);
-        }
+        // if (xSemaphoreTake(data_mutex, pdMS_TO_TICKS(100)) == pdTRUE)
+        // {
+        //     local_data = imu_data;
+        //     xSemaphoreGive(data_mutex);
+        // }
 
-        printf(">a.x:%.2f\n", local_data.ay);
-        printf(">a.y:%.2f\n", -local_data.ax);
-        printf(">a.z:%.2f\n", local_data.az);
-        printf(">g.x:%.2f\n", local_data.gx);
-        printf(">g.y:%.2f\n", local_data.gy);
-        printf(">g.z:%.2f\n", local_data.gz);
-        printf(">m.x:%.2f\n", local_data.mx);
-        printf(">m.y:%.2f\n", local_data.my);
-        printf(">m.z:%.2f\n", local_data.mz);
-        printf(">m.a:%.2f\n", local_data.azimuth);
-        printf(">m.dir: %s\n", local_data.mag_dir);
+        // printf(">a.x:%.2f\n", local_data.ay);
+        // printf(">a.y:%.2f\n", -local_data.ax);
+        // printf(">a.z:%.2f\n", local_data.az);
+        // printf(">g.x:%.2f\n", local_data.gx);
+        // printf(">g.y:%.2f\n", local_data.gy);
+        // printf(">g.z:%.2f\n", local_data.gz);
+        // printf(">m.x:%.2f\n", local_data.mx);
+        // printf(">m.y:%.2f\n", local_data.my);
+        // printf(">m.z:%.2f\n", local_data.mz);
+        // printf(">m.a:%.2f\n", local_data.azimuth);
+        // printf(">m.dir: %s\n", local_data.mag_dir);
 
-        printf(">pose.roll:%.2f\n", local_data.roll);
-        printf(">pose.pitch:%.2f\n", local_data.pitch);
-        printf(">pose.yaw:%.2f\n", local_data.yaw);
+        // printf(">pose.roll:%.2f\n", local_data.roll);
+        // printf(">pose.pitch:%.2f\n", local_data.pitch);
+        // printf(">pose.yaw:%.2f\n", local_data.yaw);
 
-        float rad_roll = local_data.roll * M_PI / 180.0f;
-        float rad_pitch = local_data.pitch * M_PI / 180.0f;
-        float rad_yaw = local_data.yaw * M_PI / 180.0f;
+        // float rad_roll = local_data.roll * M_PI / 180.0f;
+        // float rad_pitch = local_data.pitch * M_PI / 180.0f;
+        // float rad_yaw = local_data.yaw * M_PI / 180.0f;
 
-        printf(">3D|IMU:R:%.4f:%.4f:%.4f:S:cube:W:3:H:1.5:D:4:C:grey|g\n",
-               rad_roll,   // X Rotation
-               rad_pitch,  // Y Rotation
-               rad_yaw     // Z Rotation
-        );
+        // printf(">3D|IMU:R:%.4f:%.4f:%.4f:S:cube:W:3:H:1.5:D:4:C:grey|g\n",
+        //        rad_roll,   // X Rotation
+        //        rad_pitch,  // Y Rotation
+        //        rad_yaw     // Z Rotation
+        // );
 
         vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));
     }
