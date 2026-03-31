@@ -378,6 +378,8 @@ void WheelStateEstimator::adc_task()
                 xSemaphoreGive(m_data_mutex);
             }
         } while (ret == ESP_OK && bytes_read > 0);
+
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 

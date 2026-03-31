@@ -24,7 +24,7 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
                                       .duty_resolution = duty_resolution_,
                                       .timer_num = timer_,
                                       .freq_hz = pwm_freq_,
-                                      .clk_cfg = LEDC_AUTO_CLK,
+                                      .clk_cfg = LEDC_USE_APB_CLK,
                                       .deconfigure = false};
     ledc_timer_config(&timer_conf);
 
@@ -61,27 +61,26 @@ BL48250::~BL48250()
         ledc_set_duty(speed_mode_, motor_channels_[i], 0);
         ledc_update_duty(speed_mode_, motor_channels_[i]);
     }
+    // Reset the GPIO pins to release them from the LEDC peripheral
+    for (auto pin : motor_pwm_pins_)
+    {
+        gpio_reset_pin(pin);
+    }
+    for (auto pin : motor_dir_pins_)
+    {
+        gpio_reset_pin(pin);
+    }
 }
 
-uint32_t BL48250::velocityToDuty(float velocity, uint32_t max_duty)
-{
-    const float vel_abs = std::abs(velocity);
-    const float duty_float = constrain(0.290329861f * vel_abs - 28.679152042f, 0.0f, 100.0f);
-    return static_cast<uint32_t>((duty_float / 100.0f) * max_duty);
-}
-
-void BL48250::setVelocities(const std::array<float, 4> & velocities)
+void BL48250::set_duties(const std::array<uint32_t, 4> & duties, const std::array<uint8_t, 4> & directions)
 {
     for (size_t i = 0; i < 4; ++i)
     {
-        const uint8_t dir = velocities[i] < 0 ? MOTOR_BACKWARD : MOTOR_FORWARD;
-        directions_[i] = dir;
-        gpio_set_level(motor_dir_pins_[i], dir);
+        directions_[i] = directions[i];
+        gpio_set_level(motor_dir_pins_[i], directions[i]);
 
-        const uint32_t duty = velocityToDuty(velocities[i], max_duty_);
-
-        duty_cycles_[i] = duty;
-        ledc_set_duty(speed_mode_, motor_channels_[i], duty);
+        duty_cycles_[i] = duties[i];
+        ledc_set_duty(speed_mode_, motor_channels_[i], duties[i]);
         ledc_update_duty(speed_mode_, motor_channels_[i]);
     }
 }

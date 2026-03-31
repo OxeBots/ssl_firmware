@@ -1,7 +1,9 @@
+#include <QuickPID.h>
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
+#include <sTune.h>
 #include <sdkconfig.h>
 #include <stdio.h>
 
@@ -12,6 +14,7 @@
 #include "IMUGY85.h"
 #include "NRF24L01.h"
 #include "NVSManager.h"
+#include "WheelController.h"
 #include "mirf.h"
 #include "omni_robot.h"
 #include "ssl_robot_protocol_bp.h"

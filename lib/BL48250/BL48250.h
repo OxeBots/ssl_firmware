@@ -76,20 +76,11 @@ class BL48250
     ~BL48250();
 
     /**
-     * @brief Set velocities for all 4 motors simultaneously
-     * @param velocities std::array<float, 4> containing velocities in rad/s
-     * @warning Input velocities should be in range [-BL48250_MAX_VEL_RAD, BL48250_MAX_VEL_RAD]
-     * converted to rad/s
+     * @brief Set raw PWM duty cycles and directions for all 4 motors simultaneously
+     * @param duties std::array<uint32_t, 4> containing raw PWM duty cycle values
+     * @param directions std::array<uint8_t, 4> containing direction values (MOTOR_FORWARD or MOTOR_BACKWARD)
      */
-    void setVelocities(const std::array<float, 4> & velocities);
-
-    /**
-     * @brief Converts a velocity in rad/s to a PWM duty cycle value.
-     * @param velocity The velocity in rad/s.
-     * @param max_duty The maximum duty cycle value based on PWM resolution.
-     * @return The calculated duty cycle.
-     */
-    static uint32_t velocityToDuty(float velocity, uint32_t max_duty);
+    void set_duties(const std::array<uint32_t, 4> & duties, const std::array<uint8_t, 4> & directions);
 
     /**
      * @brief Print the current driver state via the serial interface.
