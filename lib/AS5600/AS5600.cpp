@@ -265,7 +265,7 @@ esp_err_t AS5600::load_calibration_from_nvs()
         return ESP_OK;
     }
 
-    return ESP_ERR_NVS_NOT_FOUND;
+    return ESP_ERR_NOT_FOUND;
 }
 
 /**

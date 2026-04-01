@@ -1,8 +1,3 @@
-/**
- * @file wheel_ekf.cpp
- * @brief A dedicated class for the wheel's state estimation using an EKF.
- * This class is pure math and has no hardware dependencies.
- */
 #include "wheel_ekf.h"
 
 #include <vt_kalman>
@@ -17,7 +12,7 @@ using StateVector = vt::numeric_vector<STATE_DIM>;
 using MeasurementVector = vt::numeric_vector<MEAS_DIM>;
 using ControlVector = vt::numeric_vector<CONTROL_DIM>;
 
-// --- Noise Matrices ---
+// Noise Matrices
 // Process Noise: Uncertainty in the model (tune these values)
 // Diagonal: [angle_noise, velocity_noise, acceleration_noise]
 static vt::numeric_matrix<STATE_DIM, STATE_DIM> Q =
@@ -26,7 +21,6 @@ static vt::numeric_matrix<STATE_DIM, STATE_DIM> Q =
 // Measurement Noise: Uncertainty in the sensor reading (tune this value)
 static vt::numeric_matrix<MEAS_DIM, MEAS_DIM> R = vt::numeric_matrix<MEAS_DIM, MEAS_DIM>::diagonals(0.1);
 
-// --- PIMPL Definition ---
 struct WheelKalmanFilter::KalmanState
 {
     StateVector state_vec;
@@ -40,7 +34,7 @@ struct WheelKalmanFilter::KalmanState
     {
     }
 
-    // --- EKF Model Functions (static members) ---
+    // EKF Model Functions (static members)
 
     // State transition function f(x, u)
     static StateVector f_func(const StateVector & x, const ControlVector & u)

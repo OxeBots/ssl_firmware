@@ -246,7 +246,7 @@ uint8_t Nrf24_getDataPipe(NRF24_t * dev)
 extern bool Nrf24_rxFifoEmpty(NRF24_t * dev)
 {
     uint8_t fifoStatus;
-    Nrf24_readRegister(dev, FIFO_STATUS, &fifoStatus, sizeof(fifoStatus));
+    Nrf24_readRegister(dev, REG_FIFO_STATUS, &fifoStatus, sizeof(fifoStatus));
     return (fifoStatus & (1 << RX_EMPTY));
 }
 
@@ -260,12 +260,12 @@ extern void Nrf24_getData(NRF24_t * dev, uint8_t * data)
     // NVI: per product spec, p 67, note c:
     // "The RX_DR IRQ is asserted by a new packet arrival event. The procedure
     // for handling this interrupt should be: 1) read payload through SPI,
-    // 2) clear RX_DR IRQ, 3) read FIFO_STATUS to check if there are more
+    // 2) clear RX_DR IRQ, 3) read REG_FIFO_STATUS to check if there are more
     // payloads available in RX FIFO, 4) if there are more data in RX FIFO,
     // repeat from step 1)."
     // So if we're going to clear RX_DR here, we need to check the RX FIFO
     // in the dataReady() function
-    Nrf24_configRegister(dev, STATUS, (1 << RX_DR));  // Reset status register
+    Nrf24_configRegister(dev, REG_STATUS, (1 << RX_DR));  // Reset status register
 }
 
 // Clocks only one byte into the given MiRF register
@@ -429,7 +429,7 @@ void Nrf24_enableNoAckFeature(NRF24_t * dev)
 uint8_t Nrf24_getStatus(NRF24_t * dev)
 {
     uint8_t rv;
-    Nrf24_readRegister(dev, STATUS, &rv, 1);
+    Nrf24_readRegister(dev, REG_STATUS, &rv, 1);
     return rv;
 }
 
@@ -439,7 +439,7 @@ void Nrf24_powerUpRx(NRF24_t * dev)
     Nrf24_ceLow(dev);
     Nrf24_configRegister(dev, CONFIG, mirf_CONFIG | ((1 << PWR_UP) | (1 << PRIM_RX)));  // set device as RX mode
     Nrf24_ceHi(dev);
-    Nrf24_configRegister(dev, STATUS,
+    Nrf24_configRegister(dev, REG_STATUS,
                          (1 << TX_DS) | (1 << MAX_RT));  // Clear seeded interrupt and max tx number interrupt
 }
 
@@ -454,7 +454,7 @@ void Nrf24_powerUpTx(NRF24_t * dev)
 {
     dev->PTX = 1;
     Nrf24_configRegister(dev, CONFIG, mirf_CONFIG | ((1 << PWR_UP) | (0 << PRIM_RX)));  // set device as TX mode
-    Nrf24_configRegister(dev, STATUS,
+    Nrf24_configRegister(dev, REG_STATUS,
                          (1 << TX_DS) | (1 << MAX_RT));  // Clear seeded interrupt and max tx number interrupt
 }
 
@@ -573,7 +573,7 @@ void Nrf24_printDetails(NRF24_t * dev)
 
 void Nrf24_print_status(uint8_t status)
 {
-    printf("STATUS\t\t = 0x%02x RX_DR=%x TX_DS=%x MAX_RT=%x RX_P_NO=%x TX_FULL=%x\r\n", status,
+    printf("REG_STATUS\t\t = 0x%02x RX_DR=%x TX_DS=%x MAX_RT=%x RX_P_NO=%x TX_FULL=%x\r\n", status,
            (status & _BV(RX_DR)) ? 1 : 0, (status & _BV(TX_DS)) ? 1 : 0, (status & _BV(MAX_RT)) ? 1 : 0,
            ((status >> RX_P_NO) & 0x07), (status & _BV(TX_FULL)) ? 1 : 0);
 }

@@ -1,7 +1,3 @@
-/**
- * @file AS5600.h
- * @brief Driver for the AS5600 magnetic rotary encoder, supporting both I2C configuration and Analog reading.
- */
 #ifndef AS5600_H
 #define AS5600_H
 

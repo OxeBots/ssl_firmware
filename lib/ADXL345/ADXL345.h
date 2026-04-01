@@ -1,14 +1,3 @@
-/**
- * @file ADXL345.h
- * @brief Based on Analog Devices ADXL345 datasheet rev. C, 5/2011
- * 7/31/2011 by Jeff Rowberg <jeff@rowberg.net>
- * Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
- * 1/20/2013 by Chris Howells <chris@howells.net>
- * Updated to support ESP-IDF v4.0 and later
- * * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not equal to the original.
- */
-
-
 #ifndef _ADXL345_H_
 #define _ADXL345_H_
 

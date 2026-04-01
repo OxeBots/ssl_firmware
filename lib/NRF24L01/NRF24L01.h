@@ -1,11 +1,3 @@
-/**
- * @file NRF24L01.h
- * @brief C++ wrapper driver for the mirf nRF24L01 library.
- *
- * This driver is transport-only. It passes raw byte payloads to/from the
- * application layer without any knowledge of the protocol message format.
- * All encoding, decoding, and dispatch logic lives in main.cpp.
- */
 #ifndef _NRF24L01_H_
 #define _NRF24L01_H_
 

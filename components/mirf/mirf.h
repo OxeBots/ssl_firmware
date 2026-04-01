@@ -35,7 +35,7 @@ extern "C"
 #define SETUP_RETR 0x04
 #define RF_CH 0x05
 #define RF_SETUP 0x06
-#define STATUS 0x07
+#define REG_STATUS 0x07
 #define OBSERVE_TX 0x08
 #define CD 0x09
 #define RX_ADDR_P0 0x0A
@@ -51,7 +51,7 @@ extern "C"
 #define RX_PW_P3 0x14
 #define RX_PW_P4 0x15
 #define RX_PW_P5 0x16
-#define FIFO_STATUS 0x17
+#define REG_FIFO_STATUS 0x17
 #define DYNPD 0x1C
 #define FEATURE 0x1D
 

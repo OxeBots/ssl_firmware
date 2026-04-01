@@ -1,7 +1,3 @@
-/**
- * @file wheel_state_estimator.h
- * @brief High-level manager for multiple AS5600 encoders, handling ADC reading, EKF filtering, and calibration.
- */
 #ifndef KINEMATICS_WHEEL_STATE_ESTIMATOR_H
 #define KINEMATICS_WHEEL_STATE_ESTIMATOR_H
 
@@ -39,6 +35,37 @@ struct AS5600Settings
 
 class WheelStateEstimator
 {
+   public:
+    static WheelStateEstimator & get_instance();
+    WheelStateEstimator(const WheelStateEstimator &) = delete;
+    WheelStateEstimator & operator=(const WheelStateEstimator &) = delete;
+
+    // Lifecycle
+    esp_err_t init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
+                   adc_atten_t attenuation = ADC_ATTEN_DB_12);
+
+    void suspend();
+    void resume();
+
+    // Calibration loading (non-blocking)
+    esp_err_t load_calibration();
+
+    // Calibration execution (blocking)
+    esp_err_t calibrate_encoders(uint32_t duration_ms = 5000, bool stop_on_full_range = true);
+
+    // Calibration state queries
+    bool is_calibrated() const;
+    bool is_channel_calibrated(size_t channel) const;
+
+    // I2C configuration (advanced)
+    esp_err_t configure_encoder(uint8_t channel_idx, const AS5600Settings & settings = AS5600Settings());
+
+    // Data accessors
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_deg();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_rpm();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_acceleration_rps2();
+
    private:
     struct EncoderChannel
     {
@@ -49,44 +76,28 @@ class WheelStateEstimator
     WheelStateEstimator();
     ~WheelStateEstimator();
 
+    // Task and ADC handling
     void adc_task();
     static void s_adc_task_wrapper(void * param);
     static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t * edata,
                                          void * user_data);
 
+    // Config helpers
     esp_err_t apply_i2c_settings(AS5600 * enc, const AS5600Settings & settings);
     esp_err_t verify_i2c_settings(AS5600 * enc, const AS5600Settings & settings);
     esp_err_t process_otp_burn(AS5600 * enc, const AS5600Settings & settings);
+    bool all_channels_full_range() const;
 
+    // State variables
     bool m_initialized = false;
     bool m_is_suspended = false;
+    bool m_calibrated = false;
     adc_continuous_handle_t m_adc_handle;
     TaskHandle_t m_task_handle;
 
     std::array<EncoderChannel, NUM_ENC_CHANNELS> m_enc_channels;
     std::array<const EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
     SemaphoreHandle_t m_data_mutex;
-
-   public:
-    static WheelStateEstimator & get_instance();
-
-    WheelStateEstimator(const WheelStateEstimator &) = delete;
-    WheelStateEstimator & operator=(const WheelStateEstimator &) = delete;
-
-    esp_err_t init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
-                   adc_atten_t attenuation = ADC_ATTEN_DB_12);
-
-    void suspend();
-    void resume();
-
-    esp_err_t load_or_calibrate(uint32_t duration_ms = 5000);
-    esp_err_t force_calibration(uint32_t duration_ms, bool stop_on_stable = true);
-    esp_err_t configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings = AS5600Settings());
-
-    std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
-    std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_deg();
-    std::array<float, NUM_ENC_CHANNELS> get_filtered_rpm();
-    std::array<float, NUM_ENC_CHANNELS> get_filtered_acceleration_rps2();
 };
 
 #endif  // KINEMATICS_WHEEL_STATE_ESTIMATOR_H

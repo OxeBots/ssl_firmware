@@ -2203,11 +2203,11 @@ esp_err_t ADXL345::load_calibration_from_nvs()
         else
         {
             ESP_LOGE(TAG, "NVS Blob size mismatch! Expected %zu, got %zu", sizeof(data), req_size);
-            return ESP_ERR_NVS_INVALID_LENGTH;
+            return ESP_ERR_INVALID_SIZE;
         }
     }
 
-    if (err == ESP_ERR_NVS_NOT_FOUND)
+    if (err == ESP_ERR_NOT_FOUND)
         ESP_LOGW(TAG, "Accelerometer calibration not found in NVS.");
 
     return err;

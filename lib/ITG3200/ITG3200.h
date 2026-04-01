@@ -1,12 +1,3 @@
-/**
- * @file ITG3200.h
- * @brief I2Cdev library collection - ITG3200 I2C device class header file
- * * Based on InvenSense ITG-3200 datasheet rev. 1.4, 3/30/2010 (PS-ITG-3200A-00-01.4)
- * 7/31/2011 by Jeff Rowberg <jeff@rowberg.net>
- * Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
- * * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not equal to the
- * original.
- */
 #ifndef _ITG3200_H_
 #define _ITG3200_H_
 

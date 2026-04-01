@@ -1,7 +1,3 @@
-/**
- * @file QMC5883L.cpp
- * @brief Driver implementation for the QMC5883L I2C magnetometer sensor.
- */
 #include "QMC5883L.h"
 
 static const char * TAG = "QMC5883L";
@@ -267,10 +263,10 @@ esp_err_t QMC5883L::load_calibration_from_nvs()
         else
         {
             ESP_LOGE(TAG, "NVS Blob size mismatch! Expected %zu, got %zu", sizeof(data), req_size);
-            return ESP_ERR_NVS_INVALID_LENGTH;
+            return ESP_ERR_INVALID_SIZE;
         }
     }
-    else if (err == ESP_ERR_NVS_NOT_FOUND)
+    else if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_NVS_NOT_FOUND)
         ESP_LOGW(TAG, "Magnetometer calibration not found in NVS.");
     else
         ESP_LOGE(TAG, "Error reading calibration from NVS: %s", esp_err_to_name(err));

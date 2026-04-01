@@ -1,9 +1,3 @@
-/**
- * @file omni_robot.h
- * @brief Defines the kinematics for an omnidirectional robot with four omnidirectional wheels.
- * This class is pure math and has no hardware dependencies.
- */
-
 #ifndef KINEMATICS_OMNI_ROBOT_H
 #define KINEMATICS_OMNI_ROBOT_H
 

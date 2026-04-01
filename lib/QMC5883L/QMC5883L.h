@@ -1,7 +1,3 @@
-/**
- * @file QMC5883L.h
- * @brief Driver for the QMC5883L I2C magnetometer sensor.
- */
 #ifndef _QMC5883L_H_
 #define _QMC5883L_H_
 
@@ -78,12 +74,6 @@ class QMC5883L
 
     void set_magnetic_declination(int degrees, uint8_t minutes);
     void set_smoothing(uint8_t steps, bool adv);
-    void clear_calibration();
-    void set_calibration_offsets(float x_offset, float y_offset, float z_offset);
-    void set_calibration_scales(float x_scale, float y_scale, float z_scale);
-    float get_calibration_offset(uint8_t index) const;
-    float get_calibration_scale(uint8_t index) const;
-
     void read();
 
     int16_t inline get_x() const { return get_axis(0); }
@@ -96,14 +86,16 @@ class QMC5883L
     void get_direction(char * myArray, int azimuth) const;
     uint8_t get_chip_id();
 
-    // ========== CALIBRATION ROUTINES ==========
-
+    // Calibration routines
     void start_calibration_mode(uint32_t seconds);
     bool calibration_update();
     void stop_calibration_mode();
     bool is_calibrated() const;
-
-    // ========== NVS PERSISTENCE ==========
+    void clear_calibration();
+    void set_calibration_offsets(float x_offset, float y_offset, float z_offset);
+    void set_calibration_scales(float x_scale, float y_scale, float z_scale);
+    float get_calibration_offset(uint8_t index) const;
+    float get_calibration_scale(uint8_t index) const;
 
     esp_err_t load_calibration_from_nvs();
     esp_err_t save_calibration_to_nvs();
@@ -127,7 +119,7 @@ class QMC5883L
     int16_t m_v_raw[3] = {0, 0, 0};
     int16_t get_axis(int index) const;
 
-    // Smoothing Data
+    // Smoothing
     int16_t m_v_history[10][3] = {{0}};
     int m_v_scan = 0;
     int32_t m_v_totals[3] = {0, 0, 0};
@@ -135,21 +127,19 @@ class QMC5883L
 
     void apply_smoothing();
 
-    // Calibration Data
+    // Calibration data
     float m_offset[3] = {0.f, 0.f, 0.f};
     float m_scale[3] = {1.f, 1.f, 1.f};
     int16_t m_v_calibrated[3] = {0, 0, 0};
 
     void apply_calibration();
 
-    // Calibration State
     bool m_calib_active = false;
     uint64_t m_calib_start_time = 0;
     uint32_t m_calib_duration_us = 0;
     int16_t m_calib_min[3] = {0, 0, 0};
     int16_t m_calib_max[3] = {0, 0, 0};
 
-    // Constants
     const char m_bearings[16][3] = {{' ', ' ', 'N'},  //
                                     {'N', 'N', 'E'},  //
                                     {' ', 'N', 'E'},  //

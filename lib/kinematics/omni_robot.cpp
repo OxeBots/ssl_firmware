@@ -1,11 +1,3 @@
-/**
- * @file omni_robot.cpp
- * @brief Defines the kinematics for an omnidirectional robot with four omnidirectional wheels.
- * This class is pure math and has no hardware dependencies.
- * * @details See https://control.ros.org/rolling/doc/ros2_controllers/doc/mobile_robot_kinematics.html
- * for mathematical details.
- */
-
 #include "omni_robot.h"
 
 using namespace config::kinematic;

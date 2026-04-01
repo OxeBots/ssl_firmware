@@ -1,7 +1,3 @@
-/**
- * @file helper_func.h
- * @brief General helper functions.
- */
 #ifndef HELPER_FUNC_H
 #define HELPER_FUNC_H
 

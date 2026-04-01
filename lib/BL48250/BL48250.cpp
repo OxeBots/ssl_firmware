@@ -72,6 +72,12 @@ BL48250::~BL48250()
     }
 }
 
+/**
+ * @brief Set PWM duty cycles and directions for all 4 motors.
+ *
+ * @param duties Array of 4 duty cycle values (0 to max_duty_)
+ * @param directions Array of 4 direction values (MOTOR_CW or MOTOR_CCW)
+ */
 void BL48250::set_duties(const std::array<uint32_t, 4> & duties, const std::array<uint8_t, 4> & directions)
 {
     for (size_t i = 0; i < 4; ++i)
@@ -85,6 +91,12 @@ void BL48250::set_duties(const std::array<uint32_t, 4> & duties, const std::arra
     }
 }
 
+/**
+ * @brief Print driver state (PWM config, duty cycles, directions) to serial log.
+ *
+ * Outputs PWM frequency, resolution, and per-motor GPIO assignments, direction,
+ * and duty cycle percentages. Useful for debugging motor driver configuration.
+ */
 void BL48250::debugPrint() const
 {
     ESP_LOGI(TAG, "\nBL48250 Driver State:");

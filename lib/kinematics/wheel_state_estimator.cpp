@@ -1,15 +1,7 @@
-/**
- * @file wheel_state_estimator.cpp
- * @brief High-level manager for multiple AS5600 encoders, handling ADC reading, EKF filtering, and calibration.
- */
-
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "WheelStateEstimator";
 
-/**
- * @brief Returns the instance of the WheelStateEstimator.
- */
 WheelStateEstimator & WheelStateEstimator::get_instance()
 {
     static WheelStateEstimator instance;
@@ -152,48 +144,53 @@ void WheelStateEstimator::resume()
 }
 
 /**
- * @brief Loads calibration from NVS. If missing, runs the interactive calibration routine.
- * @param duration_ms Time to block and wait for calibration if missing.
+ * @brief Loads calibration from NVS for all encoder channels.
+ * @return ESP_OK if all calibrations loaded, ESP_ERR_NOT_FOUND if any missing.
  */
-esp_err_t WheelStateEstimator::load_or_calibrate(uint32_t duration_ms)
+esp_err_t WheelStateEstimator::load_calibration()
 {
-    bool missing_calibration = false;
+    bool all_calibrated = true;
 
-    // We let the AS5600 object manage NVS reading via NVSManager (which safely suspends ADC inherently)
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
         if (m_enc_channels[i].encoder->load_calibration_from_nvs() != ESP_OK)
         {
-            ESP_LOGW(TAG, "Missing calibration for Ch %zu", i);
-            missing_calibration = true;
+            ESP_LOGW(TAG, "Channel %zu calibration not found", i);
+            all_calibrated = false;
         }
     }
 
-    if (missing_calibration)
+    if (all_calibrated)
     {
-        ESP_LOGW(TAG, "Entering Calibration Mode. Please rotate all wheels fully!");
-        return force_calibration(duration_ms, true);
+        ESP_LOGI(TAG, "All AS5600 calibrations loaded via NVSManager.");
+        m_calibrated = true;
+        return ESP_OK;
     }
-
-    ESP_LOGI(TAG, "All AS5600 calibration loaded via NVSManager.");
-    return ESP_OK;
+    else
+    {
+        m_calibrated = false;
+        return ESP_ERR_NOT_FOUND;
+    }
 }
 
 /**
- * @brief Performs range calibration (Min/Max Voltage) and saves to NVS.
+ * @brief Performs range calibration (Min/Max Voltage) for all encoders and saves to NVS.
  * Blocks for 'duration_ms' or until all sensors hit FULL_RANGE_THRESHOLD_MV.
- * @param stop_on_stable If true, stops early if full range (0-3.3V) is detected.
+ * @param duration_ms Time to block and wait for calibration.
+ * @param stop_on_full_range If true, stops early if full range (0-3.3V) is detected.
+ * @return ESP_OK if all channels calibrated successfully.
  */
-esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop_on_stable)
+esp_err_t WheelStateEstimator::calibrate_encoders(uint32_t duration_ms, bool stop_on_full_range)
 {
+    ESP_LOGI(TAG, "Starting encoder calibration. Rotate all wheels fully!");
+
+    // Start calibration mode on all encoders
     for (auto & ch : m_enc_channels)
     {
         ch.encoder->stop_calibration_mode();
         ch.encoder->reset_calibration_min_max();
         ch.encoder->start_calibration_mode();
     }
-
-    ESP_LOGI(TAG, "Calibration started. Duration: %lu ms", duration_ms);
 
     TickType_t end_tick = xTaskGetTickCount() + pdMS_TO_TICKS(duration_ms);
     bool all_done = false;
@@ -209,7 +206,7 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
                 stable_count++;
         }
 
-        if (stop_on_stable && stable_count == NUM_ENC_CHANNELS)
+        if (stop_on_full_range && stable_count == NUM_ENC_CHANNELS)
         {
             ESP_LOGI(TAG, "All sensors reached full range. Stopping early.");
             all_done = true;
@@ -242,7 +239,48 @@ esp_err_t WheelStateEstimator::force_calibration(uint32_t duration_ms, bool stop
         }
     }
 
-    return (success_count == NUM_ENC_CHANNELS) ? ESP_OK : ESP_FAIL;
+    m_calibrated = (success_count == NUM_ENC_CHANNELS);
+    return (m_calibrated) ? ESP_OK : ESP_FAIL;
+}
+
+/**
+ * @brief Checks if all encoder channels are calibrated.
+ * @return true if all channels are calibrated.
+ */
+bool WheelStateEstimator::is_calibrated() const
+{
+    return m_calibrated;
+}
+
+/**
+ * @brief Checks if a specific encoder channel is calibrated.
+ * @param channel Channel index (0-3).
+ * @return true if the channel is calibrated (has valid min/max range).
+ */
+bool WheelStateEstimator::is_channel_calibrated(size_t channel) const
+{
+    if (channel >= NUM_ENC_CHANNELS)
+        return false;
+
+    // Check if encoder has valid calibration range loaded
+    auto * enc = m_enc_channels[channel].encoder.get();
+    int range = enc->get_calib_max() - enc->get_calib_min();
+    return (range >= MIN_VALID_SWING_MV);
+}
+
+/**
+ * @brief Helper to check if all channels have reached full voltage range.
+ * @return true if all channels have range >= FULL_RANGE_THRESHOLD_MV.
+ */
+bool WheelStateEstimator::all_channels_full_range() const
+{
+    for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
+    {
+        auto * enc = m_enc_channels[i].encoder.get();
+        if ((enc->get_calib_max() - enc->get_calib_min()) < FULL_RANGE_THRESHOLD_MV)
+            return false;
+    }
+    return true;
 }
 
 /**
@@ -391,7 +429,7 @@ void WheelStateEstimator::adc_task()
  * @param settings The configuration settings to apply.
  * @return ESP_OK on success, ESP_ERR_TIMEOUT if sensor not found.
  */
-esp_err_t WheelStateEstimator::configure_encoder_i2c(uint8_t channel_idx, const AS5600Settings & settings)
+esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx, const AS5600Settings & settings)
 {
     if (channel_idx >= NUM_ENC_CHANNELS)
         return ESP_ERR_INVALID_ARG;

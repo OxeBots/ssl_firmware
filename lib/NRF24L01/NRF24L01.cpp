@@ -1,10 +1,3 @@
-/**
- * @file NRF24L01.cpp
- * @brief C++ wrapper driver for the mirf nRF24L01 library.
- *
- * Transport-only layer: sends and receives raw byte payloads.
- */
-
 #include "NRF24L01.h"
 
 static const char * TAG = "NRF24L01";

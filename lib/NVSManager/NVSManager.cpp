@@ -1,16 +1,15 @@
-/**
- * @file NVSManager.cpp
- * @brief Singleton manager for non-volatile storage (NVS) operations, ensuring hardware safety.
- */
 #include "NVSManager.h"
 
 static const char * TAG = "NVSManager";
 
-std::function<void()> NVSManager::m_suspend_cb = nullptr;
-std::function<void()> NVSManager::m_resume_cb = nullptr;
+QueueHandle_t NVSManager::m_op_queue = nullptr;
 
 /**
  * @brief Initializes the NVS flash partition.
+ *
+ * Calls nvs_flash_init(). If the partition is corrupt or has an incompatible
+ * version, erases it and reinitializes.
+ *
  * @return ESP_OK on success.
  */
 esp_err_t NVSManager::init()
@@ -19,6 +18,7 @@ esp_err_t NVSManager::init()
 
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
+        ESP_LOGW(TAG, "NVS partition corrupt or incompatible — erasing and reinitializing.");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
@@ -27,174 +27,305 @@ esp_err_t NVSManager::init()
 }
 
 /**
- * @brief Set callbacks to suspend/resume sensitive hardware (like ADC continuous mode)
- * to prevent flash contention during NVS read/write operations.
- * @param suspend_cb Function to call before NVS access.
- * @param resume_cb Function to call after NVS access.
+ * @brief Create the internal operation queue and launch the nvs_writer task.
+ *
+ * Must be called after init(). The nvs_writer task (priority 4, 4096-byte stack)
+ * is the sole caller of ESP-IDF nvs_* functions. Serializing all NVS access
+ * through one task avoids flash contention with the ADC continuous driver.
+ *
+ * After this call, save_* and load_* are safe from any task context.
  */
-void NVSManager::set_adc_callbacks(std::function<void()> suspend_cb, std::function<void()> resume_cb)
+void NVSManager::start()
 {
-    m_suspend_cb = suspend_cb;
-    m_resume_cb = resume_cb;
+    configASSERT(m_op_queue == nullptr);
+    m_op_queue = xQueueCreate(QUEUE_DEPTH, sizeof(NvsOp));
+    configASSERT(m_op_queue != nullptr);
+    xTaskCreate(nvs_writer_task, "nvs_writer", 4096, nullptr, 4, nullptr);
+    ESP_LOGI(TAG, "NVS writer started (queue_depth=%zu, blob_max=%zu).", QUEUE_DEPTH, BLOB_MAX);
 }
 
 /**
- * @brief Executes an NVS operation while wrapping it in the suspend/resume callbacks.
- * @param func Lambda or function to execute.
- */
-void NVSManager::execute_safe(const std::function<void()> & func)
-{
-    if (m_suspend_cb)
-        m_suspend_cb();
-
-    func();
-
-    if (m_resume_cb)
-        m_resume_cb();
-}
-
-/**
- * @brief Saves a 32-bit integer to NVS safely.
- * @param ns Namespace string.
- * @param key Key string.
- * @param value Integer value to save.
- * @return ESP_OK on success.
+ * @brief Queue a 32-bit integer write.
+ *
+ * The value is copied into the queue message at call time. The caller's
+ * data is safe to modify or free immediately after this returns.
+ *
+ * Safe from any task or ISR context after start() has been called.
+ *
+ * @param ns   Namespace (max 15 chars).
+ * @param key  Key (max 15 chars).
+ * @param value 32-bit integer to write.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if start() not called,
+ *         ESP_ERR_TIMEOUT if the queue is full.
  */
 esp_err_t NVSManager::save_i32(const char * ns, const char * key, int32_t value)
 {
-    esp_err_t err = ESP_OK;
-
-    execute_safe([&]() {
-        nvs_handle_t handle;
-        err = nvs_open(ns, NVS_READWRITE, &handle);
-
-        if (err == ESP_OK)
-        {
-            err = nvs_set_i32(handle, key, value);
-            if (err == ESP_OK)
-                err = nvs_commit(handle);
-
-            nvs_close(handle);
-        }
-    });
-
-    if (err == ESP_OK)
-        ESP_LOGI(TAG, "Saved i32  [%s/%s] = %ld", ns, key, (long)value);
-    else
-        ESP_LOGE(TAG, "Failed to save i32 [%s/%s]: %s", ns, key, esp_err_to_name(err));
-
-    return err;
-}
-
-/**
- * @brief Saves a 32-bit integer directly to NVS without calling the ADC
- *        suspend/resume callbacks.  Safe to call from any task context that
- *        does not hold ADC continuous driver resources.
- */
-esp_err_t NVSManager::save_i32_direct(const char * ns, const char * key, int32_t value)
-{
-    esp_err_t err = ESP_OK;
-    nvs_handle_t handle;
-
-    err = nvs_open(ns, NVS_READWRITE, &handle);
-    if (err == ESP_OK)
+    if (m_op_queue == nullptr)
     {
-        err = nvs_set_i32(handle, key, value);
-        if (err == ESP_OK)
-            err = nvs_commit(handle);
-        nvs_close(handle);
+        ESP_LOGE(TAG, "save_i32 called before start()");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (err == ESP_OK)
-        ESP_LOGI(TAG, "Saved i32  [%s/%s] = %ld (direct)", ns, key, (long)value);
-    else
-        ESP_LOGE(TAG, "Failed to save i32 [%s/%s]: %s", ns, key, esp_err_to_name(err));
+    NvsOp op{};
+    op.type = NvsOpType::WRITE_I32;
+    memcpy(op.write.data, &value, sizeof(value));
+    op.write.len = sizeof(value);
+    strncpy(op.ns, ns, sizeof(op.ns) - 1);
+    strncpy(op.key, key, sizeof(op.key) - 1);
 
-    return err;
+    if (xQueueSend(m_op_queue, &op, pdMS_TO_TICKS(100)) != pdPASS)
+    {
+        ESP_LOGE(TAG, "NVS write queue full — i32 [%s/%s]=%ld not persisted!", ns, key, (long)value);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    ESP_LOGD(TAG, "Queued i32 write [%s/%s] = %ld", ns, key, (long)value);
+    return ESP_OK;
 }
 
 /**
- * @brief Loads a 32-bit integer from NVS safely.
- * @param ns Namespace string.
- * @param key Key string.
- * @param value Pointer to store loaded value.
- * @return ESP_OK on success.
- */
-esp_err_t NVSManager::load_i32(const char * ns, const char * key, int32_t * value)
-{
-    esp_err_t err = ESP_OK;
-
-    execute_safe([&]() {
-        nvs_handle_t handle;
-        err = nvs_open(ns, NVS_READONLY, &handle);
-
-        if (err == ESP_OK)
-        {
-            err = nvs_get_i32(handle, key, value);
-            nvs_close(handle);
-        }
-    });
-
-    return err;
-}
-
-/**
- * @brief Saves a binary blob to NVS safely.
- * @param ns Namespace string.
- * @param key Key string.
- * @param data Pointer to the binary data.
- * @param length Size of the binary data.
- * @return ESP_OK on success.
+ * @brief Queue a binary blob write.
+ *
+ * The blob data is copied into the queue message at call time. The caller's
+ * buffer is safe to modify or free immediately after this returns.
+ *
+ * Safe from any task or ISR context after start() has been called.
+ *
+ * @param ns     Namespace (max 15 chars).
+ * @param key    Key (max 15 chars).
+ * @param data   Pointer to binary data.
+ * @param length Size of data in bytes. Must be <= BLOB_MAX (128).
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if start() not called,
+ *         ESP_ERR_INVALID_ARG if length > BLOB_MAX,
+ *         ESP_ERR_TIMEOUT if the queue is full.
  */
 esp_err_t NVSManager::save_blob(const char * ns, const char * key, const void * data, size_t length)
 {
-    esp_err_t err = ESP_OK;
+    if (m_op_queue == nullptr)
+    {
+        ESP_LOGE(TAG, "save_blob called before start()");
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    execute_safe([&]() {
-        nvs_handle_t handle;
-        err = nvs_open(ns, NVS_READWRITE, &handle);
+    if (length > BLOB_MAX)
+    {
+        ESP_LOGE(TAG, "save_blob: blob too large (%zu > %zu) for [%s/%s]", length, BLOB_MAX, ns, key);
+        return ESP_ERR_INVALID_ARG;
+    }
 
-        if (err == ESP_OK)
-        {
-            err = nvs_set_blob(handle, key, data, length);
+    NvsOp op{};
+    op.type = NvsOpType::WRITE_BLOB;
+    op.write.len = length;
+    memcpy(op.write.data, data, length);
+    strncpy(op.ns, ns, sizeof(op.ns) - 1);
+    strncpy(op.key, key, sizeof(op.key) - 1);
 
-            if (err == ESP_OK)
-                err = nvs_commit(handle);
+    if (xQueueSend(m_op_queue, &op, pdMS_TO_TICKS(100)) != pdPASS)
+    {
+        ESP_LOGE(TAG, "NVS write queue full — blob [%s/%s] not persisted!", ns, key);
+        return ESP_ERR_TIMEOUT;
+    }
 
-            nvs_close(handle);
-        }
-    });
-
-    if (err == ESP_OK)
-        ESP_LOGI(TAG, "Saved blob [%s/%s] (%zu bytes)", ns, key, length);
-    else
-        ESP_LOGE(TAG, "Failed to save blob [%s/%s]: %s", ns, key, esp_err_to_name(err));
-
-    return err;
+    ESP_LOGD(TAG, "Queued blob write [%s/%s] (%zu bytes)", ns, key, length);
+    return ESP_OK;
 }
 
 /**
- * @brief Loads a binary blob from NVS safely.
- * @param ns Namespace string.
- * @param key Key string.
- * @param data Pointer to store the loaded binary data.
- * @param length Pointer to the size of the binary data buffer.
- * @return ESP_OK on success.
+ * @brief Read a 32-bit integer from NVS.
+ *
+ * Blocks the calling task until the nvs_writer task completes the read.
+ * Must NOT be called from ISR context.
+ *
+ * @param ns   Namespace (max 15 chars).
+ * @param key  Key (max 15 chars).
+ * @param out  Pointer to store the loaded value.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if start() not called,
+ *         ESP_ERR_TIMEOUT if the queue is full,
+ *         ESP_ERR_NOT_FOUND if the key does not exist.
  */
-esp_err_t NVSManager::load_blob(const char * ns, const char * key, void * data, size_t * length)
+esp_err_t NVSManager::load_i32(const char * ns, const char * key, int32_t * out)
 {
-    esp_err_t err = ESP_OK;
+    configASSERT(!xPortInIsrContext());
 
-    execute_safe([&]() {
+    if (m_op_queue == nullptr)
+    {
+        ESP_LOGE(TAG, "load_i32 called before start()");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    configASSERT(sem != nullptr);
+
+    esp_err_t result = ESP_FAIL;
+
+    NvsOp op{};
+    op.type = NvsOpType::READ_I32;
+    op.read.data_out = out;
+    op.read.response_sem = sem;
+    op.read.result_out = &result;
+    strncpy(op.ns, ns, sizeof(op.ns) - 1);
+    strncpy(op.key, key, sizeof(op.key) - 1);
+
+    if (xQueueSend(m_op_queue, &op, pdMS_TO_TICKS(100)) != pdPASS)
+    {
+        ESP_LOGE(TAG, "NVS read queue full — i32 [%s/%s]", ns, key);
+        vSemaphoreDelete(sem);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    xSemaphoreTake(sem, portMAX_DELAY);
+    vSemaphoreDelete(sem);
+
+    return result;
+}
+
+/**
+ * @brief Read a binary blob from NVS.
+ *
+ * Blocks the calling task until the nvs_writer task completes the read.
+ * Must NOT be called from ISR context.
+ *
+ * The caller must set *length to the size of the output buffer before calling.
+ * On success, *length is updated to the actual number of bytes read.
+ *
+ * @param ns     Namespace (max 15 chars).
+ * @param key    Key (max 15 chars).
+ * @param out    Pointer to store the loaded data.
+ * @param length Pointer to buffer size (in/out: updated to actual bytes read).
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE if start() not called,
+ *         ESP_ERR_INVALID_ARG if *length > BLOB_MAX,
+ *         ESP_ERR_TIMEOUT if the queue is full,
+ *         ESP_ERR_NVS_NOT_FOUND if the key does not exist.
+ */
+esp_err_t NVSManager::load_blob(const char * ns, const char * key, void * out, size_t * length)
+{
+    configASSERT(!xPortInIsrContext());
+
+    if (m_op_queue == nullptr)
+    {
+        ESP_LOGE(TAG, "load_blob called before start()");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (*length > BLOB_MAX)
+    {
+        ESP_LOGE(TAG, "load_blob: requested length (%zu) exceeds BLOB_MAX (%zu)", *length, BLOB_MAX);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    configASSERT(sem != nullptr);
+
+    esp_err_t result = ESP_FAIL;
+
+    NvsOp op{};
+    op.type = NvsOpType::READ_BLOB;
+    op.read.data_out = out;
+    op.read.len_out = length;
+    op.read.response_sem = sem;
+    op.read.result_out = &result;
+    strncpy(op.ns, ns, sizeof(op.ns) - 1);
+    strncpy(op.key, key, sizeof(op.key) - 1);
+
+    if (xQueueSend(m_op_queue, &op, pdMS_TO_TICKS(100)) != pdPASS)
+    {
+        ESP_LOGE(TAG, "NVS read queue full — blob [%s/%s]", ns, key);
+        vSemaphoreDelete(sem);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    xSemaphoreTake(sem, portMAX_DELAY);
+    vSemaphoreDelete(sem);
+
+    return result;
+}
+
+/**
+ * @brief FreeRTOS task function that processes all NVS operations from the queue.
+ *
+ * This task is the sole caller of ESP-IDF nvs_* functions, which serializes
+ * all flash access and avoids contention of the hardware.
+ */
+void NVSManager::nvs_writer_task(void * /*arg*/)
+{
+    NvsOp op;
+
+    while (true)
+    {
+        if (xQueueReceive(m_op_queue, &op, portMAX_DELAY) != pdTRUE)
+            continue;
+
+        esp_err_t err = ESP_OK;
         nvs_handle_t handle;
-        err = nvs_open(ns, NVS_READONLY, &handle);
 
-        if (err == ESP_OK)
+        switch (op.type)
         {
-            err = nvs_get_blob(handle, key, data, length);
-            nvs_close(handle);
-        }
-    });
+            case NvsOpType::WRITE_I32:
+            {
+                int32_t value;
+                memcpy(&value, op.write.data, sizeof(value));
 
-    return err;
+                err = nvs_open(op.ns, NVS_READWRITE, &handle);
+                if (err == ESP_OK)
+                {
+                    err = nvs_set_i32(handle, op.key, value);
+                    if (err == ESP_OK)
+                        err = nvs_commit(handle);
+                    nvs_close(handle);
+                }
+
+                if (err == ESP_OK)
+                    ESP_LOGD(TAG, "Saved i32  [%s/%s] = %ld", op.ns, op.key, (long)value);
+                else
+                    ESP_LOGE(TAG, "Failed to save i32 [%s/%s]: %s", op.ns, op.key, esp_err_to_name(err));
+                break;
+            }
+
+            case NvsOpType::WRITE_BLOB:
+            {
+                err = nvs_open(op.ns, NVS_READWRITE, &handle);
+                if (err == ESP_OK)
+                {
+                    err = nvs_set_blob(handle, op.key, op.write.data, op.write.len);
+                    if (err == ESP_OK)
+                        err = nvs_commit(handle);
+                    nvs_close(handle);
+                }
+
+                if (err == ESP_OK)
+                    ESP_LOGD(TAG, "Saved blob [%s/%s] (%zu bytes)", op.ns, op.key, op.write.len);
+                else
+                    ESP_LOGE(TAG, "Failed to save blob [%s/%s]: %s", op.ns, op.key, esp_err_to_name(err));
+                break;
+            }
+
+            case NvsOpType::READ_I32:
+            {
+                err = nvs_open(op.ns, NVS_READONLY, &handle);
+                if (err == ESP_OK)
+                {
+                    err = nvs_get_i32(handle, op.key, static_cast<int32_t *>(op.read.data_out));
+                    nvs_close(handle);
+                }
+
+                *op.read.result_out = err;
+                xSemaphoreGive(op.read.response_sem);
+                break;
+            }
+
+            case NvsOpType::READ_BLOB:
+            {
+                err = nvs_open(op.ns, NVS_READONLY, &handle);
+                if (err == ESP_OK)
+                {
+                    err = nvs_get_blob(handle, op.key, op.read.data_out, op.read.len_out);
+                    nvs_close(handle);
+                }
+
+                *op.read.result_out = err;
+                xSemaphoreGive(op.read.response_sem);
+                break;
+            }
+        }
+    }
 }

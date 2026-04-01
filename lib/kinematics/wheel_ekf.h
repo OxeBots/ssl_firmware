@@ -1,8 +1,3 @@
-/**
- * @file wheel_ekf.h
- * @brief A dedicated class for the wheel's state estimation using an EKF.
- * This class is pure math and has no hardware dependencies.
- */
 #ifndef KINEMATICS_WHEEL_EKF_H
 #define KINEMATICS_WHEEL_EKF_H
 
