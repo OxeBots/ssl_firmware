@@ -1,43 +1,81 @@
 {
-    "name": "PlatformIO",
-    "build": {
-        "dockerfile": "Dockerfile",
-        "context": ".",
-        "args": {
-            "FEDORA_COMPAT": "1",
-            "VARIANT": "bookworm"
-        }
-    },
-    "customizations": {
-        "vscode": {
-            "settings": {
-                "terminal.integrated.defaultProfile.linux": "zsh"
-            },
-            "extensions": [
-                "ms-vscode.cpptools",
-                "platformio.platformio-ide",
-                "pbkit.vscode-pbkit",
-                "jbenden.c-cpp-flylint",
-                "jeff-hykin.better-cpp-syntax",
-                "nordic-semiconductor.nrf-kconfig",
-                "alexnesnes.teleplot",
-                "hit9.bitproto",
-                "ms-python.python",
-                "charliermarsh.ruff"
-            ]
-        }
-    },
-    "forwardPorts": [
-        8008
-    ],
-    "mounts": [
-        "source=/dev/,target=/dev/,type=bind,consistency=consistent"
-    ],
-    "runArgs": [
-        "--privileged",
-        "--ipc=host",
-        "--network=host"
-    ],
-    "features": {},
-    "postAttachCommand": "sudo service udev restart"
+  "name": "PlatformIO + AI",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "args": {
+      "VARIANT": "bookworm",
+      "FEDORA_COMPAT": "1",
+      "TZ": "${localEnv:TZ:America/Sao_Paulo}",
+      "GIT_DELTA_VERSION": "0.18.2",
+      "ZSH_IN_DOCKER_VERSION": "1.2.0",
+      // AI agents — set to "0" to skip installation
+      "INSTALL_CLAUDE": "0",
+      "INSTALL_GEMINI": "0",
+      "INSTALL_QWEN": "0",
+      "INSTALL_CODEX": "0",
+      "INSTALL_OPENCODE": "0"
+    }
+  },
+  "runArgs": [
+    "--privileged",
+    "--ipc=host",
+    "--network=host"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "platformio.platformio-ide",
+        "pbkit.vscode-pbkit",
+        "jbenden.c-cpp-flylint",
+        "jeff-hykin.better-cpp-syntax",
+        "nordic-semiconductor.nrf-kconfig",
+        "alexnesnes.teleplot",
+        "hit9.bitproto",
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "mhutchie.git-graph",
+        "yzhang.markdown-all-in-one",
+        "stkb.rewrap"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "bash",
+            "icon": "terminal-bash"
+          },
+          "zsh": {
+            "path": "zsh"
+          }
+        },
+        "editor.formatOnSave": true
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "mounts": [
+    // Hardware access for PlatformIO
+    "source=/dev/,target=/dev/,type=bind,consistency=consistent",
+    // Persistent shell history (survives container rebuilds)
+    "source=pio-bash-history-${devcontainerId},target=/home/vscode/.history,type=volume",
+    // Persistent AI configs (survive container rebuilds)
+    "source=pio-claude-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=pio-gemini-config-${devcontainerId},target=/home/vscode/.gemini,type=volume",
+    "source=pio-qwen-config-${devcontainerId},target=/home/vscode/.qwen,type=volume",
+    "source=pio-codex-config-${devcontainerId},target=/home/vscode/.codex,type=volume"
+  ],
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    "GEMINI_CONFIG_DIR": "/home/vscode/.gemini",
+    "QWEN_CONFIG_DIR": "/home/vscode/.qwen",
+    "CODEX_CONFIG_DIR": "/home/vscode/.codex"
+  },
+  "forwardPorts": [
+    8008
+  ],
+  "postAttachCommand": "sudo service udev restart",
+  "features": {}
 }

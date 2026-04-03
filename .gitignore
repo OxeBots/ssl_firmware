@@ -6,3 +6,18 @@
 .vscode/ipch
 sdkconfig*
 !sdkconfig.defaults
+bitprotolib/
+__pycache__/
+ssl_robot_protocol_bp.py
+
+# AI agent tool configs (persisted via devcontainer volumes)
+.agents/
+.qwen/
+.codex/
+.claude/
+.gemini/
+
+# Editor / patch artifacts
+*.orig
+*.rej
+*~
