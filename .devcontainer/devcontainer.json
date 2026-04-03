@@ -18,9 +18,10 @@
     }
   },
   "runArgs": [
-    "--privileged",
     "--ipc=host",
-    "--network=host"
+    "--network=host",
+    "--device-cgroup-rule=c 188:* rmw",
+    "--device-cgroup-rule=c 166:* rmw"
   ],
   "customizations": {
     "vscode": {

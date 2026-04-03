@@ -106,9 +106,9 @@ RUN curl -fsSL -o /tmp/get-platformio.py \
       https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py \
  && python3 /tmp/get-platformio.py
 
-RUN $HOME/.platformio/penv/bin/pip install flawfinder lizard bitproto
+RUN $HOME/.platformio/penv/bin/pip install flawfinder lizard bitproto pyserial
 
-RUN echo 'export PATH="$PATH:$HOME/.platformio/penv/bin"' \
+RUN echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' \
       | tee -a /home/vscode/.bashrc /home/vscode/.zshrc
 
 # Configure zsh to use shared history file on persistent volume
