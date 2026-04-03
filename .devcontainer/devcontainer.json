@@ -18,8 +18,8 @@
     }
   },
   "runArgs": [
-    "--ipc=host",
-    "--network=host",
+    // Allow USB serial device access (FTDI/CH340 = major 188, CDC ACM = major 166)
+    // Combined with udev rules in Dockerfile — replaces --privileged
     "--device-cgroup-rule=c 188:* rmw",
     "--device-cgroup-rule=c 166:* rmw"
   ],
@@ -51,7 +51,8 @@
             "path": "zsh"
           }
         },
-        "editor.formatOnSave": true
+        "editor.formatOnSave": true,
+        "platformio-ide.pioHomeServerHttpPort": 8008
       }
     }
   },
@@ -77,6 +78,12 @@
   "forwardPorts": [
     8008
   ],
+  "portsAttributes": {
+    "8008": {
+      "label": "PlatformIO Home",
+      "onAutoForward": "notify"
+    }
+  },
   "postAttachCommand": "sudo service udev restart",
   "features": {}
 }
