@@ -4,9 +4,23 @@ Firmware for small-size league (SSL) robots based on the ESP32. It controls a 4-
 
 ## Setup
 
-The project is fully configured for Docker-based development. You only need VS Code with the Dev Containers extension installed.
+This project uses **git submodules** for some components. When cloning, you **must** include the `--recurse-submodules` flag so all dependencies are fetched.
 
-### Start the container
+### Cloning
+
+```bash
+git clone --recurse-submodules https://github.com/OxeBots/ssl_firmware.git
+```
+
+If you already cloned without submodules, fetch them manually:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Start the devlopment environment
+
+The project is fully configured for Docker-based development. You only need VS Code with the Dev Containers extension installed.
 
 1. Open VS Code
 2. Open this folder
