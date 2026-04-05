@@ -30,7 +30,7 @@ esp_err_t IMUGY85::init()
       .glitch_ignore_cnt = 7,
       .intr_priority = 0,
       .trans_queue_depth = 0,
-      .flags = {.enable_internal_pullup = 1, .allow_pd = 0},
+      .flags = {.enable_internal_pullup = true, .allow_pd = false},
     };
 
     esp_err_t err = i2c_new_master_bus(&i2c_cfg, &m_i2c_bus);

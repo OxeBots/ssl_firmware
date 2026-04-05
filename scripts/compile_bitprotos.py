@@ -1,7 +1,9 @@
-import os
+"""PlatformIO extra script: compiles .bitproto files and generates C code."""
+
 import glob
+import os
 import urllib.request
-from os.path import join, getmtime, exists, basename, splitext
+from os.path import basename, exists, getmtime, join, splitext
 
 
 def ensure_bitproto_runtime(env, output_dir):
@@ -28,14 +30,14 @@ def ensure_bitproto_runtime(env, output_dir):
             break
 
     if all_exist:
-        print("✅ bitproto runtime files already present. Skipping download.")
+        print("bitproto runtime files already present. Skipping download.")
         return
 
     # Download missing files (or all if some missing)
     for filename in files:
         dst = join(output_dir, filename)
         url = f"{base_url}/{filename}"
-        print(f"⬇️  Downloading {filename} version {version} from GitHub...")
+        print(f"...Downloading {filename} version {version} from GitHub...")
         try:
             with urllib.request.urlopen(url) as response:
                 if response.getcode() != 200:
@@ -43,9 +45,9 @@ def ensure_bitproto_runtime(env, output_dir):
                 content = response.read()
             with open(dst, "wb") as f:
                 f.write(content)
-            print(f"📄 Saved {filename} to {dst}")
+            print(f"Saved {filename} to {dst}")
         except Exception as e:
-            print(f"❌ Failed to download {filename}: {e}")
+            print(f"X Failed to download {filename}: {e}")
             env.Exit(1)
 
 
@@ -56,7 +58,7 @@ def compile_bitprotos(env):
     and generated C sources (including the runtime bitproto.c) are built into a
     static library that is linked automatically.
     """
-    # --- Configuration ------------------------------------------------------
+    # Configuration
     proto_dir = env.GetProjectOption("proto_dir", "proto")
     proto_dir = env.subst(proto_dir)
 
@@ -64,17 +66,14 @@ def compile_bitprotos(env):
     build_dir = env.subst("$BUILD_DIR")
     output_dir = join(build_dir, "proto_gen")
     bitproto_cmd = "bitproto {lang} {input} {out_dir}"
-    # ------------------------------------------------------------------------
 
     if not exists(proto_dir):
-        print(
-            f"⚠️  Proto directory '{proto_dir}' not found. Skipping bitproto compilation."
-        )
+        print(f"  Proto directory '{proto_dir}' not found. Skipping bitproto compilation.")
         return
 
     proto_files = glob.glob(join(proto_dir, "*.bitproto"))
     if not proto_files:
-        print(f"ℹ️  No .bitproto files found in '{proto_dir}'. Nothing to do.")
+        print(f"  No .bitproto files found in '{proto_dir}'. Nothing to do.")
         return
 
     os.makedirs(output_dir, exist_ok=True)
@@ -94,37 +93,33 @@ def compile_bitprotos(env):
             files_to_generate.append(pf)
 
     if not files_to_generate:
-        print("✅ All .bitproto files are up to date.")
+        print("All .bitproto files are up to date.")
     else:
-        print(
-            f"🔄 Compiling {len(files_to_generate)} .bitproto file(s) with bitproto..."
-        )
+        print(f"Compiling {len(files_to_generate)} .bitproto file(s) with bitproto...")
         for pf in files_to_generate:
             cmd = bitproto_cmd.format(lang=lang, out_dir=output_dir, input=pf)
             print(f"   Running: {cmd}")
             result = env.Execute(cmd)
             if result != 0:
-                print(f"❌ Failed to compile {pf}")
+                print(f"X Failed to compile {pf}")
                 env.Exit(1)
-        print("✅ Bitproto compilation finished.")
+        print("Bitproto compilation finished.")
 
-    # --- Ensure bitproto runtime (header and implementation) is present ---
+    # Ensure bitproto runtime (header and implementation) is present
     ensure_bitproto_runtime(env, output_dir)
 
-    # --- Add generated headers to the compiler's include path ---------------
+    # Add generated headers to the compiler's include path
     env.Append(CPPPATH=[output_dir])
 
-    # --- Build static library from all C sources in output_dir --------------
+    # Build static library from all C sources in output_dir
     # This includes generated _bp.c files AND the runtime bitproto.c
     all_c_sources = glob.glob(join(output_dir, "*.c"))
     if all_c_sources:
-        lib = env.StaticLibrary(
-            target=join(output_dir, "libbitproto_generated"), source=all_c_sources
-        )
-        print(f"🔧 Library target: {lib[0].abspath}")
+        lib = env.StaticLibrary(target=join(output_dir, "libbitproto_generated"), source=all_c_sources)
+        print(f"Library target: {lib[0].abspath}")
         env.Append(LIBS=[lib])
     else:
-        print("ℹ️  No C source files found in output directory.")
+        print("No C source files found in output directory.")
 
 
 try:

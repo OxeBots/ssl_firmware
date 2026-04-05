@@ -24,13 +24,19 @@ WheelController::WheelController()
   m_pid_outputs({0, 0, 0, 0}),
   m_kp(1.0f),
   m_ki(0.5f),
-  m_kd(0.01f)
+  m_kd(0.01f),
+  m_mutex(xSemaphoreCreateMutex())
 {
 }
 
 WheelController::~WheelController()
 {
     deinit();
+    if (m_mutex)
+    {
+        vSemaphoreDelete(m_mutex);
+        m_mutex = nullptr;
+    }
 }
 
 /**
@@ -106,11 +112,15 @@ void WheelController::deinit()
  */
 void WheelController::set_target_velocities(const std::array<float, 4> & velocities)
 {
+    if (!m_mutex)
+        return;
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
     for (int i = 0; i < 4; ++i)
     {
         m_target_velocities[i] =
           std::clamp(velocities[i], -config::driver::BL48250_MAX_VEL_RAD, config::driver::BL48250_MAX_VEL_RAD);
     }
+    xSemaphoreGive(m_mutex);
 }
 
 /**
@@ -122,10 +132,14 @@ void WheelController::set_target_velocities(const std::array<float, 4> & velocit
  */
 void WheelController::set_pid_tunings(float kp, float ki, float kd)
 {
+    if (!m_mutex)
+        return;
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
     m_kp = kp;
     m_ki = ki;
     m_kd = kd;
     for (int i = 0; i < 4; ++i) m_pids[i].SetTunings(m_kp, m_ki, m_kd);
+    xSemaphoreGive(m_mutex);
 }
 
 /**
@@ -190,7 +204,15 @@ void WheelController::control_task()
     {
         vTaskDelayUntil(&xLastWake, xPeriod);
 
-        if (m_tuning_mode)
+        if (!m_mutex)
+            continue;
+
+        bool tuning = false;
+        xSemaphoreTake(m_mutex, 0);
+        tuning = m_tuning_mode;
+        xSemaphoreGive(m_mutex);
+
+        if (tuning)
             continue;
 
         std::array<float, 4> current_rpm = WheelStateEstimator::get_instance().get_filtered_rpm();
@@ -198,6 +220,7 @@ void WheelController::control_task()
         std::array<uint32_t, 4> duties;
         std::array<uint8_t, 4> dirs;
 
+        xSemaphoreTake(m_mutex, portMAX_DELAY);
         for (int i = 0; i < 4; ++i)
         {
             // Convert encoder RPM to rad/s for the PID input.
@@ -228,6 +251,7 @@ void WheelController::control_task()
                 duties[i] = static_cast<uint32_t>(-output);
             }
         }
+        xSemaphoreGive(m_mutex);
 
         m_driver->set_duties(duties, dirs);
     }
@@ -243,7 +267,11 @@ void WheelController::control_task()
 void WheelController::tune_pid()
 {
     ESP_LOGI(TAG, "Starting PID auto-tuning on motor 0...");
+    if (m_mutex)
+        xSemaphoreTake(m_mutex, portMAX_DELAY);
     m_tuning_mode = true;
+    if (m_mutex)
+        xSemaphoreGive(m_mutex);
 
     float input = 0.0f, output = 0.0f;
     sTune tuner = sTune(&input, &output, sTune::ZN_PID, sTune::directIP, sTune::printSUMMARY);
@@ -288,5 +316,9 @@ void WheelController::tune_pid()
     set_pid_tunings(kp, ki, kd);
     save_pid_to_nvs(kp, ki, kd);
 
+    if (m_mutex)
+        xSemaphoreTake(m_mutex, portMAX_DELAY);
     m_tuning_mode = false;
+    if (m_mutex)
+        xSemaphoreGive(m_mutex);
 }

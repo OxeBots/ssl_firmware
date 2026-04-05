@@ -1,0 +1,33 @@
+{
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}",
+        "--clang-tidy",
+        "--completion-style=detailed",
+        "--header-insertion=never",
+        "--all-scopes-completion",
+        "--query-driver=/home/vscode/.platformio/packages/toolchain-xtensa-esp-elf/bin/*"
+    ],
+    // Python 
+    "python.defaultInterpreterPath": "/home/vscode/.platformio/penv/bin/python",
+    "python.languageServer": "None",
+    "python.terminal.activateEnvironment": true,
+    // Ruff (Python Linter)
+    "ruff.lineLength": 120,
+    "ruff.lint.select": [
+        "E",
+        "F",
+        "W"
+    ],
+    "ruff.lint.ignore": [
+        "F821",
+        "F405"
+    ],
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.codeActionsOnSave": {
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports.ruff": "explicit"
+        }
+    }
+}

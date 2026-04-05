@@ -93,7 +93,7 @@ class nRF24L01_Controller:
                     return nRF24L01_Controller(
                         port=port.device, baudrate=baudrate, timeout=timeout
                     )
-                except serial.serialutil.SerialException as e:
+                except serial.SerialException as e:
                     print(
                         f"{Colors.RED}Error connecting to {port.device}: {e}{Colors.RESET}"
                     )
@@ -107,7 +107,7 @@ class nRF24L01_Controller:
     def decode_gb2312(hex_string):
         """Decode GB2312 Chinese text from hex string"""
         try:
-            byte_data = bytes(int(x, 16) for x in hex_string.strip().split())
+            byte_data = bytearray(int(x, 16) for x in hex_string.strip().split())
             return byte_data.decode("gb2312")
         except Exception as e:
             return f"Decoding error: {e}"
@@ -332,7 +332,6 @@ class nRF24L01_Controller:
         )
         self.send_data(cfg.encode())
 
-
     def receive_data(self, timeout=0.5):
         """
         Receive a RobotTelemetry packet.
@@ -357,7 +356,7 @@ class nRF24L01_Controller:
                     buffer = buffer[6:]
 
                 if len(buffer) >= expected_len:
-                    packet = bytes(buffer[:expected_len])
+                    packet = bytearray(buffer[:expected_len])
 
                     raw_msg_type = packet[0] & 0x0F
                     if raw_msg_type != MSG_TYPE_TELEMETRY:
@@ -486,7 +485,7 @@ class CLIController:
                 )
 
                 if robot_id != ROBOT_ID_BROADCAST:
-                # Await a response from the robot firmware via NRF24 USB dongle, on average it takes 20ms. We will wait up to 200ms to be safe.
+                    # Await a response from the robot firmware via NRF24 USB dongle, on average it takes 20ms. We will wait up to 200ms to be safe.
 
                     self.device.receive_data(timeout=0.200)
                 else:
@@ -573,7 +572,7 @@ def main():
 
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}Stopped by user{Colors.RESET}")
-    except serial.serialutil.SerialException as e:
+    except serial.SerialException as e:
         print(f"\n{Colors.RED}Serial Error: {e}{Colors.RESET}")
         print(
             f"{Colors.YELLOW}Hint: Try 'sudo usermod -a -G dialout $USER'{Colors.RESET}"

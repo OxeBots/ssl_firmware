@@ -1,10 +1,8 @@
 #include <unity.h>
 
 #include <cmath>
-#include <stdexcept>
 
-#include "kinematics/omnidirectional_robot.cpp"  // Include the implementation file for testing
-#include "kinematics/omnidirectional_robot.hpp"
+#include "omni_robot.h"
 
 namespace config
 {
@@ -34,14 +32,13 @@ void assert_vector_equal(const vt::generic_vector<T, N> & expected, const vt::ge
     }
 }
 
-
 void test_pure_rotation()
 {
     OmnidirectionalRobot robot(config::test::RADIUS, config::test::WHEEL_DISTANCE);
 
     const vt::numeric_vector<4> expected = vt::numeric_vector<4>(config::test::ROTATION_FACTOR);
 
-    const vt::numeric_vector<4> actual = robot.computeWheelVelocities(vt::make_numeric_vector({1.0, 0.0, 0.0}));
+    const vt::numeric_vector<4> actual = robot.compute_wheel_velocities(vt::make_numeric_vector({1.0, 0.0, 0.0}));
 
     assert_vector_equal(expected, actual, "Pure rotation");
 }
@@ -54,7 +51,7 @@ void test_pure_translation_x()
       vt::make_numeric_vector<4>({config::test::TRANSLATION_FACTOR, -config::test::TRANSLATION_FACTOR,
                                   -config::test::TRANSLATION_FACTOR, config::test::TRANSLATION_FACTOR});
 
-    const vt::numeric_vector<4> actual = robot.computeWheelVelocities(vt::make_numeric_vector({0.0, 1.0, 0.0}));
+    const vt::numeric_vector<4> actual = robot.compute_wheel_velocities(vt::make_numeric_vector({0.0, 1.0, 0.0}));
 
     assert_vector_equal(expected, actual, "X translation");
 }
@@ -67,7 +64,7 @@ void test_pure_translation_y()
       vt::make_numeric_vector<4>({config::test::TRANSLATION_FACTOR, config::test::TRANSLATION_FACTOR,
                                   -config::test::TRANSLATION_FACTOR, -config::test::TRANSLATION_FACTOR});
 
-    const vt::numeric_vector<4> actual = robot.computeWheelVelocities(vt::make_numeric_vector({0.0, 0.0, 1.0}));
+    const vt::numeric_vector<4> actual = robot.compute_wheel_velocities(vt::make_numeric_vector({0.0, 0.0, 1.0}));
 
     assert_vector_equal(expected, actual, "Y translation");
 }
@@ -79,9 +76,9 @@ void test_kinematics_round_trip()
     const vt::numeric_vector<3> original = vt::make_numeric_vector<3>({0.5, 1.2, -0.8});
 
     const vt::numeric_vector<4> wheel_vel =
-      robot.computeWheelVelocities(vt::make_numeric_vector<3>({original[0], original[1], original[2]}));
+      robot.compute_wheel_velocities(vt::make_numeric_vector<3>({original[0], original[1], original[2]}));
 
-    const vt::numeric_vector<3> reconstructed = robot.computeBodyVelocities(wheel_vel);
+    const vt::numeric_vector<3> reconstructed = robot.compute_body_velocities(wheel_vel);
 
     assert_vector_equal(original, reconstructed, "Round trip");
 }
@@ -90,11 +87,11 @@ void test_zero_input_zero_output()
 {
     OmnidirectionalRobot robot(config::test::RADIUS, config::test::WHEEL_DISTANCE);
 
-    const vt::numeric_vector<4> wheel_zeros = robot.computeWheelVelocities(vt::numeric_vector<3>::zeros());
+    const vt::numeric_vector<4> wheel_zeros = robot.compute_wheel_velocities(vt::numeric_vector<3>::zeros());
 
     assert_vector_equal(vt::numeric_vector<4>::zeros(), wheel_zeros, "Zero wheels");
 
-    const vt::numeric_vector<3> body_zeros = robot.computeBodyVelocities(vt::numeric_vector<4>::zeros());
+    const vt::numeric_vector<3> body_zeros = robot.compute_body_velocities(vt::numeric_vector<4>::zeros());
 
     assert_vector_equal(vt::numeric_vector<3>::zeros(), body_zeros, "Zero body");
 }

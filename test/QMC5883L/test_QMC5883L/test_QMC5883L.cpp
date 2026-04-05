@@ -30,7 +30,7 @@ void setup_i2c()
                                               .glitch_ignore_cnt = 7,
                                               .intr_priority = 0,
                                               .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = 1, .allow_pd = 0}};
+                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
     I2Cdev::init(bus_handle);
@@ -39,23 +39,23 @@ void setup_i2c()
 void test_connection(void)
 {
     ESP_LOGI(TAG, "Testing Connection...");
-    TEST_ASSERT_TRUE_MESSAGE(mag.testConnection(), "QMC5883L Not Connected!");
+    TEST_ASSERT_TRUE_MESSAGE(mag.test_connection(), "QMC5883L Not Connected!");
 }
 
 void test_reading_and_azimuth(void)
 {
-    mag.initialize();
+    mag.init();
     vTaskDelay(100 / portTICK_PERIOD_MS);
 
     mag.read();
 
-    int16_t x = mag.getX();
-    int16_t y = mag.getY();
-    int16_t z = mag.getZ();
-    int azimuth = mag.getAzimuth();
+    int16_t x = mag.get_x();
+    int16_t y = mag.get_y();
+    int16_t z = mag.get_z();
+    int azimuth = mag.get_azimuth();
 
     char direction[4];
-    mag.getDirection(direction, azimuth);
+    mag.get_direction(direction, azimuth);
 
     ESP_LOGI(TAG, "X: %d, Y: %d, Z: %d | Azimuth: %d deg | Direction: %s", x, y, z, azimuth, direction);
 

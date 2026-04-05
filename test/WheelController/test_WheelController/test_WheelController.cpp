@@ -3,11 +3,8 @@
 #include <sdkconfig.h>
 #include <unity.h>
 
-#include <algorithm>
 #include <array>
-#include <cinttypes>
 #include <cmath>
-#include <memory>
 
 #include "BL48250.h"
 #include "I2Cdev.h"
@@ -60,7 +57,7 @@ void setUp(void)
                                               .glitch_ignore_cnt = 7,
                                               .intr_priority = 0,
                                               .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = 1, .allow_pd = 0}};
+                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
     i2c_new_master_bus(&i2c_mst_config, &bus_handle);
     I2Cdev::init(bus_handle);
 

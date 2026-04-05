@@ -9,12 +9,10 @@
 #include "ADXL345.h"
 #include "I2Cdev.h"
 
-// --- Hardware Configuration ---
 #define PIN_SDA 21
 #define PIN_CLK 22
 #define I2C_PORT_NUM I2C_NUM_0
 
-// --- Objects ---
 ADXL345 accel;
 const char * TAG = "CALIBRATION";
 i2c_master_bus_handle_t bus_handle;
@@ -22,7 +20,6 @@ i2c_master_bus_handle_t bus_handle;
 // Global flag to control the monitoring task
 volatile bool is_calibrating = false;
 
-// --- I2C Setup ---
 void setup_i2c()
 {
     i2c_master_bus_config_t i2c_mst_config = {.i2c_port = I2C_PORT_NUM,
@@ -32,13 +29,12 @@ void setup_i2c()
                                               .glitch_ignore_cnt = 7,
                                               .intr_priority = 0,
                                               .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = 1, .allow_pd = 0}};
+                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
     I2Cdev::init(bus_handle);
 }
 
-// --- Monitoring Task ---
 // This runs in parallel with calibration to show you what's happening
 void monitoring_task(void * pvParameters)
 {
@@ -48,7 +44,7 @@ void monitoring_task(void * pvParameters)
     while (is_calibrating)
     {
         // Read raw values (calibrate() resets offsets to 0 at start, so these are raw)
-        accel.getAcceleration(&x, &y, &z);
+        accel.get_acceleration(&x, &y, &z);
 
         if (x == 0 && y == 0)
             ESP_LOGI(TAG, "z calibrated.");
@@ -67,19 +63,18 @@ void monitoring_task(void * pvParameters)
     vTaskDelete(NULL);
 }
 
-// --- Calibration Logic ---
 void perform_calibration()
 {
-    // 1. Initialize Sensor
-    accel.initialize();
+    // Initialize Sensor
+    accel.init();
 
-    if (!accel.testConnection())
+    if (!accel.test_connection())
     {
         ESP_LOGE(TAG, "ADXL345 Connection Failed! Check wiring.");
         return;
     }
 
-    // 2. Instructions
+    // Instructions
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGI(TAG, "      ADXL345 CALIBRATION UTILITY");
     ESP_LOGI(TAG, "=================================================");
@@ -95,11 +90,11 @@ void perform_calibration()
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 
-    // 4. Start Monitoring Task
+    // Start Monitoring Task
     is_calibrating = true;
     xTaskCreate(monitoring_task, "monitor", 4096, NULL, 5, NULL);
 
-    // 5. Calibrate (Blocking call until data is gathered)
+    // Calibrate (Blocking call until data is gathered)
     ESP_LOGW(TAG, ">>> START ROTATING THE SENSOR NOW! <<<");
     accel.calibrate();
     ESP_LOGI(TAG, ">>> STOP. Calibration calculation done. <<<");
@@ -108,17 +103,17 @@ void perform_calibration()
     is_calibrating = false;
     vTaskDelay(500 / portTICK_PERIOD_MS);
 
-    // 6. Retrieve Data
-    float offX = accel.getCalibrationOffset(0);
-    float offY = accel.getCalibrationOffset(1);
-    float offZ = accel.getCalibrationOffset(2);
-    float scaleX = accel.getCalibrationScale(0);
-    float scaleY = accel.getCalibrationScale(1);
-    float scaleZ = accel.getCalibrationScale(2);
+    // Retrieve Data
+    float offX = accel.get_calibration_offset(0);
+    float offY = accel.get_calibration_offset(1);
+    float offZ = accel.get_calibration_offset(2);
+    float scaleX = accel.get_calibration_scale(0);
+    float scaleY = accel.get_calibration_scale(1);
+    float scaleZ = accel.get_calibration_scale(2);
 
-    accel.setOffset(offX, offY, offZ);
+    accel.set_offset(offX, offY, offZ);
 
-    // 7. Print formatted code for copy-paste
+    // Print formatted code for copy-paste
     printf("\n\n/**************************************************/\n");
     printf("/* CALIBRATION RESULTS (Copy into your setup)   */\n");
     printf("/**************************************************/\n\n");
@@ -137,25 +132,25 @@ extern "C" void app_main(void)
     UNITY_BEGIN();
 
     // perform_calibration();
-    accel.setRange(0x3);
+    accel.set_range(ADXL345::Range::RNG_16G);
     // We enable Full Resolution by default for best precision (4mg/LSB across all ranges)
-    accel.setFullResolution(true);
+    accel.set_full_resolution(true);
 
-    accel.setOffset(7.0f / 256.0f, 3.0f / 256.0f, -200.0f / 256.0f);
-    accel.setCalibrationScales(0.98f, 0.99f, 1.01f);
+    accel.set_offset(7.0f / 256.0f, 3.0f / 256.0f, -200.0f / 256.0f);
+    accel.set_calibration_scales(0.98f, 0.99f, 1.01f);
 
     // Optional: Test live data
     ESP_LOGI(TAG, "Testing live data with new calibration...");
-    accel.setMeasureEnabled(true);
+    accel.set_measure_enabled(true);
 
-    float scaleX = accel.getCalibrationScale(0);
-    float scaleY = accel.getCalibrationScale(1);
-    float scaleZ = accel.getCalibrationScale(2);
+    float scaleX = accel.get_calibration_scale(0);
+    float scaleY = accel.get_calibration_scale(1);
+    float scaleZ = accel.get_calibration_scale(2);
 
     while (true)
     {
         int16_t ax, ay, az;
-        accel.getAcceleration(&ax, &ay, &az);
+        accel.get_acceleration(&ax, &ay, &az);
 
         ESP_LOGI(TAG, "Calibrated -> X: %d | Y: %d | Z: %d", ax, ay, az);
         ESP_LOGI(TAG, "Scaled -> X: %f | Y: %f | Z: %f", ax * scaleX / 256.0f, ay * scaleY / 256.0f,

@@ -13,25 +13,8 @@ Usage:
 import time
 import argparse
 import sys
-import importlib.util
 import ssl_robot_protocol_bp
-
-# ---------------------------------------------------------------------------
-# Dynamically import nrf24-usb.py (hyphen in filename requires this approach)
-# ---------------------------------------------------------------------------
-try:
-    spec = importlib.util.spec_from_file_location("nrf24_module", "nrf24-usb.py")
-    nrf = importlib.util.module_from_spec(spec)
-    sys.modules["nrf24_module"] = nrf
-    spec.loader.exec_module(nrf)
-except FileNotFoundError:
-    print("Error: Ensure nrf24-usb.py is in the same directory as this script.")
-    sys.exit(1)
-
-
-# ---------------------------------------------------------------------------
-# Per-robot statistics
-# ---------------------------------------------------------------------------
+import nrf24_usb
 
 
 class RobotStats:
@@ -49,7 +32,7 @@ class RobotStats:
         return (self.received / self.sent * 100) if self.sent > 0 else 0.0
 
     def print_report(self, total_time_sec):
-        c = nrf.Colors
+        c = nrf24_usb.Colors
         rate = self.success_rate()
         color = c.GREEN if rate >= 95 else (c.YELLOW if rate >= 80 else c.RED)
 
@@ -60,18 +43,10 @@ class RobotStats:
         if self.rtt_list:
             print(f"  Min RTT:         {min(self.rtt_list):.2f} ms")
             print(f"  Max RTT:         {max(self.rtt_list):.2f} ms")
-            print(
-                f"  Avg RTT:         {sum(self.rtt_list) / len(self.rtt_list):.2f} ms"
-            )
+            print(f"  Avg RTT:         {sum(self.rtt_list) / len(self.rtt_list):.2f} ms")
         if total_time_sec > 0:
-            print(
-                f"  Throughput:      {self.received / total_time_sec:.2f} packets/sec"
-            )
+            print(f"  Throughput:      {self.received / total_time_sec:.2f} packets/sec")
 
-
-# ---------------------------------------------------------------------------
-# Round-robin benchmark loop
-# ---------------------------------------------------------------------------
 
 # After this many consecutive misses a robot is marked unreachable and its
 # receive window is skipped for the rest of the benchmark run, preventing
@@ -80,7 +55,7 @@ UNREACHABLE_THRESHOLD = 10
 
 
 def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
-    c = nrf.Colors
+    c = nrf24_usb.Colors
     print(f"\n{c.BOLD}=== STARTING ROUND-ROBIN BENCHMARK ==={c.RESET}")
     print(f"Robots:      {robot0_id}  ↔  {robot1_id}")
     print(f"Total pkts:  {num_packets}  ({num_packets // 2} per robot)")
@@ -102,7 +77,7 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
         send_ms = int(time.time() * 1000) & 0xFFFFFFFF
 
         cmd = ssl_robot_protocol_bp.RobotCommand()
-        cmd.header = nrf._make_header(nrf.MSG_TYPE_COMMAND, target_id, send_ms)
+        cmd.header = nrf24_usb._make_header(nrf24_usb.MSG_TYPE_COMMAND, target_id, send_ms)
         cmd.target_pose.x = i % 1000
         cmd.target_pose.y = 0
         cmd.kick_velocity = 0
@@ -121,8 +96,7 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
             else f"{stats[robot1_id].received}/{stats[robot1_id].sent}"
         )
         sys.stdout.write(
-            f"\r[{i + 1}/{num_packets}] → Robot {target_id}  "
-            f"(R{robot0_id}: {r0_label}  R{robot1_id}: {r1_label})"
+            f"\r[{i + 1}/{num_packets}] → Robot {target_id}  (R{robot0_id}: {r0_label}  R{robot1_id}: {r1_label})"
         )
         sys.stdout.flush()
 
@@ -143,19 +117,12 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
         # late-arriving dongle status codes before the next send.
         device.ser.reset_input_buffer()
 
-        if (
-            telemetry is not None
-            and telemetry.header.timestamp == send_ms
-            and telemetry.header.robot_id == target_id
-        ):
+        if telemetry is not None and telemetry.header.timestamp == send_ms and telemetry.header.robot_id == target_id:
             stat.record_success((t1 - t0) * 1000)
             consecutive[target_id] = 0
         else:
             consecutive[target_id] += 1
-            if (
-                not unreachable[target_id]
-                and consecutive[target_id] >= UNREACHABLE_THRESHOLD
-            ):
+            if not unreachable[target_id] and consecutive[target_id] >= UNREACHABLE_THRESHOLD:
                 unreachable[target_id] = True
                 print(
                     f"\n{c.YELLOW}[WARN] Robot {target_id} marked UNREACHABLE "
@@ -166,10 +133,8 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
     test_end = time.time()
     total_time = test_end - test_start
 
-    # ------------------------------------------------------------------
     # Print final report
-    # ------------------------------------------------------------------
-    c = nrf.Colors
+    c = nrf24_usb.Colors
     print("\n\n" + "=" * 50)
     print(f"{c.BOLD}BENCHMARK RESULTS{c.RESET}")
     print("=" * 50)
@@ -178,12 +143,8 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
 
     combined_recv = sum(s.received for s in stats.values())
     combined_rate = combined_recv / num_packets * 100
-    oc = (
-        c.GREEN if combined_rate >= 95 else (c.YELLOW if combined_rate >= 80 else c.RED)
-    )
-    print(
-        f"Overall:     {oc}{combined_recv}/{num_packets}  ({combined_rate:.2f}%){c.RESET}"
-    )
+    oc = c.GREEN if combined_rate >= 95 else (c.YELLOW if combined_rate >= 80 else c.RED)
+    print(f"Overall:     {oc}{combined_recv}/{num_packets}  ({combined_rate:.2f}%){c.RESET}")
 
     print(f"\n{'─' * 50}")
     print(f"{c.BOLD}Per-Robot Breakdown{c.RESET}")
@@ -192,11 +153,6 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec):
         stats[rid].print_report(total_time)
 
     print("=" * 50 + "\n")
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 
 def main():
@@ -228,17 +184,17 @@ def main():
         choices=[1, 2, 3],
         help="1=250K, 2=1M, 3=2M",
     )
-    parser.add_argument("--robot0", type=int, default=0, help="First robot ID  (0–10)")
-    parser.add_argument("--robot1", type=int, default=1, help="Second robot ID (0–10)")
+    parser.add_argument("--robot0", type=int, default=0, help="First robot ID  (0-10)")
+    parser.add_argument("--robot1", type=int, default=1, help="Second robot ID (0-10)")
     args = parser.parse_args()
 
     # Validate robot IDs
     for rid, label in [(args.robot0, "--robot0"), (args.robot1, "--robot1")]:
-        if rid > nrf.ROBOT_ID_MAX or rid == nrf.ROBOT_ID_BROADCAST:
+        if rid > nrf24_usb.ROBOT_ID_MAX or rid == nrf24_usb.ROBOT_ID_BROADCAST:
             print(
                 f"Error: {label}={rid} is out of range. "
-                f"Valid IDs are 0–{nrf.ROBOT_ID_MAX} "
-                f"(broadcast {nrf.ROBOT_ID_BROADCAST} is reserved)."
+                f"Valid IDs are 0–{nrf24_usb.ROBOT_ID_MAX} "
+                f"(broadcast {nrf24_usb.ROBOT_ID_BROADCAST} is reserved)."
             )
             sys.exit(1)
 
@@ -249,21 +205,19 @@ def main():
     # Ensure even split
     if args.packets % 2 != 0:
         args.packets += 1
-        print(
-            f"{nrf.Colors.YELLOW}Note: packet count rounded up to {args.packets}.{nrf.Colors.RESET}"
-        )
+        print(f"{nrf24_usb.Colors.YELLOW}Note: packet count rounded up to {args.packets}.{nrf24_usb.Colors.RESET}")
 
     # Connect
     device = (
-        nrf.nRF24L01_Controller.auto_connect(baudrate=args.baud)
+        nrf24_usb.nRF24L01_Controller.auto_connect(baudrate=args.baud)
         if args.port.lower() == "auto"
-        else nrf.nRF24L01_Controller(port=args.port, baudrate=args.baud)
+        else nrf24_usb.nRF24L01_Controller(port=args.port, baudrate=args.baud)
     )
 
     if not device:
         sys.exit(1)
 
-    print(f"\n{nrf.Colors.CYAN}Applying Benchmark Configurations...{nrf.Colors.RESET}")
+    print(f"\n{nrf24_usb.Colors.CYAN}Applying Benchmark Configurations...{nrf24_usb.Colors.RESET}")
     device.set_data_rate(args.rate)
     time.sleep(1)
 

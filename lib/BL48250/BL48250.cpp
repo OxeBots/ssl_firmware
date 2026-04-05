@@ -26,7 +26,11 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
                                       .freq_hz = pwm_freq_,
                                       .clk_cfg = LEDC_USE_APB_CLK,
                                       .deconfigure = false};
-    ledc_timer_config(&timer_conf);
+    esp_err_t err = ledc_timer_config(&timer_conf);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to configure LEDC timer: %s", esp_err_to_name(err));
+    }
 
     // Configure each motor's PWM channel
     for (size_t i = 0; i < 4; ++i)
@@ -39,10 +43,14 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
           .timer_sel = timer_,
           .duty = 0,
           .hpoint = 0,
-          .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
+          .sleep_mode = LEDC_SLEEP_MODE_NO_ALIVE_NO_PD,
           .flags = {.output_invert = 0},
         };
-        ledc_channel_config(&channel_conf);
+        err = ledc_channel_config(&channel_conf);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to configure LEDC channel %zu: %s", i, esp_err_to_name(err));
+        }
 
         gpio_reset_pin(motor_dir_pins_[i]);
         gpio_set_direction(motor_dir_pins_[i], GPIO_MODE_OUTPUT_OD);
@@ -100,15 +108,16 @@ void BL48250::set_duties(const std::array<uint32_t, 4> & duties, const std::arra
 void BL48250::debugPrint() const
 {
     ESP_LOGI(TAG, "\nBL48250 Driver State:");
-    ESP_LOGI(TAG, "PWM Frequency: %uHz, Resolution: %d bits\n", pwm_freq_, static_cast<int>(duty_resolution_));
-    ESP_LOGI(TAG, "Max Duty: %u (%.1f%%)\n", max_duty_, 100.0);
+    ESP_LOGI(TAG, "PWM Frequency: %luHz, Resolution: %d bits\n", (unsigned long)pwm_freq_,
+             static_cast<int>(duty_resolution_));
+    ESP_LOGI(TAG, "Max Duty: %lu (%.1f%%)\n", (unsigned long)max_duty_, 100.0);
 
     for (size_t i = 0; i < 4; ++i)
     {
         ESP_LOGI(TAG, "\nMotor %d:", i + 1);
         ESP_LOGI(TAG, "  PWM: GPIO %-2d (Ch %d)", motor_pwm_pins_[i], motor_channels_[i]);
-        ESP_LOGI(TAG, "\n  DIR: GPIO %-2d -> %s", motor_dir_pins_[i], directions_[i] ? "CW" : "CCW");
-        ESP_LOGI(TAG, "\n  Duty: %-5u (%.1f%%)", duty_cycles_[i], (duty_cycles_[i] * 100.0) / max_duty_);
+        ESP_LOGI(TAG, "  DIR: GPIO %-2d -> %s", motor_dir_pins_[i], directions_[i] ? "CW" : "CCW");
+        ESP_LOGI(TAG, "  Duty: %-5lu (%.1f%%)", (unsigned long)duty_cycles_[i], (duty_cycles_[i] * 100.0) / max_duty_);
     }
     ESP_LOGI(TAG, "\n-----------------------");
 }

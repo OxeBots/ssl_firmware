@@ -3,6 +3,7 @@
 
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 #include <array>
@@ -56,6 +57,8 @@ class WheelController
     float m_kd;
 
     static constexpr float MAX_ACCEL = 100.0f;
+
+    SemaphoreHandle_t m_mutex;
 };
 
 #endif  // WHEEL_CONTROLLER_H

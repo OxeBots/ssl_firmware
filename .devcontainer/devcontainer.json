@@ -9,7 +9,7 @@
       "TZ": "${localEnv:TZ:America/Sao_Paulo}",
       "GIT_DELTA_VERSION": "0.18.2",
       "ZSH_IN_DOCKER_VERSION": "1.2.0",
-      // AI agents — set to "0" to skip installation
+      // AI agents — set to "1" to install
       "INSTALL_CLAUDE": "0",
       "INSTALL_GEMINI": "0",
       "INSTALL_QWEN": "0",
@@ -28,8 +28,6 @@
       "extensions": [
         "ms-vscode.cpptools",
         "platformio.platformio-ide",
-        "pbkit.vscode-pbkit",
-        "jbenden.c-cpp-flylint",
         "jeff-hykin.better-cpp-syntax",
         "nordic-semiconductor.nrf-kconfig",
         "alexnesnes.teleplot",
@@ -38,7 +36,8 @@
         "charliermarsh.ruff",
         "mhutchie.git-graph",
         "yzhang.markdown-all-in-one",
-        "stkb.rewrap"
+        "dnut.rewrap-revived",
+        "llvm-vs-code-extensions.vscode-clangd"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "zsh",

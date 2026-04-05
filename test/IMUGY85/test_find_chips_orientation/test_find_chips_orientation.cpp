@@ -6,13 +6,9 @@
 #include "IMUGY85.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "unity.h"
 
-// ---------------------------------------------------------------------------
-// HARDWARE CONFIGURATION
-// ---------------------------------------------------------------------------
 // Standard ESP32 I2C Pins (Change if using a different board/wiring)
 #define I2C_MASTER_SDA_IO 21
 #define I2C_MASTER_SCL_IO 22
@@ -21,14 +17,11 @@
 static const char * TAG = "GY85_TEST";
 
 // Instantiate the IMU driver (which owns accel, gyro, and mag objects)
-IMUGY85 imu;
+IMUGY85 & imu = IMUGY85::get_instance();
 
 // Handle for the new I2C driver
 i2c_master_bus_handle_t bus_handle;
 
-// ---------------------------------------------------------------------------
-// I2C INITIALIZATION HELPER (NEW DRIVER)
-// ---------------------------------------------------------------------------
 static void i2c_master_init(void)
 {
     i2c_master_bus_config_t i2c_mst_config = {
@@ -42,15 +35,12 @@ static void i2c_master_init(void)
       .flags =
         {
           .enable_internal_pullup = true,
+          .allow_pd = false,
         },
     };
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
 }
-
-// ---------------------------------------------------------------------------
-// HELPER: DETECT DOMINANT AXIS (ABSOLUTE) - For Accel/Gyro
-// ---------------------------------------------------------------------------
 void get_dominant_axis(int16_t x, int16_t y, int16_t z, int threshold, char * output)
 {
     int16_t ax = abs(x);
@@ -77,9 +67,6 @@ void get_dominant_axis(int16_t x, int16_t y, int16_t z, int threshold, char * ou
     }
 }
 
-// ---------------------------------------------------------------------------
-// HELPER: DETECT DOMINANT AXIS (RANGE) - For Magnetometer
-// ---------------------------------------------------------------------------
 void get_dominant_range(int16_t rx, int16_t ry, int16_t rz, int threshold, char * output)
 {
     if (rx < threshold && ry < threshold && rz < threshold)
@@ -102,9 +89,6 @@ void get_dominant_range(int16_t rx, int16_t ry, int16_t rz, int threshold, char 
     }
 }
 
-// ---------------------------------------------------------------------------
-// UNITY SETUP / TEARDOWN
-// ---------------------------------------------------------------------------
 void setUp(void)
 {
     // Runs before every test
@@ -115,21 +99,18 @@ void tearDown(void)
     // Runs after every test
 }
 
-// ---------------------------------------------------------------------------
-// TEST CASE: RAW SENSOR OUTPUT WITH ORIENTATION HELP
-// ---------------------------------------------------------------------------
 void test_sensor_orientation_check(void)
 {
-    // 1. Initialize GY-85 Sensors
+    // Initialize GY-85 Sensors
     ESP_LOGI(TAG, "Initializing Sensors...");
     imu.init();
 
-    // 2. Clear Calibrations for Orientation Testing
+    // Clear Calibrations for Orientation Testing
     ESP_LOGI(TAG, "Clearing default calibrations for raw data inspection...");
-    imu.accel.setOffset(0, 0, 0);
-    imu.accel.setCalibrationScales(1.0f, 1.0f, 1.0f);
-    imu.gyro.setOffsets(0, 0, 0);
-    imu.mag.clearCalibration();
+    imu.get_accel().set_offset(0, 0, 0);
+    imu.get_accel().set_calibration_scales(1.0f, 1.0f, 1.0f);
+    imu.get_gyro().set_offsets(0, 0, 0);
+    imu.get_mag().clear_calibration();
 
     printf("\n\n");
     printf("================================================================\n");
@@ -158,17 +139,15 @@ void test_sensor_orientation_check(void)
         int16_t mx, my, mz;
 
         // Read Raw Data
-        imu.accel.getAcceleration(&ax, &ay, &az);
+        imu.get_accel().get_acceleration(&ax, &ay, &az);
 
-        // --- CORRECTION APPLIED HERE ---
         // User observed that Accel X and Y are inverted relative to Gyro/Board frame.
         // We invert them here to align the frames.
         ax = -ax;
         ay = -ay;
-        // -------------------------------
 
-        imu.gyro.getRotation(&gx, &gy, &gz);
-        imu.mag.getOrientation(&mx, &my, &mz);
+        imu.get_gyro().get_rotation(&gx, &gy, &gz);
+        imu.get_mag().get_orientation(&mx, &my, &mz);
 
         // --- UPDATE MAG RANGE STATS ---
         if (mx < mag_min[0])
@@ -211,9 +190,6 @@ void test_sensor_orientation_check(void)
     }
 }
 
-// ---------------------------------------------------------------------------
-// MAIN APPLICATION
-// ---------------------------------------------------------------------------
 extern "C" void app_main(void)
 {
     // Initialize I2C Bus (New Driver)

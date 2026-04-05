@@ -1,0 +1,5 @@
+noExplicitConstructor
+useStlAlgorithm
+cstyleCast
+unreadVariable
+constVariablePointer

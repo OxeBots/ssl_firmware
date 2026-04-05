@@ -9,12 +9,10 @@
 #include "I2Cdev.h"
 #include "ITG3200.h"
 
-// --- Hardware Configuration ---
 #define PIN_SDA 21
 #define PIN_CLK 22
 #define I2C_PORT_NUM I2C_NUM_0
 
-// --- Objects ---
 ITG3200 gyro;
 const char * TAG = "GYRO_CALIB";
 i2c_master_bus_handle_t bus_handle;
@@ -28,7 +26,7 @@ void setup_i2c()
                                               .glitch_ignore_cnt = 7,
                                               .intr_priority = 0,
                                               .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = 1, .allow_pd = 0}};
+                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
     I2Cdev::init(bus_handle);
@@ -37,9 +35,9 @@ void setup_i2c()
 void perform_calibration()
 {
     ESP_LOGI(TAG, "Initializing ITG3200...");
-    gyro.initialize();
+    gyro.init();
 
-    if (!gyro.testConnection())
+    if (!gyro.test_connection())
     {
         ESP_LOGE(TAG, "Connection Failed!");
         return;
@@ -65,7 +63,7 @@ void perform_calibration()
 
     // Get results
     int16_t x_off, y_off, z_off;
-    gyro.getOffsets(&x_off, &y_off, &z_off);
+    gyro.get_offsets(&x_off, &y_off, &z_off);
 
     // Print copy-paste code
     printf("\n/******************************************/\n");
@@ -79,7 +77,7 @@ extern "C" void app_main(void)
 {
     setup_i2c();
     vTaskDelay(100 / portTICK_PERIOD_MS);  // Power up stability
-    
+
     UNITY_BEGIN();
 
     perform_calibration();
@@ -91,7 +89,7 @@ extern "C" void app_main(void)
     while (esp_timer_get_time() - now < 10000000)
     {
         int16_t x, y, z;
-        gyro.getRotation(&x, &y, &z);
+        gyro.get_rotation(&x, &y, &z);
         // If calibrated correctly, these should hover around 0 when still
         ESP_LOGI(TAG, "X: %6d | Y: %6d | Z: %6d", x, y, z);
         vTaskDelay(200 / portTICK_PERIOD_MS);

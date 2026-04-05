@@ -36,6 +36,8 @@
 
 #include "ADXL345.h"
 
+#include "NVSManager.h"
+
 static const char * TAG = "ADXL345";
 static const char * NVS_NS = "accel_calib";
 static const char * NVS_KEY_BLOB = "calib_blob";

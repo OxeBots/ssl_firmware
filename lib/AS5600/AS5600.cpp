@@ -5,6 +5,12 @@
 
 #include "AS5600.h"
 
+#include <algorithm>
+#include <numeric>
+
+#include "I2Cdev.h"
+#include "NVSManager.h"
+
 static const char * TAG = "AS5600";
 
 /**
@@ -162,20 +168,24 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
         if (m_is_voltage_calibrated)
             adc_cali_raw_to_voltage(m_cali_handle, m_last_avg_value, &current_voltage_mv);
 
-        if (m_is_calibrating)
+        if (m_is_calibrating.load())
         {
             // If we are calibrating, we need to update the min/max voltage range
-            if (current_voltage_mv < m_min_voltage_mv)
-                m_min_voltage_mv = current_voltage_mv;
-            if (current_voltage_mv > m_max_voltage_mv)
-                m_max_voltage_mv = current_voltage_mv;
+            int current_min = m_min_voltage_mv.load();
+            int current_max = m_max_voltage_mv.load();
+            if (current_voltage_mv < current_min)
+                m_min_voltage_mv.store(current_voltage_mv);
+            if (current_voltage_mv > current_max)
+                m_max_voltage_mv.store(current_voltage_mv);
         }
 
         float measured_angle_rad = 0.0f;
-        if (m_max_voltage_mv > m_min_voltage_mv)
+        int cal_min = m_min_voltage_mv.load();
+        int cal_max = m_max_voltage_mv.load();
+        if (cal_max > cal_min)
         {
-            int clamped_mv = std::clamp(current_voltage_mv, (int)m_min_voltage_mv, (int)m_max_voltage_mv);
-            float ratio = static_cast<float>(clamped_mv - m_min_voltage_mv) / (m_max_voltage_mv - m_min_voltage_mv);
+            int clamped_mv = std::clamp(current_voltage_mv, cal_min, cal_max);
+            float ratio = static_cast<float>(clamped_mv - cal_min) / (cal_max - cal_min);
             measured_angle_rad = ratio * 2.0f * PI;
         }
         else
@@ -205,16 +215,17 @@ esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
     }
 
     ESP_LOGI(TAG, "Starting range calibration for channel %d. Rotate sensor now...", m_channel);
-    m_is_calibrating = true;
+    m_is_calibrating.store(true);
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
-    m_is_calibrating = false;
+    m_is_calibrating.store(false);
 
-    ESP_LOGI(TAG, "Channel %d calibrated. Min: %d mV, Max: %d mV", m_channel, m_min_voltage_mv, m_max_voltage_mv);
+    ESP_LOGI(TAG, "Channel %d calibrated. Min: %d mV, Max: %d mV", m_channel, m_min_voltage_mv.load(),
+             m_max_voltage_mv.load());
 
-    if (m_max_voltage_mv - m_min_voltage_mv < MIN_VALID_VOLTAGE_RANGE_MV)
+    if (m_max_voltage_mv.load() - m_min_voltage_mv.load() < MIN_VALID_VOLTAGE_RANGE_MV)
     {
         ESP_LOGE(TAG, "Error: Voltage range for channel %d is invalid (%d mV).", m_channel,
-                 m_max_voltage_mv - m_min_voltage_mv);
+                 m_max_voltage_mv.load() - m_min_voltage_mv.load());
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -231,14 +242,14 @@ esp_err_t AS5600::save_calibration_to_nvs()
     snprintf(key_min, sizeof(key_min), "ch%d_min", static_cast<int>(m_channel));
     snprintf(key_max, sizeof(key_max), "ch%d_max", static_cast<int>(m_channel));
 
-    esp_err_t err = NVSManager::save_i32(NVS_NS, key_min, m_min_voltage_mv);
+    esp_err_t err = NVSManager::save_i32(NVS_NS, key_min, m_min_voltage_mv.load());
 
     if (err == ESP_OK)
-        err = NVSManager::save_i32(NVS_NS, key_max, m_max_voltage_mv);
+        err = NVSManager::save_i32(NVS_NS, key_max, m_max_voltage_mv.load());
 
     if (err == ESP_OK)
-        ESP_LOGI(TAG, "Saved calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv,
-                 m_max_voltage_mv);
+        ESP_LOGI(TAG, "Saved calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv.load(),
+                 m_max_voltage_mv.load());
 
     return err;
 }
@@ -260,8 +271,8 @@ esp_err_t AS5600::load_calibration_from_nvs()
     if (err_min == ESP_OK && err_max == ESP_OK)
     {
         set_calibration_range(static_cast<int>(min_v), static_cast<int>(max_v));
-        ESP_LOGI(TAG, "Loaded calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv,
-                 m_max_voltage_mv);
+        ESP_LOGI(TAG, "Loaded calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv.load(),
+                 m_max_voltage_mv.load());
         return ESP_OK;
     }
 
@@ -410,8 +421,8 @@ esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
         return ESP_ERR_INVALID_ARG;
     }
 
-    m_min_voltage_mv = min_mv;
-    m_max_voltage_mv = max_mv;
+    m_min_voltage_mv.store(min_mv);
+    m_max_voltage_mv.store(max_mv);
 
     return ESP_OK;
 }
@@ -421,8 +432,8 @@ esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
  */
 void AS5600::reset_calibration_min_max()
 {
-    m_min_voltage_mv = 5000;
-    m_max_voltage_mv = 0;
+    m_min_voltage_mv.store(5000);
+    m_max_voltage_mv.store(0);
 }
 
 /**
@@ -430,7 +441,7 @@ void AS5600::reset_calibration_min_max()
  */
 void AS5600::start_calibration_mode()
 {
-    m_is_calibrating = true;
+    m_is_calibrating.store(true);
 }
 
 /**
@@ -438,7 +449,7 @@ void AS5600::start_calibration_mode()
  */
 void AS5600::stop_calibration_mode()
 {
-    m_is_calibrating = false;
+    m_is_calibrating.store(false);
 }
 
 /**
@@ -447,7 +458,7 @@ void AS5600::stop_calibration_mode()
  */
 int AS5600::get_calib_min() const
 {
-    return m_min_voltage_mv;
+    return m_min_voltage_mv.load();
 }
 
 /**
@@ -456,5 +467,5 @@ int AS5600::get_calib_min() const
  */
 int AS5600::get_calib_max() const
 {
-    return m_max_voltage_mv;
+    return m_max_voltage_mv.load();
 }

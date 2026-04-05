@@ -10,14 +10,10 @@
 #include <standard_constants.h>
 #include <stdint.h>
 
-#include <algorithm>
 #include <array>
+#include <atomic>
 #include <memory>
-#include <numeric>
 
-#include "I2Cdev.h"
-#include "NVSManager.h"
-#include "helper_func.h"
 #include "wheel_ekf.h"
 
 class AS5600
@@ -124,9 +120,9 @@ class AS5600
 
     adc_cali_handle_t m_cali_handle = nullptr;
     bool m_is_voltage_calibrated = false;
-    volatile bool m_is_calibrating = false;
-    volatile int m_min_voltage_mv = 5000;
-    volatile int m_max_voltage_mv = 0;
+    std::atomic<bool> m_is_calibrating{false};
+    std::atomic<int> m_min_voltage_mv{5000};
+    std::atomic<int> m_max_voltage_mv{0};
 
     SamplingState m_sampling_state;
     uint16_t m_last_avg_value = 0;

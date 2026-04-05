@@ -1,0 +1,12 @@
+[submodule "esp-idf-mirf"]
+	path = components/esp-idf-mirf
+	url = https://github.com/OxeBots/esp-idf-mirf.git
+[submodule "sTune"]
+	path = components/sTune
+	url = https://github.com/OxeBots/sTune.git
+[submodule "QuickPID"]
+	path = components/QuickPID
+	url = https://github.com/OxeBots/QuickPID.git
+[submodule "VL53L5CX-Library"]
+	path = components/VL53L5CX-Library
+	url = https://github.com/RJRP44/VL53L5CX-Library.git

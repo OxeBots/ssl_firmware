@@ -7,8 +7,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "NVSManager.h"
-
 class ITG3200
 {
    public:

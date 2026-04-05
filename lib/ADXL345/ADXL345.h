@@ -8,8 +8,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#include "NVSManager.h"
-
 class ADXL345
 {
    public:
@@ -323,8 +321,8 @@ class ADXL345
    private:
     uint8_t m_dev_addr;
     uint8_t m_buffer[6] = {0};
-    float m_cal_offset[3] = {0.f, 0.f, 0.f};
-    float m_cal_scale[3] = {1.f, 1.f, 1.f};
+    float m_cal_offset[3] = {0.F, 0.F, 0.F};
+    float m_cal_scale[3] = {1.F, 1.F, 1.F};
 };
 
 #endif /* _ADXL345_H_ */

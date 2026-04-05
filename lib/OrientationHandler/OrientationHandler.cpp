@@ -299,6 +299,10 @@ void OrientationHandler::update_ahrs()
 
         xSemaphoreGive(m_mutex);
     }
+    else
+    {
+        ESP_LOGW(TAG, "update_ahrs: mutex timeout, sensor data skipped");
+    }
 }
 
 bool OrientationHandler::is_accel_calibrated() const
@@ -510,8 +514,16 @@ void OrientationHandler::get_magnetometer(double * mx, double * my, double * mz)
  */
 void OrientationHandler::set_fusion_gain(float gain)
 {
-    m_settings.gain = gain;
-    FusionAhrsSetSettings(&m_ahrs, &m_settings);
+    if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(MUTEX_WAIT_MS)) == pdTRUE)
+    {
+        m_settings.gain = gain;
+        FusionAhrsSetSettings(&m_ahrs, &m_settings);
+        xSemaphoreGive(m_mutex);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "set_fusion_gain: mutex timeout, setting skipped");
+    }
 }
 
 /**
@@ -520,8 +532,16 @@ void OrientationHandler::set_fusion_gain(float gain)
  */
 void OrientationHandler::set_acceleration_rejection(float degrees)
 {
-    m_settings.accelerationRejection = degrees;
-    FusionAhrsSetSettings(&m_ahrs, &m_settings);
+    if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(MUTEX_WAIT_MS)) == pdTRUE)
+    {
+        m_settings.accelerationRejection = degrees;
+        FusionAhrsSetSettings(&m_ahrs, &m_settings);
+        xSemaphoreGive(m_mutex);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "set_acceleration_rejection: mutex timeout, setting skipped");
+    }
 }
 
 /**
@@ -530,6 +550,14 @@ void OrientationHandler::set_acceleration_rejection(float degrees)
  */
 void OrientationHandler::set_magnetic_rejection(float degrees)
 {
-    m_settings.magneticRejection = degrees;
-    FusionAhrsSetSettings(&m_ahrs, &m_settings);
+    if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(MUTEX_WAIT_MS)) == pdTRUE)
+    {
+        m_settings.magneticRejection = degrees;
+        FusionAhrsSetSettings(&m_ahrs, &m_settings);
+        xSemaphoreGive(m_mutex);
+    }
+    else
+    {
+        ESP_LOGW(TAG, "set_magnetic_rejection: mutex timeout, setting skipped");
+    }
 }

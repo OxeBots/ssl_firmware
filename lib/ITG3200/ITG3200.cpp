@@ -9,7 +9,7 @@
  *
  * Changelog:
  * 2011-07-31 - initial release
- * 
+ *
  * ============================================
  * I2Cdev device library code is placed under the MIT license
  * Copyright (c) 2011 Jeff Rowberg
@@ -35,6 +35,8 @@
  */
 
 #include "ITG3200.h"
+
+#include "NVSManager.h"
 
 static const char * TAG = "ITG3200";
 static const char * NVS_NS = "gyro_calib";

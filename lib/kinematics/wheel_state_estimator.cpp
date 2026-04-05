@@ -149,6 +149,10 @@ void WheelStateEstimator::resume()
  */
 esp_err_t WheelStateEstimator::load_calibration()
 {
+    // Suspend the ADC task to prevent it from running flash-resident code
+    // while NVS flash operations disable the cache.
+    suspend();
+
     bool all_calibrated = true;
 
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
@@ -160,17 +164,22 @@ esp_err_t WheelStateEstimator::load_calibration()
         }
     }
 
+    esp_err_t result;
     if (all_calibrated)
     {
         ESP_LOGI(TAG, "All AS5600 calibrations loaded via NVSManager.");
         m_calibrated = true;
-        return ESP_OK;
+        result = ESP_OK;
     }
     else
     {
         m_calibrated = false;
-        return ESP_ERR_NOT_FOUND;
+        result = ESP_ERR_NOT_FOUND;
     }
+
+    // Resume the ADC task after NVS operations are complete.
+    resume();
+    return result;
 }
 
 /**
