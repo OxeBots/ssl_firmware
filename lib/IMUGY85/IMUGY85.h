@@ -1,5 +1,5 @@
-#ifndef _IMUGY85_H_
-#define _IMUGY85_H_
+#ifndef IMUGY85_H
+#define IMUGY85_H
 
 #include <driver/i2c_master.h>
 #include <esp_log.h>

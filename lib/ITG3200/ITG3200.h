@@ -1,5 +1,5 @@
-#ifndef _ITG3200_H_
-#define _ITG3200_H_
+#ifndef ITG3200_H
+#define ITG3200_H
 
 #include <I2Cdev.h>
 #include <esp_err.h>
@@ -159,4 +159,4 @@ class ITG3200
     int16_t m_z_offset = 0;
 };
 
-#endif /* _ITG3200_H_ */
+#endif /* ITG3200_H */

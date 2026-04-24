@@ -10,10 +10,8 @@ OrientationHandler & OrientationHandler::get_instance()
     return instance;
 }
 
-OrientationHandler::OrientationHandler() : m_driver(IMUGY85::get_instance())
+OrientationHandler::OrientationHandler() : m_driver(IMUGY85::get_instance()), m_mutex(nullptr)
 {
-    m_mutex = xSemaphoreCreateMutex();
-    configASSERT(m_mutex != nullptr);
 }
 
 /**
@@ -22,6 +20,10 @@ OrientationHandler::OrientationHandler() : m_driver(IMUGY85::get_instance())
  */
 esp_err_t OrientationHandler::init()
 {
+    // Create mutex
+    m_mutex = xSemaphoreCreateMutex();
+    configASSERT(m_mutex != nullptr);
+
     // Initialize hardware driver
     esp_err_t err = m_driver.init();
     if (err != ESP_OK)

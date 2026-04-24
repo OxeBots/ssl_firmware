@@ -1,5 +1,5 @@
-#ifndef _NRF24L01_H_
-#define _NRF24L01_H_
+#ifndef NRF24L01_H
+#define NRF24L01_H
 
 #include <driver/gpio.h>
 #include <esp_log.h>
@@ -37,4 +37,4 @@ class NRF24L01
     uint8_t m_payload_size;
 };
 
-#endif  // _NRF24L01_H_
+#endif  // NRF24L01_H

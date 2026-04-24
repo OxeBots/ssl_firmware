@@ -2144,16 +2144,16 @@ void ADXL345::calibrate()
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    float offX = (maxX + minX) / (256.0f * 2.0f);
-    float offY = (maxY + minY) / (256.0f * 2.0f);
-    float offZ = (maxZ + minZ) / (256.0f * 2.0f);
+    float offX = (static_cast<float>(maxX) + static_cast<float>(minX)) / (256.0f * 2.0f);
+    float offY = (static_cast<float>(maxY) + static_cast<float>(minY)) / (256.0f * 2.0f);
+    float offZ = (static_cast<float>(maxZ) + static_cast<float>(minZ)) / (256.0f * 2.0f);
 
     set_calibration_offsets(offX, offY, offZ);
 
     float target = 256.0f;
-    float semiRangeX = (maxX - minX) / 2.0f;
-    float semiRangeY = (maxY - minY) / 2.0f;
-    float semiRangeZ = (maxZ - minZ) / 2.0f;
+    float semiRangeX = (static_cast<float>(maxX) - static_cast<float>(minX)) / 2.0f;
+    float semiRangeY = (static_cast<float>(maxY) - static_cast<float>(minY)) / 2.0f;
+    float semiRangeZ = (static_cast<float>(maxZ) - static_cast<float>(minZ)) / 2.0f;
 
     if (semiRangeX > 0)
         m_cal_scale[0] = target / semiRangeX;

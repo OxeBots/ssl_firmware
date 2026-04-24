@@ -68,7 +68,7 @@ void QMC5883L::set_reset()
  */
 void QMC5883L::set_magnetic_declination(int degrees, uint8_t minutes)
 {
-    m_magnetic_declination_degrees = degrees + (minutes / 60.0f);
+    m_magnetic_declination_degrees = static_cast<float>(degrees) + (static_cast<float>(minutes) / 60.0f);
 }
 
 /**
@@ -192,17 +192,17 @@ void QMC5883L::stop_calibration_mode()
         return;
 
     // Calculate offsets as the average of min and max, and scales to normalize the range to be equal across axes
-    float x_avg = (m_calib_max[0] + m_calib_min[0]) / 2.0f;
-    float y_avg = (m_calib_max[1] + m_calib_min[1]) / 2.0f;
-    float z_avg = (m_calib_max[2] + m_calib_min[2]) / 2.0f;
+    float x_avg = (static_cast<float>(m_calib_max[0]) + static_cast<float>(m_calib_min[0])) / 2.0f;
+    float y_avg = (static_cast<float>(m_calib_max[1]) + static_cast<float>(m_calib_min[1])) / 2.0f;
+    float z_avg = (static_cast<float>(m_calib_max[2]) + static_cast<float>(m_calib_min[2])) / 2.0f;
 
     set_calibration_offsets(x_avg, y_avg, z_avg);
 
     // Calculate scales to normalize the half-range of each axis to be the same (assuming the true magnetic field
     // strength is similar across axes)
-    float x_half_range = (m_calib_max[0] - m_calib_min[0]) / 2.0f;
-    float y_half_range = (m_calib_max[1] - m_calib_min[1]) / 2.0f;
-    float z_half_range = (m_calib_max[2] - m_calib_min[2]) / 2.0f;
+    float x_half_range = (static_cast<float>(m_calib_max[0]) - static_cast<float>(m_calib_min[0])) / 2.0f;
+    float y_half_range = (static_cast<float>(m_calib_max[1]) - static_cast<float>(m_calib_min[1])) / 2.0f;
+    float z_half_range = (static_cast<float>(m_calib_max[2]) - static_cast<float>(m_calib_min[2])) / 2.0f;
 
     float avg_half_range = (x_half_range + y_half_range + z_half_range) / 3.0f;
 
@@ -313,9 +313,9 @@ void QMC5883L::read()
  */
 void QMC5883L::apply_calibration()
 {
-    m_v_calibrated[0] = (m_v_raw[0] - m_offset[0]) * m_scale[0];
-    m_v_calibrated[1] = (m_v_raw[1] - m_offset[1]) * m_scale[1];
-    m_v_calibrated[2] = (m_v_raw[2] - m_offset[2]) * m_scale[2];
+    m_v_calibrated[0] = static_cast<int16_t>((static_cast<float>(m_v_raw[0]) - m_offset[0]) * m_scale[0]);
+    m_v_calibrated[1] = static_cast<int16_t>((static_cast<float>(m_v_raw[1]) - m_offset[1]) * m_scale[1]);
+    m_v_calibrated[2] = static_cast<int16_t>((static_cast<float>(m_v_raw[2]) - m_offset[2]) * m_scale[2]);
 }
 
 /**
@@ -364,13 +364,13 @@ void QMC5883L::apply_smoothing()
 
             int32_t sum = m_v_totals[i] - (m_v_history[max_idx][i] + m_v_history[min_idx][i]);
             if (m_smooth_steps > 2)
-                m_v_smooth[i] = sum / (m_smooth_steps - 2);
+                m_v_smooth[i] = static_cast<int16_t>(sum / (m_smooth_steps - 2));
             else
-                m_v_smooth[i] = m_v_totals[i] / m_smooth_steps;
+                m_v_smooth[i] = static_cast<int16_t>(m_v_totals[i] / m_smooth_steps);
         }
         else
         {
-            m_v_smooth[i] = m_v_totals[i] / m_smooth_steps;
+            m_v_smooth[i] = static_cast<int16_t>(m_v_totals[i] / m_smooth_steps);
         }
     }
 
@@ -399,12 +399,13 @@ int16_t QMC5883L::get_axis(int index) const
  */
 int QMC5883L::get_azimuth() const
 {
-    float heading = atan2((float)get_y(), (float)get_x()) * 180.0 / M_PI;
+    float heading =
+      atan2f(static_cast<float>(get_y()), static_cast<float>(get_x())) * 180.0f / static_cast<float>(M_PI);
     heading += m_magnetic_declination_degrees;
 
-    while (heading < 0) heading += 360;
+    while (heading < 0) heading += 360.0f;
 
-    while (heading >= 360) heading -= 360;
+    while (heading >= 360.0f) heading -= 360.0f;
 
     return static_cast<int>(heading);
 }
@@ -417,7 +418,7 @@ int QMC5883L::get_azimuth() const
 uint8_t QMC5883L::get_bearing(int azimuth) const
 {
     float sector = static_cast<float>(azimuth) / 22.5f;
-    int bearing = static_cast<int>(sector + 0.5f);
+    int bearing = static_cast<int>(std::lround(static_cast<double>(sector) + 0.5));
     return static_cast<uint8_t>(bearing % 16);
 }
 

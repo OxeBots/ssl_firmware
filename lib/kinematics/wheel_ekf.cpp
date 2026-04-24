@@ -62,9 +62,8 @@ struct WheelKalmanFilter::KalmanState
     static vt::numeric_matrix<1, 3> Hj_func(const StateVector &) { return vt::make_numeric_matrix<1, 3>({{1, 0, 0}}); }
 };
 
-WheelKalmanFilter::WheelKalmanFilter()
+WheelKalmanFilter::WheelKalmanFilter() : m_state(std::make_unique<KalmanState>())
 {
-    m_state = std::make_unique<KalmanState>();
 }
 
 WheelKalmanFilter::~WheelKalmanFilter() = default;

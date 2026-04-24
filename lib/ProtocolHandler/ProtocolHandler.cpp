@@ -128,9 +128,9 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
 
     // Convert body-frame velocities to wheel velocities via omni kinematics.
     vt::numeric_vector<3> body_vel;
-    body_vel(0) = cmd.target_pose.x_v / 1000.0f;         // mm/s  → m/s
-    body_vel(1) = cmd.target_pose.y_v / 1000.0f;         // mm/s  → m/s
-    body_vel(2) = cmd.target_pose.angular_vel / 100.0f;  // 0.01 rad/s → rad/s
+    body_vel(0) = static_cast<float>(cmd.target_pose.x_v) / 1000.0f;         // mm/s  → m/s
+    body_vel(1) = static_cast<float>(cmd.target_pose.y_v) / 1000.0f;         // mm/s  → m/s
+    body_vel(2) = static_cast<float>(cmd.target_pose.angular_vel) / 100.0f;  // 0.01 rad/s → rad/s
 
     vt::numeric_vector<4> wheel_vels = m_kinematics->compute_wheel_velocities(body_vel);
 

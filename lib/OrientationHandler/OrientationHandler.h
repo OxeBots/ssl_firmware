@@ -67,9 +67,9 @@ class OrientationHandler
     IMUGY85 & m_driver;
 
     // AHRS states
-    FusionAhrs m_ahrs;
-    FusionOffset m_offset;
-    FusionAhrsSettings m_settings;
+    FusionAhrs m_ahrs = {};
+    FusionOffset m_offset = {};
+    FusionAhrsSettings m_settings = {};
 
     // FreeRTOS
     TaskHandle_t m_task_handle = nullptr;

@@ -23,9 +23,12 @@ static const char * TAG = "AS5600";
  */
 AS5600::AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltage_calibrated, adc_unit_t unit,
                adc_bitwidth_t bitwidth)
-: ADC_BITWIDTH(bitwidth), m_channel(channel), m_cali_handle(cali_handle), m_is_voltage_calibrated(voltage_calibrated)
+: ADC_BITWIDTH(bitwidth),
+  m_channel(channel),
+  m_filter(std::make_unique<WheelKalmanFilter>()),
+  m_cali_handle(cali_handle),
+  m_is_voltage_calibrated(voltage_calibrated)
 {
-    m_filter = std::make_unique<WheelKalmanFilter>();
 }
 
 /**
@@ -185,14 +188,14 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
         if (cal_max > cal_min)
         {
             int clamped_mv = std::clamp(current_voltage_mv, cal_min, cal_max);
-            float ratio = static_cast<float>(clamped_mv - cal_min) / (cal_max - cal_min);
-            measured_angle_rad = ratio * 2.0f * PI;
+            float ratio = static_cast<float>(clamped_mv - cal_min) / static_cast<float>(cal_max - cal_min);
+            measured_angle_rad = ratio * 2.0f * static_cast<float>(PI);
         }
         else
         {
             // Fallback if not calibrated: map raw value to angle
             const float max_raw = static_cast<float>((1 << ADC_BITWIDTH) - 1);
-            measured_angle_rad = static_cast<float>(m_last_avg_value) * (2.0f * PI / max_raw);
+            measured_angle_rad = static_cast<float>(m_last_avg_value) * (2.0f * static_cast<float>(PI) / max_raw);
         }
 
         // Update Kalman Filter

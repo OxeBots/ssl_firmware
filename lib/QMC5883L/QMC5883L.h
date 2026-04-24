@@ -1,5 +1,5 @@
-#ifndef _QMC5883L_H_
-#define _QMC5883L_H_
+#ifndef QMC5883L_H
+#define QMC5883L_H
 
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -158,4 +158,4 @@ class QMC5883L
                                     {'N', 'N', 'W'}};
 };
 
-#endif /* _QMC5883L_H_ */
+#endif /* QMC5883L_H */

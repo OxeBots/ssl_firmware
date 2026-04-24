@@ -1,5 +1,5 @@
-#ifndef _ADXL345_H_
-#define _ADXL345_H_
+#ifndef ADXL345_H
+#define ADXL345_H
 
 #include <I2Cdev.h>
 #include <esp_err.h>
@@ -325,4 +325,4 @@ class ADXL345
     float m_cal_scale[3] = {1.F, 1.F, 1.F};
 };
 
-#endif /* _ADXL345_H_ */
+#endif /* ADXL345_H */

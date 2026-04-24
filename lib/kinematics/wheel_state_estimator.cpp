@@ -9,9 +9,12 @@ WheelStateEstimator & WheelStateEstimator::get_instance()
 }
 
 WheelStateEstimator::WheelStateEstimator()
-: m_initialized(false), m_is_suspended(false), m_adc_handle(nullptr), m_task_handle(nullptr)
+: m_initialized(false),
+  m_is_suspended(false),
+  m_adc_handle(nullptr),
+  m_task_handle(nullptr),
+  m_data_mutex(xSemaphoreCreateMutex())
 {
-    m_data_mutex = xSemaphoreCreateMutex();
     m_channel_lookup.fill(nullptr);
 }
 

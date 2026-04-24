@@ -31,8 +31,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ===============================================
 */
-#ifndef _I2CDEV_H_
-#define _I2CDEV_H_
+#ifndef I2CDEV_H
+#define I2CDEV_H
 
 #include <driver/i2c_master.h>
 #include <esp_err.h>
@@ -82,4 +82,4 @@ class I2Cdev
                                          uint8_t * read_buffer, size_t read_len);
 };
 
-#endif /* _I2CDEV_H_ */
+#endif /* I2CDEV_H */
