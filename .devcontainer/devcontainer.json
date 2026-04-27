@@ -13,7 +13,7 @@
       "INSTALL_CLAUDE": "0",
       "INSTALL_GEMINI": "0",
       "INSTALL_QWEN": "0",
-      "INSTALL_CODEX": "0",
+      "INSTALL_CODEX": "1",
       "INSTALL_OPENCODE": "0"
     }
   },
