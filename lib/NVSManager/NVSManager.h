@@ -26,6 +26,8 @@ class NVSManager
     static esp_err_t load_i32(const char * ns, const char * key, int32_t * out);
     static esp_err_t load_blob(const char * ns, const char * key, void * out, size_t * length);
 
+    static void erase_all();
+
     static constexpr size_t BLOB_MAX = 128;
 
    private:

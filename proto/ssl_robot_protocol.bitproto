@@ -58,8 +58,14 @@ const CONFIG_FLAG_SET_ID = 1;
 // Trigger the wheel encoder calibration routine on the robot
 const CONFIG_FLAG_RUN_CALIBRATION = 2;
 
+// Trigger magnetometer calibration only
+const CONFIG_FLAG_CALIBRATE_MAG = 4;
+
 // Reset all NVS-stored configuration to factory defaults
 const CONFIG_FLAG_RESET_NVS = 8;
+
+// Full NVS erase — all namespaces, all keys
+const CONFIG_FLAG_FACTORY_RESET = 16;
 
 // ---------------------------------------------------------------------------
 // Error flag constants (bitmask for error_flags field in RobotTelemetry)

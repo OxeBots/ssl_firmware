@@ -104,7 +104,8 @@ typedef union
 /**
  * @brief Identity matrix.
  */
-#define FUSION_IDENTITY_MATRIX ((FusionMatrix){.array = {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}})
+#define FUSION_IDENTITY_MATRIX \
+    ((FusionMatrix){.array = {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}})
 
 /**
  * @brief Euler angles of zero.
@@ -229,7 +230,8 @@ static inline FusionVector FusionVectorAdd(const FusionVector vectorA, const Fus
  * @param vectorB Vector B.
  * @return Vector B subtracted from vector A.
  */
-static inline FusionVector FusionVectorSubtract(const FusionVector vectorA, const FusionVector vectorB)
+static inline FusionVector FusionVectorSubtract(const FusionVector vectorA,
+                                                const FusionVector vectorB)
 {
     const FusionVector result = {.axis = {
                                    .x = vectorA.axis.x - vectorB.axis.x,
@@ -271,7 +273,8 @@ static inline FusionVector FusionVectorMultiplyScalar(const FusionVector vector,
  * @param vectorB Vector B.
  * @return Hadamard product.
  */
-static inline FusionVector FusionVectorHadamardProduct(const FusionVector vectorA, const FusionVector vectorB)
+static inline FusionVector FusionVectorHadamardProduct(const FusionVector vectorA,
+                                                       const FusionVector vectorB)
 {
     const FusionVector result = {.axis = {
                                    .x = vectorA.axis.x * vectorB.axis.x,
@@ -287,7 +290,8 @@ static inline FusionVector FusionVectorHadamardProduct(const FusionVector vector
  * @param vectorB Vector B.
  * @return Cross product.
  */
-static inline FusionVector FusionVectorCrossProduct(const FusionVector vectorA, const FusionVector vectorB)
+static inline FusionVector FusionVectorCrossProduct(const FusionVector vectorA,
+                                                    const FusionVector vectorB)
 {
 #define A vectorA.axis
 #define B vectorB.axis
@@ -426,7 +430,8 @@ static inline FusionQuaternion FusionQuaternionNormalise(const FusionQuaternion 
 #ifdef FUSION_USE_NORMAL_SQRT
     const float magnitudeReciprocal = 1.0f / sqrtf(Q.w * Q.w + Q.x * Q.x + Q.y * Q.y + Q.z * Q.z);
 #else
-    const float magnitudeReciprocal = FusionFastInverseSqrt(Q.w * Q.w + Q.x * Q.x + Q.y * Q.y + Q.z * Q.z);
+    const float magnitudeReciprocal =
+      FusionFastInverseSqrt(Q.w * Q.w + Q.x * Q.x + Q.y * Q.y + Q.z * Q.z);
 #endif
     const FusionQuaternion result = {.element = {
                                        .w = Q.w * magnitudeReciprocal,
@@ -447,14 +452,16 @@ static inline FusionQuaternion FusionQuaternionNormalise(const FusionQuaternion 
  * @param vector Vector.
  * @return Multiplication of a matrix with a vector.
  */
-static inline FusionVector FusionMatrixMultiplyVector(const FusionMatrix matrix, const FusionVector vector)
+static inline FusionVector FusionMatrixMultiplyVector(const FusionMatrix matrix,
+                                                      const FusionVector vector)
 {
 #define R matrix.element
-    const FusionVector result = {.axis = {
-                                   .x = R.xx * vector.axis.x + R.xy * vector.axis.y + R.xz * vector.axis.z,
-                                   .y = R.yx * vector.axis.x + R.yy * vector.axis.y + R.yz * vector.axis.z,
-                                   .z = R.zx * vector.axis.x + R.zy * vector.axis.y + R.zz * vector.axis.z,
-                                 }};
+    const FusionVector result = {
+      .axis = {
+        .x = R.xx * vector.axis.x + R.xy * vector.axis.y + R.xz * vector.axis.z,
+        .y = R.yx * vector.axis.x + R.yy * vector.axis.y + R.yz * vector.axis.z,
+        .z = R.zx * vector.axis.x + R.zy * vector.axis.y + R.zz * vector.axis.z,
+      }};
     return result;
 #undef R
 }
@@ -500,12 +507,15 @@ static inline FusionMatrix FusionQuaternionToMatrix(const FusionQuaternion quate
 static inline FusionEuler FusionQuaternionToEuler(const FusionQuaternion quaternion)
 {
 #define Q quaternion.element
-    const float halfMinusQySquared = 0.5f - Q.y * Q.y;  // calculate common terms to avoid repeated operations
+    const float halfMinusQySquared =
+      0.5f - Q.y * Q.y;  // calculate common terms to avoid repeated operations
     const FusionEuler euler = {
       .angle = {
-        .roll = FusionRadiansToDegrees(atan2f(Q.w * Q.x + Q.y * Q.z, halfMinusQySquared - Q.x * Q.x)),
+        .roll =
+          FusionRadiansToDegrees(atan2f(Q.w * Q.x + Q.y * Q.z, halfMinusQySquared - Q.x * Q.x)),
         .pitch = FusionRadiansToDegrees(FusionAsin(2.0f * (Q.w * Q.y - Q.z * Q.x))),
-        .yaw = FusionRadiansToDegrees(atan2f(Q.w * Q.z + Q.x * Q.y, halfMinusQySquared - Q.z * Q.z)),
+        .yaw =
+          FusionRadiansToDegrees(atan2f(Q.w * Q.z + Q.x * Q.y, halfMinusQySquared - Q.z * Q.z)),
       }};
     return euler;
 #undef Q

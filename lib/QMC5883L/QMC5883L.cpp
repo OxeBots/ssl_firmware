@@ -47,8 +47,8 @@ void QMC5883L::set_mode(Mode mode, OutputDataRate odr, Range rng, Oversampling o
     m_rng = rng;
     m_osr = osr;
 
-    uint8_t config_val = static_cast<uint8_t>(m_mode) | static_cast<uint8_t>(m_odr) | static_cast<uint8_t>(m_rng) |
-                         static_cast<uint8_t>(m_osr);
+    uint8_t config_val = static_cast<uint8_t>(m_mode) | static_cast<uint8_t>(m_odr) |
+                         static_cast<uint8_t>(m_rng) | static_cast<uint8_t>(m_osr);
 
     I2Cdev::writeByte(m_dev_addr, static_cast<uint8_t>(Register::CONTROL_1), config_val);
 }
@@ -68,7 +68,8 @@ void QMC5883L::set_reset()
  */
 void QMC5883L::set_magnetic_declination(int degrees, uint8_t minutes)
 {
-    m_magnetic_declination_degrees = static_cast<float>(degrees) + (static_cast<float>(minutes) / 60.0f);
+    m_magnetic_declination_degrees =
+      static_cast<float>(degrees) + (static_cast<float>(minutes) / 60.0f);
 }
 
 /**
@@ -191,18 +192,22 @@ void QMC5883L::stop_calibration_mode()
     if (!m_calib_active)
         return;
 
-    // Calculate offsets as the average of min and max, and scales to normalize the range to be equal across axes
+    // Calculate offsets as the average of min and max, and scales to normalize the range to be
+    // equal across axes
     float x_avg = (static_cast<float>(m_calib_max[0]) + static_cast<float>(m_calib_min[0])) / 2.0f;
     float y_avg = (static_cast<float>(m_calib_max[1]) + static_cast<float>(m_calib_min[1])) / 2.0f;
     float z_avg = (static_cast<float>(m_calib_max[2]) + static_cast<float>(m_calib_min[2])) / 2.0f;
 
     set_calibration_offsets(x_avg, y_avg, z_avg);
 
-    // Calculate scales to normalize the half-range of each axis to be the same (assuming the true magnetic field
-    // strength is similar across axes)
-    float x_half_range = (static_cast<float>(m_calib_max[0]) - static_cast<float>(m_calib_min[0])) / 2.0f;
-    float y_half_range = (static_cast<float>(m_calib_max[1]) - static_cast<float>(m_calib_min[1])) / 2.0f;
-    float z_half_range = (static_cast<float>(m_calib_max[2]) - static_cast<float>(m_calib_min[2])) / 2.0f;
+    // Calculate scales to normalize the half-range of each axis to be the same (assuming the true
+    // magnetic field strength is similar across axes)
+    float x_half_range =
+      (static_cast<float>(m_calib_max[0]) - static_cast<float>(m_calib_min[0])) / 2.0f;
+    float y_half_range =
+      (static_cast<float>(m_calib_max[1]) - static_cast<float>(m_calib_min[1])) / 2.0f;
+    float z_half_range =
+      (static_cast<float>(m_calib_max[2]) - static_cast<float>(m_calib_min[2])) / 2.0f;
 
     float avg_half_range = (x_half_range + y_half_range + z_half_range) / 3.0f;
 
@@ -215,8 +220,14 @@ void QMC5883L::stop_calibration_mode()
 
     set_calibration_scales(m_scale[0], m_scale[1], m_scale[2]);
 
-    ESP_LOGI(TAG, "Calibration Results: Offsets[%.2f, %.2f, %.2f], Scales[%.2f, %.2f, %.2f]", m_offset[0], m_offset[1],
-             m_offset[2], m_scale[0], m_scale[1], m_scale[2]);
+    ESP_LOGI(TAG,
+             "Calibration Results: Offsets[%.2f, %.2f, %.2f], Scales[%.2f, %.2f, %.2f]",
+             m_offset[0],
+             m_offset[1],
+             m_offset[2],
+             m_scale[0],
+             m_scale[1],
+             m_scale[2]);
 
     m_calib_active = false;
 }
@@ -256,8 +267,14 @@ esp_err_t QMC5883L::load_calibration_from_nvs()
             m_scale[0] = data[3];
             m_scale[1] = data[4];
             m_scale[2] = data[5];
-            ESP_LOGI(TAG, "Loaded magnetometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]", m_offset[0],
-                     m_offset[1], m_offset[2], m_scale[0], m_scale[1], m_scale[2]);
+            ESP_LOGI(TAG,
+                     "Loaded magnetometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]",
+                     m_offset[0],
+                     m_offset[1],
+                     m_offset[2],
+                     m_scale[0],
+                     m_scale[1],
+                     m_scale[2]);
             return ESP_OK;
         }
         else
@@ -294,7 +311,8 @@ bool QMC5883L::is_calibrated() const
 void QMC5883L::read()
 {
     // sizeof(m_buffer) limits FlawFinder boundaries warning.
-    if (I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX_L), sizeof(m_buffer), m_buffer) ==
+    if (I2Cdev::readBytes(
+          m_dev_addr, static_cast<uint8_t>(Register::DATAX_L), sizeof(m_buffer), m_buffer) ==
         sizeof(m_buffer))
     {
         m_v_raw[0] = (int16_t)(((uint16_t)m_buffer[1] << 8) | m_buffer[0]);
@@ -313,9 +331,12 @@ void QMC5883L::read()
  */
 void QMC5883L::apply_calibration()
 {
-    m_v_calibrated[0] = static_cast<int16_t>((static_cast<float>(m_v_raw[0]) - m_offset[0]) * m_scale[0]);
-    m_v_calibrated[1] = static_cast<int16_t>((static_cast<float>(m_v_raw[1]) - m_offset[1]) * m_scale[1]);
-    m_v_calibrated[2] = static_cast<int16_t>((static_cast<float>(m_v_raw[2]) - m_offset[2]) * m_scale[2]);
+    m_v_calibrated[0] =
+      static_cast<int16_t>((static_cast<float>(m_v_raw[0]) - m_offset[0]) * m_scale[0]);
+    m_v_calibrated[1] =
+      static_cast<int16_t>((static_cast<float>(m_v_raw[1]) - m_offset[1]) * m_scale[1]);
+    m_v_calibrated[2] =
+      static_cast<int16_t>((static_cast<float>(m_v_raw[2]) - m_offset[2]) * m_scale[2]);
 }
 
 /**
@@ -399,8 +420,8 @@ int16_t QMC5883L::get_axis(int index) const
  */
 int QMC5883L::get_azimuth() const
 {
-    float heading =
-      atan2f(static_cast<float>(get_y()), static_cast<float>(get_x())) * 180.0f / static_cast<float>(M_PI);
+    float heading = atan2f(static_cast<float>(get_y()), static_cast<float>(get_x())) * 180.0f /
+                    static_cast<float>(M_PI);
     heading += m_magnetic_declination_degrees;
 
     while (heading < 0) heading += 360.0f;

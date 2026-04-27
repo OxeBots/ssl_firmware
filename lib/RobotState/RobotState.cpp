@@ -59,7 +59,11 @@ void RobotState::set_id(uint8_t id)
 {
     if (id > ROBOT_ID_MAX && id != ROBOT_ID_BROADCAST)
     {
-        ESP_LOGE(TAG, "Invalid robot ID %d (max=%d, broadcast=%d). Rejected.", id, ROBOT_ID_MAX, ROBOT_ID_BROADCAST);
+        ESP_LOGE(TAG,
+                 "Invalid robot ID %d (max=%d, broadcast=%d). Rejected.",
+                 id,
+                 ROBOT_ID_MAX,
+                 ROBOT_ID_BROADCAST);
         return;
     }
 

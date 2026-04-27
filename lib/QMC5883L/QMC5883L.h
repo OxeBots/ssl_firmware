@@ -76,9 +76,9 @@ class QMC5883L
     void set_smoothing(uint8_t steps, bool adv);
     void read();
 
-    int16_t inline get_x() const { return get_axis(0); }
-    int16_t inline get_y() const { return get_axis(1); }
-    int16_t inline get_z() const { return get_axis(2); }
+    int16_t get_x() const { return get_axis(0); }
+    int16_t get_y() const { return get_axis(1); }
+    int16_t get_z() const { return get_axis(2); }
 
     void get_orientation(int16_t * x, int16_t * y, int16_t * z);
     int get_azimuth() const;

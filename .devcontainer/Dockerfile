@@ -30,6 +30,8 @@ RUN apt-get update \
       aggregate \
       jq \
       wget \
+      clang-format \
+      clangd \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Node.js (for AI agent CLIs)

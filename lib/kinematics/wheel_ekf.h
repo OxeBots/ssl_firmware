@@ -14,11 +14,11 @@ class WheelKalmanFilter
     WheelKalmanFilter();
     ~WheelKalmanFilter();
 
-    void update(float measured_angle);
+    void update(double measured_angle);
 
-    float get_angle_rad() const;
-    float get_velocity_rad_s() const;
-    float get_acceleration_rad_s2() const;
+    double get_angle_rad() const;
+    double get_velocity_rad_s() const;
+    double get_acceleration_rad_s2() const;
 
    private:
     struct KalmanState;

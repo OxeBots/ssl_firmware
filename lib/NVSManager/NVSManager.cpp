@@ -5,6 +5,30 @@ static const char * TAG = "NVSManager";
 QueueHandle_t NVSManager::m_op_queue = nullptr;
 
 /**
+ * @brief Erase the entire NVS partition and re-initialize.
+ *
+ * Destroys all stored data including robot ID, wheel calibration, and PID gains.
+ * The caller should reboot immediately after this call to start with a clean state.
+ */
+void NVSManager::erase_all()
+{
+    ESP_LOGW(TAG, "Erasing entire NVS partition...");
+    esp_err_t err = nvs_flash_erase();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "nvs_flash_erase failed: %s", esp_err_to_name(err));
+        return;
+    }
+    err = nvs_flash_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "nvs_flash_init after erase failed: %s", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "NVS partition erased and reinitialized.");
+}
+
+/**
  * @brief Initializes the NVS flash partition.
  *
  * Calls nvs_flash_init(). If the partition is corrupt or has an incompatible
@@ -75,7 +99,8 @@ esp_err_t NVSManager::save_i32(const char * ns, const char * key, int32_t value)
 
     if (xQueueSend(m_op_queue, &op, pdMS_TO_TICKS(100)) != pdPASS)
     {
-        ESP_LOGE(TAG, "NVS write queue full — i32 [%s/%s]=%ld not persisted!", ns, key, (long)value);
+        ESP_LOGE(
+          TAG, "NVS write queue full — i32 [%s/%s]=%ld not persisted!", ns, key, (long)value);
         return ESP_ERR_TIMEOUT;
     }
 
@@ -109,7 +134,8 @@ esp_err_t NVSManager::save_blob(const char * ns, const char * key, const void * 
 
     if (length > BLOB_MAX)
     {
-        ESP_LOGE(TAG, "save_blob: blob too large (%zu > %zu) for [%s/%s]", length, BLOB_MAX, ns, key);
+        ESP_LOGE(
+          TAG, "save_blob: blob too large (%zu > %zu) for [%s/%s]", length, BLOB_MAX, ns, key);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -209,7 +235,8 @@ esp_err_t NVSManager::load_blob(const char * ns, const char * key, void * out, s
 
     if (*length > BLOB_MAX)
     {
-        ESP_LOGE(TAG, "load_blob: requested length (%zu) exceeds BLOB_MAX (%zu)", *length, BLOB_MAX);
+        ESP_LOGE(
+          TAG, "load_blob: requested length (%zu) exceeds BLOB_MAX (%zu)", *length, BLOB_MAX);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -277,7 +304,8 @@ void NVSManager::nvs_writer_task(void * /*arg*/)
                 if (err == ESP_OK)
                     ESP_LOGD(TAG, "Saved i32  [%s/%s] = %ld", op.ns, op.key, (long)value);
                 else
-                    ESP_LOGE(TAG, "Failed to save i32 [%s/%s]: %s", op.ns, op.key, esp_err_to_name(err));
+                    ESP_LOGE(
+                      TAG, "Failed to save i32 [%s/%s]: %s", op.ns, op.key, esp_err_to_name(err));
                 break;
             }
 
@@ -295,7 +323,8 @@ void NVSManager::nvs_writer_task(void * /*arg*/)
                 if (err == ESP_OK)
                     ESP_LOGD(TAG, "Saved blob [%s/%s] (%zu bytes)", op.ns, op.key, op.write.len);
                 else
-                    ESP_LOGE(TAG, "Failed to save blob [%s/%s]: %s", op.ns, op.key, esp_err_to_name(err));
+                    ESP_LOGE(
+                      TAG, "Failed to save blob [%s/%s]: %s", op.ns, op.key, esp_err_to_name(err));
                 break;
             }
 

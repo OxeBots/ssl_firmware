@@ -26,7 +26,6 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "ms-vscode.cpptools",
         "platformio.platformio-ide",
         "jeff-hykin.better-cpp-syntax",
         "nordic-semiconductor.nrf-kconfig",

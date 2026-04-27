@@ -147,7 +147,8 @@ esp_err_t OrientationHandler::calibrate_mag(uint32_t timeout_s)
  */
 esp_err_t OrientationHandler::calibrate_accel(uint32_t timeout_s)
 {
-    ESP_LOGI(TAG, "Starting Accelerometer Calibration. Place robot completely FLAT and STATIONARY!");
+    ESP_LOGI(TAG,
+             "Starting Accelerometer Calibration. Place robot completely FLAT and STATIONARY!");
     for (int i = 3; i > 0; i--)
     {
         ESP_LOGI(TAG, "%d...", i);
@@ -158,8 +159,11 @@ esp_err_t OrientationHandler::calibrate_accel(uint32_t timeout_s)
     accel.calibrate();
 
     // Apply calibration to driver
-    Vector3f scale = {accel.get_calibration_scale(0), accel.get_calibration_scale(1), accel.get_calibration_scale(2)};
-    Vector3f offset = {accel.get_calibration_offset(0), accel.get_calibration_offset(1),
+    Vector3f scale = {accel.get_calibration_scale(0),
+                      accel.get_calibration_scale(1),
+                      accel.get_calibration_scale(2)};
+    Vector3f offset = {accel.get_calibration_offset(0),
+                       accel.get_calibration_offset(1),
                        accel.get_calibration_offset(2)};
     m_driver.set_accel_calibration(scale, offset);
 
@@ -194,7 +198,8 @@ esp_err_t OrientationHandler::calibrate_gyro(uint32_t timeout_s)
     int16_t x_off, y_off, z_off;
     gyro.get_offsets(&x_off, &y_off, &z_off);
     Vector3f scale = {1.0f, 1.0f, 1.0f};  // ITG3200 doesn't use scale
-    Vector3f offset = {static_cast<float>(x_off), static_cast<float>(y_off), static_cast<float>(z_off)};
+    Vector3f offset = {
+      static_cast<float>(x_off), static_cast<float>(y_off), static_cast<float>(z_off)};
     m_driver.set_gyro_calibration(scale, offset);
 
     // Save to NVS
@@ -363,9 +368,11 @@ esp_err_t OrientationHandler::load_accel_calibration_from_nvs()
 
     if (err == ESP_OK)
     {
-        Vector3f scale = {accel.get_calibration_scale(0), accel.get_calibration_scale(1),
+        Vector3f scale = {accel.get_calibration_scale(0),
+                          accel.get_calibration_scale(1),
                           accel.get_calibration_scale(2)};
-        Vector3f offset = {accel.get_calibration_offset(0), accel.get_calibration_offset(1),
+        Vector3f offset = {accel.get_calibration_offset(0),
+                           accel.get_calibration_offset(1),
                            accel.get_calibration_offset(2)};
         m_driver.set_accel_calibration(scale, offset);
     }
@@ -388,7 +395,8 @@ esp_err_t OrientationHandler::load_gyro_calibration_from_nvs()
         int16_t x_off, y_off, z_off;
         gyro.get_offsets(&x_off, &y_off, &z_off);
         Vector3f scale = {1.0f, 1.0f, 1.0f};
-        Vector3f offset = {static_cast<float>(x_off), static_cast<float>(y_off), static_cast<float>(z_off)};
+        Vector3f offset = {
+          static_cast<float>(x_off), static_cast<float>(y_off), static_cast<float>(z_off)};
         m_driver.set_gyro_calibration(scale, offset);
     }
 
@@ -406,8 +414,11 @@ esp_err_t OrientationHandler::load_mag_calibration_from_nvs()
 
     if (err == ESP_OK)
     {
-        Vector3f scale = {mag.get_calibration_scale(0), mag.get_calibration_scale(1), mag.get_calibration_scale(2)};
-        Vector3f offset = {mag.get_calibration_offset(0), mag.get_calibration_offset(1), mag.get_calibration_offset(2)};
+        Vector3f scale = {
+          mag.get_calibration_scale(0), mag.get_calibration_scale(1), mag.get_calibration_scale(2)};
+        Vector3f offset = {mag.get_calibration_offset(0),
+                           mag.get_calibration_offset(1),
+                           mag.get_calibration_offset(2)};
         m_driver.set_mag_calibration(scale, offset);
     }
 

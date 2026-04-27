@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "ADXL345.h"
-#include "I2Cdev.h"
 #include "ITG3200.h"
 #include "QMC5883L.h"
 

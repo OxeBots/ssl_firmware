@@ -1,16 +1,14 @@
 import argparse
+import subprocess
 import sys
 import time
-import subprocess
 
 try:
     import ssl_robot_protocol_bp
 except ImportError:
     print("Generating Python bitproto module...")
     try:
-        subprocess.run(
-            ["bitproto", "py", "proto/ssl_robot_protocol.bitproto", "."], check=True
-        )
+        subprocess.run(["bitproto", "py", "proto/ssl_robot_protocol.bitproto", "."], check=True)
         import ssl_robot_protocol_bp
     except Exception as e:
         print(
@@ -20,7 +18,6 @@ except ImportError:
 
 import serial
 import serial.tools.list_ports
-
 
 MSG_TYPE_COMMAND = ssl_robot_protocol_bp.MSG_TYPE_COMMAND
 MSG_TYPE_CONFIG = ssl_robot_protocol_bp.MSG_TYPE_CONFIG
@@ -83,24 +80,16 @@ class nRF24L01_Controller:
         # These IDs are from dmesg output:
         # idVendor=1a86, idProduct=7523
         TARGET_VID, TARGET_PID = 0x1A86, 0x7523
-        print(
-            f"{Colors.BLUE}Searching for nRF24L01 device (VID:{TARGET_VID:x}, PID:{TARGET_PID:x})...{Colors.RESET}"
-        )
+        print(f"{Colors.BLUE}Searching for nRF24L01 device (VID:{TARGET_VID:x}, PID:{TARGET_PID:x})...{Colors.RESET}")
         for port in serial.tools.list_ports.comports():
             if port.vid == TARGET_VID and port.pid == TARGET_PID:
                 print(f"{Colors.GREEN}Found device at: {port.device}{Colors.RESET}")
                 try:
-                    return nRF24L01_Controller(
-                        port=port.device, baudrate=baudrate, timeout=timeout
-                    )
+                    return nRF24L01_Controller(port=port.device, baudrate=baudrate, timeout=timeout)
                 except serial.SerialException as e:
-                    print(
-                        f"{Colors.RED}Error connecting to {port.device}: {e}{Colors.RESET}"
-                    )
+                    print(f"{Colors.RED}Error connecting to {port.device}: {e}{Colors.RESET}")
                     return None
-        print(
-            f"\n{Colors.RED}Error: Could not find nRF24L01 USB adapter.{Colors.RESET}"
-        )
+        print(f"\n{Colors.RED}Error: Could not find nRF24L01 USB adapter.{Colors.RESET}")
         return None
 
     @staticmethod
@@ -195,9 +184,7 @@ class nRF24L01_Controller:
                 continue
             if ":" in line:
                 key, value = line.split(":", 1)
-                display_key = next(
-                    (lbl for sub, lbl in key_map.items() if sub in key), key.strip()
-                )
+                display_key = next((lbl for sub, lbl in key_map.items() if sub in key), key.strip())
                 print(f"{display_key:25}: {value.strip()}")
 
     def set_receive_address(self, address_bytes):
@@ -205,37 +192,27 @@ class nRF24L01_Controller:
         if len(address_bytes) != 5:
             return False
         addr_str = ",".join(f"0x{b:02X}" for b in address_bytes)
-        return (
-            "successful"
-            in self.send_at_command(f"AT+RXA={addr_str}", wait_time=3).lower()
-        )
+        return "successful" in self.send_at_command(f"AT+RXA={addr_str}", wait_time=3).lower()
 
     def set_transmit_address(self, address_bytes):
         """Set transmit pipe address using AT+TXA command"""
         if len(address_bytes) != 5:
             return False
         addr_str = ",".join(f"0x{b:02X}" for b in address_bytes)
-        return (
-            "successful"
-            in self.send_at_command(f"AT+TXA={addr_str}", wait_time=3).lower()
-        )
+        return "successful" in self.send_at_command(f"AT+TXA={addr_str}", wait_time=3).lower()
 
     def set_addresses(self, rx_address, tx_address):
         """Set both receive and transmit addresses"""
         print(
             f"\n{Colors.BLUE}Setting RX: {[hex(x) for x in rx_address]}  TX: {[hex(x) for x in tx_address]}{Colors.RESET}"
         )
-        return self.set_receive_address(rx_address) and self.set_transmit_address(
-            tx_address
-        )
+        return self.set_receive_address(rx_address) and self.set_transmit_address(tx_address)
 
     def set_frequency(self, frequency_ghz):
         """Set operating frequency in GHz (e.g., 2.404 for 2.404GHz)"""
         if not 2.400 <= frequency_ghz <= 2.525:
             return False
-        return (
-            "successful" in self.send_at_command(f"AT+FREQ={frequency_ghz:.3f}").lower()
-        )
+        return "successful" in self.send_at_command(f"AT+FREQ={frequency_ghz:.3f}").lower()
 
     def set_data_rate(self, rate):
         """Set data rate (1=250Kbps, 2=1Mbps, 3=2Mbps)"""
@@ -257,17 +234,11 @@ class nRF24L01_Controller:
             7: 115200,
         }
         if new_baud not in baud_rates:
-            print(
-                f"{Colors.RED}Error: Invalid baud rate code: {new_baud}{Colors.RESET}"
-            )
+            print(f"{Colors.RED}Error: Invalid baud rate code: {new_baud}{Colors.RESET}")
             return False
-        print(
-            f"\n{Colors.BLUE}Setting baud rate to {baud_rates[new_baud]}{Colors.RESET}"
-        )
+        print(f"\n{Colors.BLUE}Setting baud rate to {baud_rates[new_baud]}{Colors.RESET}")
         if "successful" in self.send_at_command(f"AT+BAUD={new_baud}").lower():
-            print(
-                f"{Colors.GREEN}✓ Baud rate changed to {baud_rates[new_baud]}{Colors.RESET}"
-            )
+            print(f"{Colors.GREEN}✓ Baud rate changed to {baud_rates[new_baud]}{Colors.RESET}")
             return True
         print(f"{Colors.RED}✗ Baud rate change failed{Colors.RESET}")
         return False
@@ -284,7 +255,7 @@ class nRF24L01_Controller:
         self.ser.write(raw_bytes)
         self.ser.flush()
 
-    def send_command(self, robot_id, x=0, y=0, angle=0, kick=0, timestamp=None):
+    def send_command(self, robot_id, x=0, y=0, angle=0, vx=0, vy=0, w=0, kick=0, timestamp=None):
         """
         Build and send a RobotCommand.
 
@@ -292,6 +263,9 @@ class nRF24L01_Controller:
         :param x:         Target pose X (mm).
         :param y:         Target pose Y (mm).
         :param angle:     Target orientation (0.01° units).
+        :param vx:        Target X velocity (mm/s).
+        :param vy:        Target Y velocity (mm/s).
+        :param w:         Target angular velocity (0.01 rad/s).
         :param kick:      Kick strength (0-255).
         :param timestamp: uint32 ms timestamp; auto-generated if None.
         :returns:         The timestamp used (for RTT matching).
@@ -304,6 +278,9 @@ class nRF24L01_Controller:
         cmd.target_pose.x = x
         cmd.target_pose.y = y
         cmd.target_pose.angle = angle
+        cmd.target_pose.x_v = vx
+        cmd.target_pose.y_v = vy
+        cmd.target_pose.angular_vel = w
         cmd.kick_velocity = kick
 
         encoded = cmd.encode()
@@ -327,9 +304,7 @@ class nRF24L01_Controller:
         cfg.config_flags = config_flags
         cfg.param = param
 
-        print(
-            f"{Colors.CYAN}[CONFIG] robot_id={robot_id} flags=0x{config_flags:02X} param={param}{Colors.RESET}"
-        )
+        print(f"{Colors.CYAN}[CONFIG] robot_id={robot_id} flags=0x{config_flags:02X} param={param}{Colors.RESET}")
         self.send_data(cfg.encode())
 
     def receive_data(self, timeout=0.5):
@@ -350,9 +325,7 @@ class nRF24L01_Controller:
                 buffer.extend(self.ser.read(self.ser.in_waiting))
 
                 # Strip dongle TX-complete status codes
-                while len(buffer) >= 6 and buffer.startswith(
-                    b"\x02\x00\x00\x00\x00\x00"
-                ):
+                while len(buffer) >= 6 and buffer.startswith(b"\x02\x00\x00\x00\x00\x00"):
                     buffer = buffer[6:]
 
                 if len(buffer) >= expected_len:
@@ -370,9 +343,7 @@ class nRF24L01_Controller:
                             f"\r{Colors.GREEN}✓ [RX] Robot {telemetry.header.robot_id} | "
                             f"ts={telemetry.header.timestamp} | "
                             f"Batt={telemetry.battery_percentage}% | "
-                            f"Kicker={telemetry.kicker_voltage / 100:.2f}V{Colors.RESET}"
-                            + " "
-                            * 10
+                            f"Kicker={telemetry.kicker_voltage / 100:.2f}V{Colors.RESET}" + " " * 10
                         )
                         return telemetry
                     except Exception as e:
@@ -401,11 +372,11 @@ class CLIController:
     def _print_help(self):
         print(f"""
 {Colors.BOLD}Commands:{Colors.RESET}
-  {{x:<mm>, y:<mm>, kick:<0-255>, id:<robot_id>}}        — send RobotCommand
+  {{x:<mm>, y:<mm>, vx:<mm/s>, vy:<mm/s>, w:<0.01rad/s>, kick:<0-255>, id:<robot_id>}} — send RobotCommand
   set_id <target_id> <new_id>                            — assign new robot ID
-  calibrate [<robot_id>|broadcast]                       — wheel calibration
+  calibrate [<robot_id>|broadcast]                       — wheel + IMU calibration + PID tuning
   calibrate_mag [<robot_id>|broadcast]                   — mag calibration
-  factory_reset [<robot_id>|broadcast]                   — factory reset
+  factory_reset [<robot_id>|broadcast]                   — full NVS erase + reboot
   help                                                   — show this help
   q / quit                                               — exit
 """)
@@ -460,7 +431,7 @@ class CLIController:
                     continue
 
                 # Motion command
-                x, y, kick, robot_id = 0, 0, 0, 0
+                x, y, vx, vy, w, kick, robot_id = 0, 0, 0, 0, 0, 0, 0
                 for p in raw.strip("{} ").split(","):
                     if ":" in p:
                         k, v = p.split(":", 1)
@@ -469,17 +440,21 @@ class CLIController:
                             x = int(v)
                         elif k == "y":
                             y = int(v)
+                        elif k == "vx":
+                            vx = int(v)
+                        elif k == "vy":
+                            vy = int(v)
+                        elif k == "w":
+                            w = int(v)
                         elif k == "kick":
                             kick = int(v)
                         elif k == "id":
                             robot_id = self._parse_robot_id(v)
 
-                timestamp = self.device.send_command(robot_id, x=x, y=y, kick=kick)
-                id_label = (
-                    "BROADCAST" if robot_id == ROBOT_ID_BROADCAST else str(robot_id)
-                )
+                timestamp = self.device.send_command(robot_id, x=x, y=y, vx=vx, vy=vy, w=w, kick=kick)
+                id_label = "BROADCAST" if robot_id == ROBOT_ID_BROADCAST else str(robot_id)
                 print(
-                    f"{Colors.CYAN}→ [CMD] robot={id_label} ts={timestamp} x={x} y={y} kick={kick}{Colors.RESET}",
+                    f"{Colors.CYAN}→ [CMD] robot={id_label} ts={timestamp} x={x} y={y} vx={vx} vy={vy} w={w} kick={kick}{Colors.RESET}",
                     end="",
                     flush=True,
                 )
@@ -489,9 +464,7 @@ class CLIController:
 
                     self.device.receive_data(timeout=0.200)
                 else:
-                    print(
-                        f"  {Colors.YELLOW}(broadcast — no reply expected){Colors.RESET}"
-                    )
+                    print(f"  {Colors.YELLOW}(broadcast — no reply expected){Colors.RESET}")
 
             except KeyboardInterrupt:
                 break
@@ -504,12 +477,8 @@ def main():
         description="nRF24L01 Wireless Module Controller",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "-p", "--port", type=str, default="auto", help="Serial port device."
-    )
-    parser.add_argument(
-        "-b", "--baud", type=int, default=115200, help="Serial baud rate."
-    )
+    parser.add_argument("-p", "--port", type=str, default="auto", help="Serial port device.")
+    parser.add_argument("-b", "--baud", type=int, default=115200, help="Serial baud rate.")
     parser.add_argument(
         "-f",
         "--freq",
@@ -521,13 +490,11 @@ def main():
         "-r",
         "--rate",
         type=int,
-        default=1,
+        default=3,
         choices=[1, 2, 3],
         help="Air data rate: 1=250Kbps, 2=1Mbps, 3=2Mbps",
     )
-    parser.add_argument(
-        "-a", "--address", type=str, default="ESP32", help="5-byte address string."
-    )
+    parser.add_argument("-a", "--address", type=str, default="ESP32", help="5-byte address string.")
     parser.add_argument(
         "--skip-config",
         action="store_true",
@@ -537,9 +504,7 @@ def main():
 
     device = None
     try:
-        print(
-            f"{Colors.BOLD}=== nRF24L01 Wireless Module Controller ==={Colors.RESET}\n"
-        )
+        print(f"{Colors.BOLD}=== nRF24L01 Wireless Module Controller ==={Colors.RESET}\n")
 
         device = (
             nRF24L01_Controller.auto_connect(baudrate=args.baud)
@@ -553,9 +518,7 @@ def main():
         if not args.skip_config:
             print(f"\n{Colors.BOLD}CONFIGURING MODULE:{Colors.RESET}")
             if len(args.address) != 5:
-                print(
-                    f"{Colors.RED}Error: Address must be exactly 5 characters.{Colors.RESET}"
-                )
+                print(f"{Colors.RED}Error: Address must be exactly 5 characters.{Colors.RESET}")
                 return
             rx_address_bytes = [ord(c) for c in "ADMIN"]
             tx_address_bytes = list(args.address.encode("ascii"))
@@ -564,9 +527,7 @@ def main():
             device.set_data_rate(args.rate)
             device.get_system_info()
         else:
-            print(
-                f"\n{Colors.YELLOW}Skipping USB Adapter AT-Configuration...{Colors.RESET}"
-            )
+            print(f"\n{Colors.YELLOW}Skipping USB Adapter AT-Configuration...{Colors.RESET}")
 
         CLIController(device).start()
 
@@ -574,9 +535,7 @@ def main():
         print(f"\n{Colors.YELLOW}Stopped by user{Colors.RESET}")
     except serial.SerialException as e:
         print(f"\n{Colors.RED}Serial Error: {e}{Colors.RESET}")
-        print(
-            f"{Colors.YELLOW}Hint: Try 'sudo usermod -a -G dialout $USER'{Colors.RESET}"
-        )
+        print(f"{Colors.YELLOW}Hint: Try 'sudo usermod -a -G dialout $USER'{Colors.RESET}")
     except Exception as e:
         print(f"{Colors.RED}An unexpected error occurred: {e}{Colors.RESET}")
     finally:

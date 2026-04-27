@@ -23,14 +23,15 @@ void setUp(void)
 
 void setup_i2c()
 {
-    i2c_master_bus_config_t i2c_mst_config = {.i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
-                                              .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
-                                              .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
-                                              .clk_source = I2C_CLK_SRC_DEFAULT,
-                                              .glitch_ignore_cnt = 7,
-                                              .intr_priority = 0,
-                                              .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
+    i2c_master_bus_config_t i2c_mst_config = {
+      .i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
+      .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
+      .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
+      .clk_source = I2C_CLK_SRC_DEFAULT,
+      .glitch_ignore_cnt = 7,
+      .intr_priority = 0,
+      .trans_queue_depth = 0,
+      .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
     I2Cdev::init(bus_handle);
@@ -57,7 +58,8 @@ void test_reading_and_azimuth(void)
     char direction[4];
     mag.get_direction(direction, azimuth);
 
-    ESP_LOGI(TAG, "X: %d, Y: %d, Z: %d | Azimuth: %d deg | Direction: %s", x, y, z, azimuth, direction);
+    ESP_LOGI(
+      TAG, "X: %d, Y: %d, Z: %d | Azimuth: %d deg | Direction: %s", x, y, z, azimuth, direction);
 
     TEST_ASSERT_FALSE_MESSAGE(x == 0 && y == 0 && z == 0, "All readings are zero");
 }

@@ -69,6 +69,9 @@ pio device monitor
 
 # Check code quality (clang-tidy + cppcheck)
 pio check
+
+# Generate compile_commands.json for IDE linting/intellisense
+pio run -t compiledb
 ```
 
 ### Tests

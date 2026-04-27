@@ -8,8 +8,11 @@
 #include <algorithm>
 #include <numeric>
 
+#include <standard_constants.h>
+
 #include "I2Cdev.h"
 #include "NVSManager.h"
+#include "constants.h"
 
 static const char * TAG = "AS5600";
 
@@ -21,7 +24,10 @@ static const char * TAG = "AS5600";
  * @param unit ADC unit (default ADC_UNIT_1).
  * @param bitwidth ADC bitwidth (default ADC_BITWIDTH_12).
  */
-AS5600::AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltage_calibrated, adc_unit_t unit,
+AS5600::AS5600(adc_channel_t channel,
+               adc_cali_handle_t cali_handle,
+               bool voltage_calibrated,
+               adc_unit_t unit,
                adc_bitwidth_t bitwidth)
 : ADC_BITWIDTH(bitwidth),
   m_channel(channel),
@@ -116,7 +122,8 @@ esp_err_t AS5600::set_fast_filter(FastFilter threshold)
 }
 
 /**
- * @brief Permanently burns settings into the AS5600 OTP memory. Can only be performed 3 times per chip.
+ * @brief Permanently burns settings into the AS5600 OTP memory. Can only be performed 3 times per
+ * chip.
  * @return ESP_OK on success.
  */
 esp_err_t AS5600::burn_settings()
@@ -151,7 +158,8 @@ esp_err_t AS5600::get_i2c_raw_angle(uint16_t * angle)
 }
 
 /**
- * @brief Processes an incoming raw ADC reading, applying oversampling and feeding the Kalman filter.
+ * @brief Processes an incoming raw ADC reading, applying oversampling and feeding the Kalman
+ * filter.
  * @param raw_adc_value Raw uint16_t coming directly from the ADC buffer.
  */
 void AS5600::process_new_reading(uint16_t raw_adc_value)
@@ -163,7 +171,8 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
     // When the sampling buffer is full, process the data
     if (m_sampling_state.count >= OVERSAMPLE_COUNT)
     {
-        uint32_t sum = std::accumulate(m_sampling_state.samples.begin(), m_sampling_state.samples.end(), 0u);
+        uint32_t sum =
+          std::accumulate(m_sampling_state.samples.begin(), m_sampling_state.samples.end(), 0u);
         m_last_avg_value = sum / OVERSAMPLE_COUNT;
 
         // Convert to Angle
@@ -188,14 +197,16 @@ void AS5600::process_new_reading(uint16_t raw_adc_value)
         if (cal_max > cal_min)
         {
             int clamped_mv = std::clamp(current_voltage_mv, cal_min, cal_max);
-            float ratio = static_cast<float>(clamped_mv - cal_min) / static_cast<float>(cal_max - cal_min);
+            float ratio =
+              static_cast<float>(clamped_mv - cal_min) / static_cast<float>(cal_max - cal_min);
             measured_angle_rad = ratio * 2.0f * static_cast<float>(PI);
         }
         else
         {
             // Fallback if not calibrated: map raw value to angle
             const float max_raw = static_cast<float>((1 << ADC_BITWIDTH) - 1);
-            measured_angle_rad = static_cast<float>(m_last_avg_value) * (2.0f * static_cast<float>(PI) / max_raw);
+            measured_angle_rad =
+              static_cast<float>(m_last_avg_value) * (2.0f * static_cast<float>(PI) / max_raw);
         }
 
         // Update Kalman Filter
@@ -222,12 +233,17 @@ esp_err_t AS5600::calibrate_range(uint32_t duration_ms)
     vTaskDelay(pdMS_TO_TICKS(duration_ms));
     m_is_calibrating.store(false);
 
-    ESP_LOGI(TAG, "Channel %d calibrated. Min: %d mV, Max: %d mV", m_channel, m_min_voltage_mv.load(),
+    ESP_LOGI(TAG,
+             "Channel %d calibrated. Min: %d mV, Max: %d mV",
+             m_channel,
+             m_min_voltage_mv.load(),
              m_max_voltage_mv.load());
 
     if (m_max_voltage_mv.load() - m_min_voltage_mv.load() < MIN_VALID_VOLTAGE_RANGE_MV)
     {
-        ESP_LOGE(TAG, "Error: Voltage range for channel %d is invalid (%d mV).", m_channel,
+        ESP_LOGE(TAG,
+                 "Error: Voltage range for channel %d is invalid (%d mV).",
+                 m_channel,
                  m_max_voltage_mv.load() - m_min_voltage_mv.load());
         return ESP_ERR_INVALID_STATE;
     }
@@ -251,7 +267,10 @@ esp_err_t AS5600::save_calibration_to_nvs()
         err = NVSManager::save_i32(NVS_NS, key_max, m_max_voltage_mv.load());
 
     if (err == ESP_OK)
-        ESP_LOGI(TAG, "Saved calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv.load(),
+        ESP_LOGI(TAG,
+                 "Saved calibration for Ch %d: [%d, %d] mV",
+                 static_cast<int>(m_channel),
+                 m_min_voltage_mv.load(),
                  m_max_voltage_mv.load());
 
     return err;
@@ -274,7 +293,10 @@ esp_err_t AS5600::load_calibration_from_nvs()
     if (err_min == ESP_OK && err_max == ESP_OK)
     {
         set_calibration_range(static_cast<int>(min_v), static_cast<int>(max_v));
-        ESP_LOGI(TAG, "Loaded calibration for Ch %d: [%d, %d] mV", static_cast<int>(m_channel), m_min_voltage_mv.load(),
+        ESP_LOGI(TAG,
+                 "Loaded calibration for Ch %d: [%d, %d] mV",
+                 static_cast<int>(m_channel),
+                 m_min_voltage_mv.load(),
                  m_max_voltage_mv.load());
         return ESP_OK;
     }
@@ -301,12 +323,21 @@ float AS5600::get_angle_deg() const
 }
 
 /**
+ * @brief Get the filtered angular velocity in rad/s.
+ * @return Angular velocity in radians per second.
+ */
+float AS5600::get_velocity_rad_s() const
+{
+    return static_cast<float>(m_filter->get_velocity_rad_s());
+}
+
+/**
  * @brief Get the filtered rotational velocity in RPM.
  * @return Rotational velocity (Revolutions Per Minute).
  */
 float AS5600::get_rpm() const
 {
-    return m_filter->get_velocity_rad_s() * RAD_S_TO_RPM;
+    return get_velocity_rad_s() * RAD_S_TO_RPM;
 }
 
 /**
@@ -315,7 +346,7 @@ float AS5600::get_rpm() const
  */
 float AS5600::get_acceleration_rps2() const
 {
-    return m_filter->get_acceleration_rad_s2() * RAD_S2_TO_RPS2;
+    return static_cast<float>(m_filter->get_acceleration_rad_s2()) * RAD_S2_TO_RPS2;
 }
 
 /**
@@ -411,16 +442,21 @@ esp_err_t AS5600::set_calibration_range(int min_mv, int max_mv)
 {
     if (min_mv >= max_mv)
     {
-        ESP_LOGE(TAG, "Invalid calibration range: min_mv (%d) must be less than max_mv (%d)", min_mv, max_mv);
+        ESP_LOGE(TAG,
+                 "Invalid calibration range: min_mv (%d) must be less than max_mv (%d)",
+                 min_mv,
+                 max_mv);
         return ESP_ERR_INVALID_ARG;
     }
 
     if ((min_mv < 0 || min_mv > 3300) || (max_mv < 0 || max_mv > 3300))
     {
         ESP_LOGE(TAG,
-                 "Invalid calibration range: min_mv and max_mv must be non-negative and <= 3300 mV. Received "
+                 "Invalid calibration range: min_mv and max_mv must be non-negative and <= 3300 "
+                 "mV. Received "
                  "min_mv=%d, max_mv=%d",
-                 min_mv, max_mv);
+                 min_mv,
+                 max_mv);
         return ESP_ERR_INVALID_ARG;
     }
 

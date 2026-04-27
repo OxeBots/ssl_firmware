@@ -41,7 +41,10 @@ NRF24L01::~NRF24L01()
  * @param rx_addr      The 5-byte receive address.
  * @return ESP_OK on success, or an error from the mirf library.
  */
-esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr)
+esp_err_t NRF24L01::init(uint8_t channel,
+                         uint8_t payload_size,
+                         const char * tx_addr,
+                         const char * rx_addr)
 {
     m_payload_size = payload_size;
 
@@ -63,7 +66,8 @@ esp_err_t NRF24L01::init(uint8_t channel, uint8_t payload_size, const char * tx_
     esp_err_t ret = Nrf24_setRADDR(&m_dev, (uint8_t *)rx_addr);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "nrf24l01 not installed / failed to set RADDR (Check Wiring & add 10uF Capacitor!)");
+        ESP_LOGE(
+          TAG, "nrf24l01 not installed / failed to set RADDR (Check Wiring & add 10uF Capacitor!)");
         return ret;
     }
 

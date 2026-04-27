@@ -29,5 +29,6 @@
             "source.fixAll.ruff": "explicit",
             "source.organizeImports.ruff": "explicit"
         }
-    }
+    },
+    "platformio-ide.autoRebuildAutocompleteIndex": true
 }

@@ -4,8 +4,8 @@
  * 7/31/2011 by Jeff Rowberg <jeff@rowberg.net>
  * Updates should (hopefully) always be available at https://github.com/jrowberg/i2cdevlib
  *
- * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not equal to the
- * original.
+ * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not
+ * equal to the original.
  *
  * Changelog:
  *     2011-07-31 - initial release
@@ -419,7 +419,8 @@ void ADXL345::set_inactivity_time(uint8_t time)
  */
 bool ADXL345::get_activity_ac()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_AC_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_AC_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -432,7 +433,8 @@ bool ADXL345::get_activity_ac()
  */
 void ADXL345::set_activity_ac(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_AC_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_AC_BIT, enabled);
 }
 
 /**
@@ -453,7 +455,8 @@ void ADXL345::set_activity_ac(bool enabled)
  */
 bool ADXL345::get_activity_x_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_X_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_X_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -467,7 +470,8 @@ bool ADXL345::get_activity_x_enabled()
  */
 void ADXL345::set_activity_x_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_X_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_X_BIT, enabled);
 }
 
 /**
@@ -480,7 +484,8 @@ void ADXL345::set_activity_x_enabled(bool enabled)
  */
 bool ADXL345::get_activity_y_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Y_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Y_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -494,7 +499,8 @@ bool ADXL345::get_activity_y_enabled()
  */
 void ADXL345::set_activity_y_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Y_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Y_BIT, enabled);
 }
 
 /**
@@ -507,7 +513,8 @@ void ADXL345::set_activity_y_enabled(bool enabled)
  */
 bool ADXL345::get_activity_z_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Z_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Z_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -521,7 +528,8 @@ bool ADXL345::get_activity_z_enabled()
  */
 void ADXL345::set_activity_z_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Z_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_ACT_Z_BIT, enabled);
 }
 
 /**
@@ -533,7 +541,8 @@ void ADXL345::set_activity_z_enabled(bool enabled)
  */
 bool ADXL345::get_inactivity_ac()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_AC_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_AC_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -546,7 +555,8 @@ bool ADXL345::get_inactivity_ac()
  */
 void ADXL345::set_inactivity_ac(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_AC_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_AC_BIT, enabled);
 }
 
 /**
@@ -559,7 +569,8 @@ void ADXL345::set_inactivity_ac(bool enabled)
  */
 bool ADXL345::get_inactivity_x_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_X_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_X_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -573,7 +584,8 @@ bool ADXL345::get_inactivity_x_enabled()
  */
 void ADXL345::set_inactivity_x_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_X_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_X_BIT, enabled);
 }
 
 /**
@@ -586,7 +598,8 @@ void ADXL345::set_inactivity_x_enabled(bool enabled)
  */
 bool ADXL345::get_inactivity_y_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Y_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Y_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -600,7 +613,8 @@ bool ADXL345::get_inactivity_y_enabled()
  */
 void ADXL345::set_inactivity_y_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Y_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Y_BIT, enabled);
 }
 
 /**
@@ -613,7 +627,8 @@ void ADXL345::set_inactivity_y_enabled(bool enabled)
  */
 bool ADXL345::get_inactivity_z_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Z_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Z_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -627,7 +642,8 @@ bool ADXL345::get_inactivity_z_enabled()
  */
 void ADXL345::set_inactivity_z_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Z_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_INACT_CTL), AIC_INACT_Z_BIT, enabled);
 }
 
 /**
@@ -698,7 +714,8 @@ void ADXL345::set_freefall_time(uint8_t time)
  */
 bool ADXL345::get_tap_axis_suppress()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_SUP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_SUP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -711,7 +728,8 @@ bool ADXL345::get_tap_axis_suppress()
  */
 void ADXL345::set_tap_axis_suppress(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_SUP_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::TAP_AXES), TAPAXIS_SUP_BIT, enabled);
 }
 
 /**
@@ -813,7 +831,8 @@ void ADXL345::set_tap_axis_z_enabled(bool enabled)
  */
 bool ADXL345::get_activity_source_x()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTX_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTX_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -826,7 +845,8 @@ bool ADXL345::get_activity_source_x()
  */
 bool ADXL345::get_activity_source_y()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -839,7 +859,8 @@ bool ADXL345::get_activity_source_y()
  */
 bool ADXL345::get_activity_source_z()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTZ_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ACTZ_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -855,7 +876,8 @@ bool ADXL345::get_activity_source_z()
  */
 bool ADXL345::get_asleep()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ASLEEP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_ASLEEP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -868,7 +890,8 @@ bool ADXL345::get_asleep()
  */
 bool ADXL345::get_tap_source_x()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPX_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPX_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -881,7 +904,8 @@ bool ADXL345::get_tap_source_x()
  */
 bool ADXL345::get_tap_source_y()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -894,7 +918,8 @@ bool ADXL345::get_tap_source_y()
  */
 bool ADXL345::get_tap_source_z()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPZ_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::ACT_TAP_STATUS), TAPSTAT_TAPZ_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -940,7 +965,8 @@ void ADXL345::set_low_power_enabled(bool enabled)
  */
 uint8_t ADXL345::get_rate()
 {
-    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_RATE_BIT, BW_RATE_LENGTH, m_buffer);
+    I2Cdev::readBits(
+      m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_RATE_BIT, BW_RATE_LENGTH, m_buffer);
     return m_buffer[0];
 }
 
@@ -957,7 +983,8 @@ uint8_t ADXL345::get_rate()
  */
 void ADXL345::set_rate(uint8_t rate)
 {
-    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_RATE_BIT, BW_RATE_LENGTH, rate);
+    I2Cdev::writeBits(
+      m_dev_addr, static_cast<uint8_t>(Register::BW_RATE), BW_RATE_BIT, BW_RATE_LENGTH, rate);
 }
 
 /**
@@ -1032,7 +1059,8 @@ void ADXL345::set_link_enabled(bool enabled)
  */
 bool ADXL345::get_auto_sleep_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_AUTOSLEEP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_AUTOSLEEP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1045,7 +1073,8 @@ bool ADXL345::get_auto_sleep_enabled()
  */
 void ADXL345::set_auto_sleep_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_AUTOSLEEP_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_AUTOSLEEP_BIT, enabled);
 }
 
 /**
@@ -1059,7 +1088,8 @@ void ADXL345::set_auto_sleep_enabled(bool enabled)
  */
 bool ADXL345::get_measure_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_MEASURE_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_MEASURE_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1072,7 +1102,8 @@ bool ADXL345::get_measure_enabled()
  */
 void ADXL345::set_measure_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_MEASURE_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_MEASURE_BIT, enabled);
 }
 
 /**
@@ -1098,7 +1129,8 @@ void ADXL345::set_measure_enabled(bool enabled)
  */
 bool ADXL345::get_sleep_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_SLEEP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_SLEEP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1111,7 +1143,8 @@ bool ADXL345::get_sleep_enabled()
  */
 void ADXL345::set_sleep_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_SLEEP_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_SLEEP_BIT, enabled);
 }
 
 /**
@@ -1124,7 +1157,10 @@ void ADXL345::set_sleep_enabled(bool enabled)
  */
 uint8_t ADXL345::get_wakeup_frequency()
 {
-    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_WAKEUP_BIT, PCTL_WAKEUP_LENGTH,
+    I2Cdev::readBits(m_dev_addr,
+                     static_cast<uint8_t>(Register::POWER_CTL),
+                     PCTL_WAKEUP_BIT,
+                     PCTL_WAKEUP_LENGTH,
                      m_buffer);
     return m_buffer[0];
 }
@@ -1138,7 +1174,10 @@ uint8_t ADXL345::get_wakeup_frequency()
  */
 void ADXL345::set_wakeup_frequency(uint8_t frequency)
 {
-    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::POWER_CTL), PCTL_WAKEUP_BIT, PCTL_WAKEUP_LENGTH,
+    I2Cdev::writeBits(m_dev_addr,
+                      static_cast<uint8_t>(Register::POWER_CTL),
+                      PCTL_WAKEUP_BIT,
+                      PCTL_WAKEUP_LENGTH,
                       frequency);
 }
 
@@ -1155,7 +1194,8 @@ void ADXL345::set_wakeup_frequency(uint8_t frequency)
  */
 bool ADXL345::get_int_data_ready_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DATA_READY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DATA_READY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1168,7 +1208,8 @@ bool ADXL345::get_int_data_ready_enabled()
  */
 void ADXL345::set_int_data_ready_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DATA_READY_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DATA_READY_BIT, enabled);
 }
 
 /**
@@ -1180,7 +1221,8 @@ void ADXL345::set_int_data_ready_enabled(bool enabled)
  */
 bool ADXL345::get_int_single_tap_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_SINGLE_TAP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_SINGLE_TAP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1193,7 +1235,8 @@ bool ADXL345::get_int_single_tap_enabled()
  */
 void ADXL345::set_int_single_tap_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_SINGLE_TAP_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_SINGLE_TAP_BIT, enabled);
 }
 
 /**
@@ -1205,7 +1248,8 @@ void ADXL345::set_int_single_tap_enabled(bool enabled)
  */
 bool ADXL345::get_int_double_tap_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DOUBLE_TAP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DOUBLE_TAP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1218,7 +1262,8 @@ bool ADXL345::get_int_double_tap_enabled()
  */
 void ADXL345::set_int_double_tap_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DOUBLE_TAP_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_DOUBLE_TAP_BIT, enabled);
 }
 
 /**
@@ -1229,7 +1274,8 @@ void ADXL345::set_int_double_tap_enabled(bool enabled)
  */
 bool ADXL345::get_int_activity_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_ACTIVITY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_ACTIVITY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1242,7 +1288,8 @@ bool ADXL345::get_int_activity_enabled()
  */
 void ADXL345::set_int_activity_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_ACTIVITY_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_ACTIVITY_BIT, enabled);
 }
 
 /**
@@ -1254,7 +1301,8 @@ void ADXL345::set_int_activity_enabled(bool enabled)
  */
 bool ADXL345::get_int_inactivity_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_INACTIVITY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_INACTIVITY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1267,7 +1315,8 @@ bool ADXL345::get_int_inactivity_enabled()
  */
 void ADXL345::set_int_inactivity_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_INACTIVITY_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_INACTIVITY_BIT, enabled);
 }
 
 /**
@@ -1279,7 +1328,8 @@ void ADXL345::set_int_inactivity_enabled(bool enabled)
  */
 bool ADXL345::get_int_freefall_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_FREE_FALL_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_FREE_FALL_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1292,7 +1342,8 @@ bool ADXL345::get_int_freefall_enabled()
  */
 void ADXL345::set_int_freefall_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_FREE_FALL_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_FREE_FALL_BIT, enabled);
 }
 
 /**
@@ -1304,7 +1355,8 @@ void ADXL345::set_int_freefall_enabled(bool enabled)
  */
 bool ADXL345::get_int_watermark_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_WATERMARK_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_WATERMARK_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1317,7 +1369,8 @@ bool ADXL345::get_int_watermark_enabled()
  */
 void ADXL345::set_int_watermark_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_WATERMARK_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_WATERMARK_BIT, enabled);
 }
 
 /**
@@ -1329,7 +1382,8 @@ void ADXL345::set_int_watermark_enabled(bool enabled)
  */
 bool ADXL345::get_int_overrun_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_OVERRUN_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_OVERRUN_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1342,7 +1396,8 @@ bool ADXL345::get_int_overrun_enabled()
  */
 void ADXL345::set_int_overrun_enabled(bool enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_OVERRUN_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_ENABLE), INT_OVERRUN_BIT, enabled);
 }
 
 /**
@@ -1356,7 +1411,8 @@ void ADXL345::set_int_overrun_enabled(bool enabled)
  */
 uint8_t ADXL345::get_int_data_ready_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DATA_READY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DATA_READY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1381,7 +1437,8 @@ void ADXL345::set_int_data_ready_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_single_tap_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_SINGLE_TAP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_SINGLE_TAP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1406,7 +1463,8 @@ void ADXL345::set_int_single_tap_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_double_tap_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DOUBLE_TAP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_DOUBLE_TAP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1431,7 +1489,8 @@ void ADXL345::set_int_double_tap_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_activity_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_ACTIVITY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_ACTIVITY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1456,7 +1515,8 @@ void ADXL345::set_int_activity_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_inactivity_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_INACTIVITY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_INACTIVITY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1481,7 +1541,8 @@ void ADXL345::set_int_inactivity_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_freefall_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_FREE_FALL_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_FREE_FALL_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1506,7 +1567,8 @@ void ADXL345::set_int_freefall_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_watermark_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_WATERMARK_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_MAP), INT_WATERMARK_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1564,7 +1626,8 @@ void ADXL345::set_int_overrun_pin(uint8_t pin)
  */
 uint8_t ADXL345::get_int_data_ready_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_DATA_READY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_DATA_READY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1576,7 +1639,8 @@ uint8_t ADXL345::get_int_data_ready_source()
  */
 uint8_t ADXL345::get_int_single_tap_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_SINGLE_TAP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_SINGLE_TAP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1588,7 +1652,8 @@ uint8_t ADXL345::get_int_single_tap_source()
  */
 uint8_t ADXL345::get_int_double_tap_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_DOUBLE_TAP_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_DOUBLE_TAP_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1600,7 +1665,8 @@ uint8_t ADXL345::get_int_double_tap_source()
  */
 uint8_t ADXL345::get_int_activity_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_ACTIVITY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_ACTIVITY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1612,7 +1678,8 @@ uint8_t ADXL345::get_int_activity_source()
  */
 uint8_t ADXL345::get_int_inactivity_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_INACTIVITY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_INACTIVITY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1624,7 +1691,8 @@ uint8_t ADXL345::get_int_inactivity_source()
  */
 uint8_t ADXL345::get_int_freefall_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_FREE_FALL_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_FREE_FALL_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1636,7 +1704,8 @@ uint8_t ADXL345::get_int_freefall_source()
  */
 uint8_t ADXL345::get_int_watermark_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_WATERMARK_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_WATERMARK_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1648,7 +1717,8 @@ uint8_t ADXL345::get_int_watermark_source()
  */
 uint8_t ADXL345::get_int_overrun_source()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_OVERRUN_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::INT_SOURCE), INT_OVERRUN_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1663,7 +1733,8 @@ uint8_t ADXL345::get_int_overrun_source()
  */
 uint8_t ADXL345::get_self_test_enabled()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SELFTEST_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SELFTEST_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1676,7 +1747,8 @@ uint8_t ADXL345::get_self_test_enabled()
  */
 void ADXL345::set_self_test_enabled(uint8_t enabled)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SELFTEST_BIT, enabled);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SELFTEST_BIT, enabled);
 }
 
 /**
@@ -1689,7 +1761,8 @@ void ADXL345::set_self_test_enabled(uint8_t enabled)
  */
 uint8_t ADXL345::get_spi_mode()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SPIMODE_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SPIMODE_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1702,7 +1775,8 @@ uint8_t ADXL345::get_spi_mode()
  */
 void ADXL345::set_spi_mode(uint8_t mode)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SPIMODE_BIT, mode);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_SPIMODE_BIT, mode);
 }
 
 /**
@@ -1715,7 +1789,8 @@ void ADXL345::set_spi_mode(uint8_t mode)
  */
 uint8_t ADXL345::get_interrupt_mode()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_INTMODE_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_INTMODE_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1728,7 +1803,8 @@ uint8_t ADXL345::get_interrupt_mode()
  */
 void ADXL345::set_interrupt_mode(uint8_t mode)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_INTMODE_BIT, mode);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_INTMODE_BIT, mode);
 }
 
 /**
@@ -1744,7 +1820,8 @@ void ADXL345::set_interrupt_mode(uint8_t mode)
  */
 uint8_t ADXL345::get_full_resolution()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_FULL_RES_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_FULL_RES_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1757,7 +1834,8 @@ uint8_t ADXL345::get_full_resolution()
  */
 void ADXL345::set_full_resolution(uint8_t resolution)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_FULL_RES_BIT, resolution);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_FULL_RES_BIT, resolution);
 }
 
 /**
@@ -1770,7 +1848,8 @@ void ADXL345::set_full_resolution(uint8_t resolution)
  */
 uint8_t ADXL345::get_data_justification()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_JUSTIFY_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_JUSTIFY_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1783,7 +1862,8 @@ uint8_t ADXL345::get_data_justification()
  */
 void ADXL345::set_data_justification(uint8_t justification)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_JUSTIFY_BIT, justification);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_JUSTIFY_BIT, justification);
 }
 
 /**
@@ -1797,7 +1877,10 @@ void ADXL345::set_data_justification(uint8_t justification)
  */
 ADXL345::Range ADXL345::get_range()
 {
-    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_RANGE_BIT, FORMAT_RANGE_LENGTH,
+    I2Cdev::readBits(m_dev_addr,
+                     static_cast<uint8_t>(Register::DATA_FORMAT),
+                     FORMAT_RANGE_BIT,
+                     FORMAT_RANGE_LENGTH,
                      m_buffer);
     return static_cast<Range>(m_buffer[0]);
 }
@@ -1812,7 +1895,10 @@ ADXL345::Range ADXL345::get_range()
  */
 void ADXL345::set_range(Range range)
 {
-    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::DATA_FORMAT), FORMAT_RANGE_BIT, FORMAT_RANGE_LENGTH,
+    I2Cdev::writeBits(m_dev_addr,
+                      static_cast<uint8_t>(Register::DATA_FORMAT),
+                      FORMAT_RANGE_BIT,
+                      FORMAT_RANGE_LENGTH,
                       static_cast<uint8_t>(range));
 }
 
@@ -1839,7 +1925,8 @@ void ADXL345::set_range(Range range)
  */
 void ADXL345::get_acceleration(int16_t * x, int16_t * y, int16_t * z)
 {
-    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX0), sizeof(int16_t) * 3, m_buffer);
+    I2Cdev::readBytes(
+      m_dev_addr, static_cast<uint8_t>(Register::DATAX0), sizeof(int16_t) * 3, m_buffer);
     *x = (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
     *y = (((int16_t)m_buffer[3]) << 8) | m_buffer[2];
     *z = (((int16_t)m_buffer[5]) << 8) | m_buffer[4];
@@ -1852,7 +1939,8 @@ void ADXL345::get_acceleration(int16_t * x, int16_t * y, int16_t * z)
  */
 int16_t ADXL345::get_acceleration_x()
 {
-    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAX0), sizeof(int16_t), m_buffer);
+    I2Cdev::readBytes(
+      m_dev_addr, static_cast<uint8_t>(Register::DATAX0), sizeof(int16_t), m_buffer);
     return (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
 }
 
@@ -1863,7 +1951,8 @@ int16_t ADXL345::get_acceleration_x()
  */
 int16_t ADXL345::get_acceleration_y()
 {
-    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAY0), sizeof(int16_t), m_buffer);
+    I2Cdev::readBytes(
+      m_dev_addr, static_cast<uint8_t>(Register::DATAY0), sizeof(int16_t), m_buffer);
     return (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
 }
 
@@ -1874,7 +1963,8 @@ int16_t ADXL345::get_acceleration_y()
  */
 int16_t ADXL345::get_acceleration_z()
 {
-    I2Cdev::readBytes(m_dev_addr, static_cast<uint8_t>(Register::DATAZ0), sizeof(int16_t), m_buffer);
+    I2Cdev::readBytes(
+      m_dev_addr, static_cast<uint8_t>(Register::DATAZ0), sizeof(int16_t), m_buffer);
     return (((int16_t)m_buffer[1]) << 8) | m_buffer[0];
 }
 
@@ -1901,7 +1991,11 @@ int16_t ADXL345::get_acceleration_z()
  */
 ADXL345::FifoMode ADXL345::get_fifo_mode()
 {
-    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_MODE_BIT, FIFO_MODE_LENGTH, m_buffer);
+    I2Cdev::readBits(m_dev_addr,
+                     static_cast<uint8_t>(Register::FIFO_CTL),
+                     FIFO_MODE_BIT,
+                     FIFO_MODE_LENGTH,
+                     m_buffer);
     return static_cast<FifoMode>(m_buffer[0]);
 }
 
@@ -1915,7 +2009,10 @@ ADXL345::FifoMode ADXL345::get_fifo_mode()
  */
 void ADXL345::set_fifo_mode(FifoMode mode)
 {
-    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_MODE_BIT, FIFO_MODE_LENGTH,
+    I2Cdev::writeBits(m_dev_addr,
+                      static_cast<uint8_t>(Register::FIFO_CTL),
+                      FIFO_MODE_BIT,
+                      FIFO_MODE_LENGTH,
                       static_cast<uint8_t>(mode));
 }
 
@@ -1929,7 +2026,8 @@ void ADXL345::set_fifo_mode(FifoMode mode)
  */
 uint8_t ADXL345::get_fifo_trigger_interrupt_pin()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_TRIGGER_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_TRIGGER_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -1941,7 +2039,8 @@ uint8_t ADXL345::get_fifo_trigger_interrupt_pin()
  */
 void ADXL345::set_fifo_trigger_interrupt_pin(uint8_t interrupt)
 {
-    I2Cdev::writeBit(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_TRIGGER_BIT, interrupt);
+    I2Cdev::writeBit(
+      m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_TRIGGER_BIT, interrupt);
 }
 
 /**
@@ -1966,7 +2065,10 @@ void ADXL345::set_fifo_trigger_interrupt_pin(uint8_t interrupt)
  */
 uint8_t ADXL345::get_fifo_samples()
 {
-    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_SAMPLES_BIT, FIFO_SAMPLES_LENGTH,
+    I2Cdev::readBits(m_dev_addr,
+                     static_cast<uint8_t>(Register::FIFO_CTL),
+                     FIFO_SAMPLES_BIT,
+                     FIFO_SAMPLES_LENGTH,
                      m_buffer);
     return m_buffer[0];
 }
@@ -1982,7 +2084,10 @@ uint8_t ADXL345::get_fifo_samples()
  */
 void ADXL345::set_fifo_samples(uint8_t size)
 {
-    I2Cdev::writeBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_CTL), FIFO_SAMPLES_BIT, FIFO_SAMPLES_LENGTH,
+    I2Cdev::writeBits(m_dev_addr,
+                      static_cast<uint8_t>(Register::FIFO_CTL),
+                      FIFO_SAMPLES_BIT,
+                      FIFO_SAMPLES_LENGTH,
                       size);
 }
 
@@ -1996,7 +2101,8 @@ void ADXL345::set_fifo_samples(uint8_t size)
  */
 bool ADXL345::get_fifo_trigger_occurred()
 {
-    I2Cdev::readBit(m_dev_addr, static_cast<uint8_t>(Register::FIFO_STATUS), FIFOSTAT_TRIGGER_BIT, m_buffer);
+    I2Cdev::readBit(
+      m_dev_addr, static_cast<uint8_t>(Register::FIFO_STATUS), FIFOSTAT_TRIGGER_BIT, m_buffer);
     return m_buffer[0];
 }
 
@@ -2016,8 +2122,11 @@ bool ADXL345::get_fifo_trigger_occurred()
  */
 uint8_t ADXL345::get_fifo_length()
 {
-    I2Cdev::readBits(m_dev_addr, static_cast<uint8_t>(Register::FIFO_STATUS), FIFOSTAT_LENGTH_BIT,
-                     FIFOSTAT_LENGTH_LENGTH, m_buffer);
+    I2Cdev::readBits(m_dev_addr,
+                     static_cast<uint8_t>(Register::FIFO_STATUS),
+                     FIFOSTAT_LENGTH_BIT,
+                     FIFOSTAT_LENGTH_LENGTH,
+                     m_buffer);
     return m_buffer[0];
 }
 
@@ -2169,7 +2278,12 @@ void ADXL345::calibrate()
  */
 esp_err_t ADXL345::save_calibration_to_nvs()
 {
-    float data[6] = {m_cal_offset[0], m_cal_offset[1], m_cal_offset[2], m_cal_scale[0], m_cal_scale[1], m_cal_scale[2]};
+    float data[6] = {m_cal_offset[0],
+                     m_cal_offset[1],
+                     m_cal_offset[2],
+                     m_cal_scale[0],
+                     m_cal_scale[1],
+                     m_cal_scale[2]};
     esp_err_t err = NVSManager::save_blob(NVS_NS, NVS_KEY_BLOB, data, sizeof(data));
 
     if (err == ESP_OK)
@@ -2198,8 +2312,15 @@ esp_err_t ADXL345::load_calibration_from_nvs()
             m_cal_scale[0] = data[3];
             m_cal_scale[1] = data[4];
             m_cal_scale[2] = data[5];
-            ESP_LOGI(TAG, "Loaded accelerometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]",
-                     m_cal_offset[0], m_cal_offset[1], m_cal_offset[2], m_cal_scale[0], m_cal_scale[1], m_cal_scale[2]);
+            ESP_LOGI(
+              TAG,
+              "Loaded accelerometer calibration: Off[%.2f, %.2f, %.2f] Scl[%.2f, %.2f, %.2f]",
+              m_cal_offset[0],
+              m_cal_offset[1],
+              m_cal_offset[2],
+              m_cal_scale[0],
+              m_cal_scale[1],
+              m_cal_scale[2]);
             return ESP_OK;
         }
         else

@@ -1,4 +1,4 @@
-#include "TelemetryService.h"
+#include "Telemetry.h"
 
 #include <cstring>
 
@@ -6,11 +6,11 @@
 #include "RobotState.h"
 #include "ssl_robot_protocol_bp.h"
 
-static const char * TAG = "TelemetryService";
+static const char * TAG = "Telemetry";
 
-TelemetryService & TelemetryService::get_instance()
+Telemetry & Telemetry::get_instance()
 {
-    static TelemetryService instance;
+    static Telemetry instance;
     return instance;
 }
 
@@ -19,11 +19,11 @@ TelemetryService & TelemetryService::get_instance()
  *
  * @param radio Pointer to initialized NRF24L01 radio instance
  */
-void TelemetryService::init(NRF24L01 * radio)
+void Telemetry::init(NRF24L01 * radio)
 {
     configASSERT(radio != nullptr);
     m_radio = radio;
-    ESP_LOGI(TAG, "TelemetryService initialized.");
+    ESP_LOGI(TAG, "Telemetry initialized.");
 }
 
 /**
@@ -34,7 +34,7 @@ void TelemetryService::init(NRF24L01 * radio)
  *
  * @param echo_timestamp Timestamp from command to echo in telemetry reply
  */
-void TelemetryService::send(uint32_t echo_timestamp)
+void Telemetry::send(uint32_t echo_timestamp)
 {
     if (m_radio == nullptr)
     {
@@ -56,7 +56,8 @@ void TelemetryService::send(uint32_t echo_timestamp)
     // Yaw is provided by the IMU (scaled: 1 unit = 0.01°).
     tel.robot_pose.x = 0;
     tel.robot_pose.y = 0;
-    tel.robot_pose.angle = static_cast<int16_t>(OrientationHandler::get_instance().get_yaw() * 100.0);
+    tel.robot_pose.angle =
+      static_cast<int16_t>(OrientationHandler::get_instance().get_yaw() * 100.0);
 
     tel.battery_percentage = STUB_BATTERY_PCT;
     tel.kicker_voltage = STUB_KICKER_VOLTAGE;

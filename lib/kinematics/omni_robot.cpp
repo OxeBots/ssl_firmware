@@ -8,7 +8,8 @@ using namespace config::kinematic;
  * @param r Wheel radius in meters (must be > 0)
  * @param d Distance from center to wheels in meters (must be > 0)
  */
-OmnidirectionalRobot::OmnidirectionalRobot(double const r = OMNI_WHEEL_RADIUS, double const d = OMNI_WHEEL_DISTANCE)
+OmnidirectionalRobot::OmnidirectionalRobot(double const r = OMNI_WHEEL_RADIUS,
+                                           double const d = OMNI_WHEEL_DISTANCE)
 : m_wheel_radius(abs(r)), m_wheel_distance(abs(d))
 {
     // Construct H matrix

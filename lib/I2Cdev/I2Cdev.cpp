@@ -8,8 +8,8 @@
  *      2015-01-02 - Initial release
  *      2025-11-29 - Ported to ESP-IDF i2c_master driver
  *
- * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not equal to the
- * original.
+ * DISCLAIMER: This code is based on the I2Cdev library collection but has been modified and is not
+ * equal to the original.
  *
  *  ============================================
  * I2Cdev device library code is placed under the MIT license
@@ -121,8 +121,8 @@ i2c_master_dev_handle_t I2Cdev::get_device_handle(uint8_t devAddr)
  * @param read_len Number of bytes to read
  * @return ESP_OK on success, error code otherwise
  */
-esp_err_t I2Cdev::perform_transaction(uint8_t devAddr, uint8_t * write_buffer, size_t write_len, uint8_t * read_buffer,
-                                      size_t read_len)
+esp_err_t I2Cdev::perform_transaction(
+  uint8_t devAddr, uint8_t * write_buffer, size_t write_len, uint8_t * read_buffer, size_t read_len)
 {
     i2c_master_dev_handle_t dev_handle = get_device_handle(devAddr);
 
@@ -132,7 +132,8 @@ esp_err_t I2Cdev::perform_transaction(uint8_t devAddr, uint8_t * write_buffer, s
     if (read_len > 0)
     {
         // Write Register Address -> Restart -> Read Data
-        return i2c_master_transmit_receive(dev_handle, write_buffer, write_len, read_buffer, read_len, -1);
+        return i2c_master_transmit_receive(
+          dev_handle, write_buffer, write_len, read_buffer, read_len, -1);
     }
     else
     {
@@ -146,11 +147,12 @@ esp_err_t I2Cdev::perform_transaction(uint8_t devAddr, uint8_t * write_buffer, s
  * @param regAddr Register regAddr to read from
  * @param bitNum Bit position to read (0-7)
  * @param data Container for single bit value
- * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default class value in
- * I2Cdev::readTimeout)
+ * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default
+ * class value in I2Cdev::readTimeout)
  * @return Status of read operation (true = success)
  */
-int8_t I2Cdev::readBit(uint8_t devAddr, uint8_t regAddr, uint8_t bitNum, uint8_t * data, uint16_t timeout)
+int8_t I2Cdev::readBit(
+  uint8_t devAddr, uint8_t regAddr, uint8_t bitNum, uint8_t * data, uint16_t timeout)
 {
     uint8_t b;
     uint8_t count = readByte(devAddr, regAddr, &b, timeout);
@@ -163,12 +165,17 @@ int8_t I2Cdev::readBit(uint8_t devAddr, uint8_t regAddr, uint8_t bitNum, uint8_t
  * @param regAddr Register regAddr to read from
  * @param bitStart First bit position to read (0-7)
  * @param length Number of bits to read (not more than 8)
- * @param data Container for right-aligned value (i.e. '101' read from any bitStart position will equal 0x05)
- * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default class value in
- * I2Cdev::readTimeout)
+ * @param data Container for right-aligned value (i.e. '101' read from any bitStart position will
+ * equal 0x05)
+ * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default
+ * class value in I2Cdev::readTimeout)
  * @return Status of read operation (true = success)
  */
-int8_t I2Cdev::readBits(uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t * data,
+int8_t I2Cdev::readBits(uint8_t devAddr,
+                        uint8_t regAddr,
+                        uint8_t bitStart,
+                        uint8_t length,
+                        uint8_t * data,
                         uint16_t timeout)
 {
     // 01101001 read byte
@@ -191,8 +198,8 @@ int8_t I2Cdev::readBits(uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint
  * @param devAddr I2C slave device address
  * @param regAddr Register regAddr to read from
  * @param data Container for byte value read from device
- * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default class value in
- * I2Cdev::readTimeout)
+ * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default
+ * class value in I2Cdev::readTimeout)
  * @return Status of read operation (true = success)
  */
 int8_t I2Cdev::readByte(uint8_t devAddr, uint8_t regAddr, uint8_t * data, uint16_t timeout)
@@ -205,11 +212,13 @@ int8_t I2Cdev::readByte(uint8_t devAddr, uint8_t regAddr, uint8_t * data, uint16
  * @param regAddr First register regAddr to read from
  * @param length Number of bytes to read
  * @param data Buffer to store read data in
- * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default class value in
- * I2Cdev::readTimeout)
- * @return I2C_TransferReturn_TypeDef http://downloads.energymicro.com/documentation/doxygen/group__I2C.html
+ * @param timeout Optional read timeout in milliseconds (0 to disable, leave off to use default
+ * class value in I2Cdev::readTimeout)
+ * @return I2C_TransferReturn_TypeDef
+ * http://downloads.energymicro.com/documentation/doxygen/group__I2C.html
  */
-int8_t I2Cdev::readBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t * data, uint16_t timeout)
+int8_t I2Cdev::readBytes(
+  uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t * data, uint16_t timeout)
 {
     esp_err_t err = perform_transaction(devAddr, &regAddr, 1, data, length);
     return (err == ESP_OK) ? length : 0;
@@ -259,7 +268,8 @@ bool I2Cdev::writeBit(uint8_t devAddr, uint8_t regAddr, uint8_t bitNum, uint8_t 
  * @param data Right-aligned value to write
  * @return Status of operation (true = success)
  */
-bool I2Cdev::writeBits(uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t data)
+bool I2Cdev::writeBits(
+  uint8_t devAddr, uint8_t regAddr, uint8_t bitStart, uint8_t length, uint8_t data)
 {
     //      010 value to write
     // 76543210 bit numbers
