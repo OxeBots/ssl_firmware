@@ -1,24 +1,30 @@
 #ifndef _VL53L5CX_H_
 #define _VL53L5CX_H_
 
+#include <driver/i2c_master.h>
+#include <stdint.h>
 
-#include <esp_err.h>
-#include <esp_log.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <I2Cdev.h>
+#include "I2Cdev.h"
+#include "vl53l5cx_api.h"
 
-class VL53L5CX 
+class VL53L5CX
 {
-    public: 
+   public:
+    static constexpr uint8_t DEFAULT_ADDRESS = 0x52;
 
-    static constexpr uint8_t DEFAULT_ADDRESS = 0x; 
-    static constexpr uint8_t ADDRESS_ALT_HIGH = 0x;
+    VL53L5CX(uint8_t address = DEFAULT_ADDRESS);
 
-    enum class Register : unint8_t
-    {
+    esp_err_t init(i2c_master_bus_handle_t bus_handle);
+    bool test_connection();
+    uint8_t start_ranging();
+    uint8_t check_data_ready(uint8_t *is_ready);
+    uint8_t get_ranging_data(VL53L5CX_ResultsData *results);
+    uint8_t stop_ranging();
 
-    }
+   private:
+    uint8_t m_dev_addr;
+    VL53L5CX_Configuration m_dev;
+    i2c_master_dev_handle_t m_dev_handle;
+};
 
-}
-
+#endif /* _VL53L5CX_H_ */
