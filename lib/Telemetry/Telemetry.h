@@ -7,20 +7,20 @@
 
 #include "NRF24L01.h"
 
-class TelemetryService
+class Telemetry
 {
    public:
-    static TelemetryService & get_instance();
+    static Telemetry & get_instance();
 
     void init(NRF24L01 * radio);
 
     void send(uint32_t echo_timestamp);
 
    private:
-    TelemetryService() = default;
-    ~TelemetryService() = default;
-    TelemetryService(const TelemetryService &) = delete;
-    TelemetryService & operator=(const TelemetryService &) = delete;
+    Telemetry() = default;
+    ~Telemetry() = default;
+    Telemetry(const Telemetry &) = delete;
+    Telemetry & operator=(const Telemetry &) = delete;
 
     NRF24L01 * m_radio = nullptr;
 

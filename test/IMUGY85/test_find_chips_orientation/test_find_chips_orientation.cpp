@@ -74,7 +74,8 @@ void get_dominant_range(int16_t rx, int16_t ry, int16_t rz, int threshold, char 
         sprintf(output, " - ");
         return;
     }
-    // For Mag, we just identify the active axis. Sign depends on North pole direction relative to sensor.
+    // For Mag, we just identify the active axis. Sign depends on North pole direction relative to
+    // sensor.
     if (rx > ry && rx > rz)
     {
         sprintf(output, " X");
@@ -125,7 +126,8 @@ void test_sensor_orientation_check(void)
 
     // Header
     printf("%-15s | %-15s | %-15s\n", "ACCEL (Corrected)", "GYRO (Rotation)", "MAG (Raw Range)");
-    printf("%-15s | %-15s | %-15s\n", "X    Y    Z  (Dom)", "X    Y    Z  (Dom)", "X    Y    Z  (Act)");
+    printf(
+      "%-15s | %-15s | %-15s\n", "X    Y    Z  (Dom)", "X    Y    Z  (Dom)", "X    Y    Z  (Act)");
 
     // Variables for Mag Range tracking (Min/Max initialization)
     int16_t mag_min[3] = {32000, 32000, 32000};
@@ -181,10 +183,19 @@ void test_sensor_orientation_check(void)
 
         // Print Formatted Table
         // Note: For Mag, we print the raw value, but the Dom column is based on RANGE
-        printf("%4d %4d %4d (%s) | %4d %4d %4d (%s) | %4d %4d %4d (%s)\n",  //
-               ax, ay, az, dom_a,                                           //
-               gx, gy, gz, dom_g,                                           //
-               mx, my, mz, dom_m);                                          //
+        printf("%4d %4d %4d (%s) | %4d %4d %4d (%s) | %4d %4d %4d (%s)\n",
+               ax,
+               ay,
+               az,
+               dom_a,
+               gx,
+               gy,
+               gz,
+               dom_g,
+               mx,
+               my,
+               mz,
+               dom_m);
 
         vTaskDelay(pdMS_TO_TICKS(200));
     }

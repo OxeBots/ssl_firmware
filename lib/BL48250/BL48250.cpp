@@ -6,17 +6,71 @@ using namespace config::driver;
 
 static const char * TAG = "BL48250_driver";
 
-BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t duty_resolution, uint32_t pwm_freq,
-                 const std::array<gpio_num_t, 4> & motor_pwm_pins, const std::array<gpio_num_t, 4> & motor_dir_pins,
-                 const std::array<ledc_channel_t, 4> & motor_channels)
-: timer_(timer),
-  speed_mode_(speed_mode),
-  duty_resolution_(duty_resolution),
-  pwm_freq_(pwm_freq),
-  motor_pwm_pins_(motor_pwm_pins),
-  motor_dir_pins_(motor_dir_pins),
-  motor_channels_(motor_channels)
+BL48250 & BL48250::get_instance()
 {
+    static BL48250 instance;
+    return instance;
+}
+
+BL48250::BL48250()
+: timer_(LEDC_TIMER_0),
+  speed_mode_(LEDC_LOW_SPEED_MODE),
+  duty_resolution_(LEDC_TIMER_10_BIT),
+  pwm_freq_(20000),
+  motor_pwm_pins_{},
+  motor_dir_pins_{},
+  motor_channels_{},
+  max_duty_(0),
+  directions_{MOTOR_CW, MOTOR_CW, MOTOR_CW, MOTOR_CW},
+  duty_cycles_{0, 0, 0, 0},
+  m_configured(false)
+{
+}
+
+BL48250::~BL48250()
+{
+    if (m_configured)
+    {
+        // Stop all motors
+        for (size_t i = 0; i < 4; ++i)
+        {
+            ledc_set_duty(speed_mode_, motor_channels_[i], 0);
+            ledc_update_duty(speed_mode_, motor_channels_[i]);
+        }
+        // Reset the GPIO pins to release them from the LEDC peripheral
+        for (auto pin : motor_pwm_pins_)
+        {
+            gpio_reset_pin(pin);
+        }
+        for (auto pin : motor_dir_pins_)
+        {
+            gpio_reset_pin(pin);
+        }
+    }
+}
+
+/**
+ * @brief Configure the motor driver with GPIO pins, PWM settings, and LEDC channels.
+ *
+ * Must be called once before any set_duties() calls. Initializes the LEDC timer,
+ * configures 4 PWM channels, and sets up direction pins.
+ *
+ * @param config MotorDriverConfig struct with PWM frequency, pins, channels, etc.
+ * @return ESP_OK on success
+ */
+esp_err_t BL48250::configure(const MotorDriverConfig & config)
+{
+    if (m_configured)
+        return ESP_OK;
+
+    timer_ = config.timer;
+    speed_mode_ = config.speed_mode;
+    duty_resolution_ = config.duty_resolution;
+    pwm_freq_ = config.pwm_freq;
+    motor_pwm_pins_ = config.motor_pwm_pins;
+    motor_dir_pins_ = config.motor_dir_pins;
+    motor_channels_ = config.motor_channels;
+
     max_duty_ = (1 << static_cast<int>(duty_resolution_)) - 1;
 
     // Configure PWM timer
@@ -30,6 +84,7 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to configure LEDC timer: %s", esp_err_to_name(err));
+        return err;
     }
 
     // Configure each motor's PWM channel
@@ -50,6 +105,7 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "Failed to configure LEDC channel %zu: %s", i, esp_err_to_name(err));
+            return err;
         }
 
         gpio_reset_pin(motor_dir_pins_[i]);
@@ -59,10 +115,25 @@ BL48250::BL48250(ledc_timer_t timer, ledc_mode_t speed_mode, ledc_timer_bit_t du
         directions_[i] = MOTOR_CW;
         duty_cycles_[i] = 0;
     }
+
+    m_configured = true;
+    ESP_LOGI(TAG,
+             "BL48250 configured. PWM: %luHz, %d-bit duty",
+             (unsigned long)pwm_freq_,
+             static_cast<int>(duty_resolution_));
+    return ESP_OK;
 }
 
-BL48250::~BL48250()
+/**
+ * @brief Deinitialize the motor driver: stop all motors, reset GPIO pins, clear state.
+ *
+ * Safe to call multiple times. After deinit(), configure() can be called again.
+ */
+void BL48250::deinit()
 {
+    if (!m_configured)
+        return;
+
     // Stop all motors
     for (size_t i = 0; i < 4; ++i)
     {
@@ -78,6 +149,9 @@ BL48250::~BL48250()
     {
         gpio_reset_pin(pin);
     }
+
+    m_configured = false;
+    ESP_LOGI(TAG, "BL48250 deinitialized.");
 }
 
 /**
@@ -86,7 +160,8 @@ BL48250::~BL48250()
  * @param duties Array of 4 duty cycle values (0 to max_duty_)
  * @param directions Array of 4 direction values (MOTOR_CW or MOTOR_CCW)
  */
-void BL48250::set_duties(const std::array<uint32_t, 4> & duties, const std::array<uint8_t, 4> & directions)
+void BL48250::set_duties(const std::array<uint32_t, 4> & duties,
+                         const std::array<uint8_t, 4> & directions)
 {
     for (size_t i = 0; i < 4; ++i)
     {
@@ -97,27 +172,4 @@ void BL48250::set_duties(const std::array<uint32_t, 4> & duties, const std::arra
         ledc_set_duty(speed_mode_, motor_channels_[i], duties[i]);
         ledc_update_duty(speed_mode_, motor_channels_[i]);
     }
-}
-
-/**
- * @brief Print driver state (PWM config, duty cycles, directions) to serial log.
- *
- * Outputs PWM frequency, resolution, and per-motor GPIO assignments, direction,
- * and duty cycle percentages. Useful for debugging motor driver configuration.
- */
-void BL48250::debugPrint() const
-{
-    ESP_LOGI(TAG, "\nBL48250 Driver State:");
-    ESP_LOGI(TAG, "PWM Frequency: %luHz, Resolution: %d bits\n", (unsigned long)pwm_freq_,
-             static_cast<int>(duty_resolution_));
-    ESP_LOGI(TAG, "Max Duty: %lu (%.1f%%)\n", (unsigned long)max_duty_, 100.0);
-
-    for (size_t i = 0; i < 4; ++i)
-    {
-        ESP_LOGI(TAG, "\nMotor %d:", i + 1);
-        ESP_LOGI(TAG, "  PWM: GPIO %-2d (Ch %d)", motor_pwm_pins_[i], motor_channels_[i]);
-        ESP_LOGI(TAG, "  DIR: GPIO %-2d -> %s", motor_dir_pins_[i], directions_[i] ? "CW" : "CCW");
-        ESP_LOGI(TAG, "  Duty: %-5lu (%.1f%%)", (unsigned long)duty_cycles_[i], (duty_cycles_[i] * 100.0) / max_duty_);
-    }
-    ESP_LOGI(TAG, "\n-----------------------");
 }

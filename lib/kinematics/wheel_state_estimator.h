@@ -10,7 +10,6 @@
 
 #include <array>
 #include <cstdio>
-#include <map>
 #include <memory>
 
 #include "AS5600.h"
@@ -25,12 +24,15 @@ static constexpr int FULL_RANGE_THRESHOLD_MV = 3300 * 0.9;  // 90% of 3.3V
 struct AS5600Settings
 {
     AS5600::OutputStage output_stage =
-      AS5600::OutputStage::ANALOG_REDUCED;  // 0.1 VCC to 0.9 VCC to be in the ESP ADC linear response range
+      AS5600::OutputStage::ANALOG_REDUCED;  // 0.1 VCC to 0.9 VCC to be in the ESP ADC linear
+                                            // response range
     AS5600::SlowFilter slow_filter =
-      AS5600::SlowFilter::FILTER_2X;  // Fast response to slow changes, which is good for wheel encoders
-    AS5600::FastFilter fast_filter = AS5600::FastFilter::THRESH_6LSB;  // Fast filter to catch sudden spikes,
-                                                                       // which can happen with noisy readings
-    bool burn_settings = false;                                        // Dangerous! Keep false by default
+      AS5600::SlowFilter::FILTER_2X;  // Fast response to slow changes, which is good for wheel
+                                      // encoders
+    AS5600::FastFilter fast_filter =
+      AS5600::FastFilter::THRESH_6LSB;  // Fast filter to catch sudden spikes,
+                                        // which can happen with noisy readings
+    bool burn_settings = false;         // Dangerous! Keep false by default
 };
 
 class WheelStateEstimator
@@ -58,11 +60,13 @@ class WheelStateEstimator
     bool is_channel_calibrated(size_t channel) const;
 
     // I2C configuration (advanced)
-    esp_err_t configure_encoder(uint8_t channel_idx, const AS5600Settings & settings = AS5600Settings());
+    esp_err_t configure_encoder(uint8_t channel_idx,
+                                const AS5600Settings & settings = AS5600Settings());
 
     // Data accessors
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_deg();
+    std::array<float, NUM_ENC_CHANNELS> get_filtered_velocity_rad_s();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_rpm();
     std::array<float, NUM_ENC_CHANNELS> get_filtered_acceleration_rps2();
 
@@ -79,7 +83,8 @@ class WheelStateEstimator
     // Task and ADC handling
     void adc_task();
     static void s_adc_task_wrapper(void * param);
-    static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle, const adc_continuous_evt_data_t * edata,
+    static bool IRAM_ATTR s_adc_callback(adc_continuous_handle_t handle,
+                                         const adc_continuous_evt_data_t * edata,
                                          void * user_data);
 
     // Config helpers

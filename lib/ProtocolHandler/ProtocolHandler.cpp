@@ -1,14 +1,23 @@
 #include "ProtocolHandler.h"
 
+#include <esp_system.h>
+
 #include <algorithm>
 #include <cstring>
 
+#include "BL48250.h"
+#include "NVSManager.h"
 #include "OrientationHandler.h"
 #include "RobotState.h"
-#include "TelemetryService.h"
+#include "Telemetry.h"
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "ProtocolHandler";
+
+static void on_tuning_done(bool success)
+{
+    ESP_LOGI(TAG, "Relay tuning finished, all_success=%d", (int)success);
+}
 
 ProtocolHandler & ProtocolHandler::get_instance()
 {
@@ -23,7 +32,9 @@ ProtocolHandler & ProtocolHandler::get_instance()
  * @param wheel_ctrl Pointer to initialized WheelController instance
  * @param kinematics Pointer to initialized OmnidirectionalRobot kinematics instance
  */
-void ProtocolHandler::init(NRF24L01 * radio, WheelController * wheel_ctrl, OmnidirectionalRobot * kinematics)
+void ProtocolHandler::init(NRF24L01 * radio,
+                           WheelController * wheel_ctrl,
+                           OmnidirectionalRobot * kinematics)
 {
     configASSERT(wheel_ctrl != nullptr);
     configASSERT(kinematics != nullptr);
@@ -31,6 +42,7 @@ void ProtocolHandler::init(NRF24L01 * radio, WheelController * wheel_ctrl, Omnid
     m_radio = radio;
     m_wheel_ctrl = wheel_ctrl;
     m_kinematics = kinematics;
+    m_wheel_ctrl->set_tuning_done_callback(on_tuning_done);
 
     ESP_LOGI(TAG, "ProtocolHandler initialized.");
 }
@@ -65,7 +77,10 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
         {
             if (len < BYTES_LENGTH_ROBOT_COMMAND)
             {
-                ESP_LOGW(TAG, "MSG_TYPE_COMMAND: too short (%d / %d bytes).", len, BYTES_LENGTH_ROBOT_COMMAND);
+                ESP_LOGW(TAG,
+                         "MSG_TYPE_COMMAND: too short (%d / %d bytes).",
+                         len,
+                         BYTES_LENGTH_ROBOT_COMMAND);
                 return;
             }
 
@@ -88,7 +103,10 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
         {
             if (len < BYTES_LENGTH_ROBOT_CONFIG)
             {
-                ESP_LOGW(TAG, "MSG_TYPE_CONFIG: too short (%d / %d bytes).", len, BYTES_LENGTH_ROBOT_CONFIG);
+                ESP_LOGW(TAG,
+                         "MSG_TYPE_CONFIG: too short (%d / %d bytes).",
+                         len,
+                         BYTES_LENGTH_ROBOT_CONFIG);
                 return;
             }
 
@@ -122,15 +140,20 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
  */
 void ProtocolHandler::handle_command(const RobotCommand & cmd)
 {
-    ESP_LOGI(TAG, "CMD robot=%d ts=%lu vx=%d vy=%d w=%d kick=%d", cmd.header.robot_id,
-             (unsigned long)cmd.header.timestamp, cmd.target_pose.x_v, cmd.target_pose.y_v, cmd.target_pose.angular_vel,
+    ESP_LOGI(TAG,
+             "CMD robot=%d ts=%lu vx=%d vy=%d w=%d kick=%d",
+             cmd.header.robot_id,
+             (unsigned long)cmd.header.timestamp,
+             cmd.target_pose.x_v,
+             cmd.target_pose.y_v,
+             cmd.target_pose.angular_vel,
              cmd.kick_velocity);
 
     // Convert body-frame velocities to wheel velocities via omni kinematics.
     vt::numeric_vector<3> body_vel;
-    body_vel(0) = cmd.target_pose.x_v / 1000.0f;         // mm/s  → m/s
-    body_vel(1) = cmd.target_pose.y_v / 1000.0f;         // mm/s  → m/s
-    body_vel(2) = cmd.target_pose.angular_vel / 100.0f;  // 0.01 rad/s → rad/s
+    body_vel(0) = static_cast<float>(cmd.target_pose.x_v) / 1000.0f;         // mm/s  → m/s
+    body_vel(1) = static_cast<float>(cmd.target_pose.y_v) / 1000.0f;         // mm/s  → m/s
+    body_vel(2) = static_cast<float>(cmd.target_pose.angular_vel) / 100.0f;  // 0.01 rad/s → rad/s
 
     vt::numeric_vector<4> wheel_vels = m_kinematics->compute_wheel_velocities(body_vel);
 
@@ -146,7 +169,7 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
     if (cmd.header.robot_id == ROBOT_ID_BROADCAST)
         return;
 
-    TelemetryService::get_instance().send(cmd.header.timestamp);
+    Telemetry::get_instance().send(cmd.header.timestamp);
 }
 
 /**
@@ -180,7 +203,10 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
 
         if (new_id > ROBOT_ID_MAX)
         {
-            ESP_LOGE(TAG, "CONFIG_FLAG_SET_ID: ID %d exceeds ROBOT_ID_MAX (%d). Rejected.", new_id, ROBOT_ID_MAX);
+            ESP_LOGE(TAG,
+                     "CONFIG_FLAG_SET_ID: ID %d exceeds ROBOT_ID_MAX (%d). Rejected.",
+                     new_id,
+                     ROBOT_ID_MAX);
         }
         else
         {
@@ -189,24 +215,41 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         }
     }
 
-    // RUN calibration routines (blocking)
+    // RUN calibration routines
     if (cfg.config_flags & CONFIG_FLAG_RUN_CALIBRATION)
     {
-        ESP_LOGI(TAG, "CONFIG_FLAG_RUN_CALIBRATION: triggering sensor calibration.");
-        // Calibrate IMU sensors (blocking, runs interactive routine)
-        OrientationHandler::get_instance().calibrate_mag(10);
-        OrientationHandler::get_instance().calibrate_accel(10);
-        OrientationHandler::get_instance().calibrate_gyro(10);
-        // Calibrate wheel encoders
-        WheelStateEstimator::get_instance().calibrate_encoders(5000, true);
+        ESP_LOGI(TAG, "CONFIG_FLAG_RUN_CALIBRATION: triggering sensor + wheel PID calibration.");
+
+        if (!m_wheel_ctrl->is_tuning_active())
+        {
+            m_wheel_ctrl->start_relay_tuning();
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Tuning already active — ignoring request.");
+        }
     }
 
-    // RESET NVS (e.g. on factory reset) — currently only resets robot ID, but should ideally erase all keys.
+    // CALIBRATE magnetometer only
+    if (cfg.config_flags & CONFIG_FLAG_CALIBRATE_MAG)
+    {
+        ESP_LOGI(TAG, "CONFIG_FLAG_CALIBRATE_MAG: triggering magnetometer calibration.");
+        OrientationHandler::get_instance().calibrate_mag(10);
+    }
+
+    // RESET NVS — reset robot ID to 0 (legacy, superseded by FACTORY_RESET)
     if (cfg.config_flags & CONFIG_FLAG_RESET_NVS)
     {
         ESP_LOGW(TAG, "CONFIG_FLAG_RESET_NVS: resetting robot ID to 0.");
         state.set_id(0);
-        // TODO: erase all NVS keys, not just robot_id.
-        ESP_LOGW(TAG, "NOTE: Full NVS erase not yet implemented. Only robot_id was reset.");
+    }
+
+    // FULL FACTORY RESET — erase all NVS namespaces and keys
+    if (cfg.config_flags & CONFIG_FLAG_FACTORY_RESET)
+    {
+        ESP_LOGW(TAG, "CONFIG_FLAG_FACTORY_RESET: erasing all NVS data.");
+        NVSManager::erase_all();
+        ESP_LOGI(TAG, "NVS erased. Rebooting to apply factory reset.");
+        esp_restart();
     }
 }

@@ -58,7 +58,8 @@ typedef enum
  * @param alignment Axes alignment.
  * @return Sensor axes aligned with the body axes.
  */
-static inline FusionVector FusionAxesSwap(const FusionVector sensor, const FusionAxesAlignment alignment)
+static inline FusionVector FusionAxesSwap(const FusionVector sensor,
+                                          const FusionAxesAlignment alignment)
 {
     FusionVector result;
     switch (alignment)

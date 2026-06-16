@@ -1,10 +1,13 @@
 {
   "name": "PlatformIO + AI",
+  "remoteUser": "${localEnv:USER}",
+  "updateRemoteUserUID": true,
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".",
     "args": {
       "VARIANT": "bookworm",
+      "USERNAME": "${localEnv:USER}",
       "FEDORA_COMPAT": "1",
       "TZ": "${localEnv:TZ:America/Sao_Paulo}",
       "GIT_DELTA_VERSION": "0.18.2",
@@ -13,20 +16,21 @@
       "INSTALL_CLAUDE": "0",
       "INSTALL_GEMINI": "0",
       "INSTALL_QWEN": "0",
-      "INSTALL_CODEX": "1",
-      "INSTALL_OPENCODE": "0"
+      "INSTALL_CODEX": "0",
+      "INSTALL_OPENCODE": "0",
+      "INSTALL_PI": "0"
     }
   },
   "runArgs": [
     // Allow USB serial device access (FTDI/CH340 = major 188, CDC ACM = major 166)
     // Combined with udev rules in Dockerfile — replaces --privileged
     "--device-cgroup-rule=c 188:* rmw",
-    "--device-cgroup-rule=c 166:* rmw"
+    "--device-cgroup-rule=c 166:* rmw",
+    "--group-add=dialout"
   ],
   "customizations": {
     "vscode": {
       "extensions": [
-        "ms-vscode.cpptools",
         "platformio.platformio-ide",
         "jeff-hykin.better-cpp-syntax",
         "nordic-semiconductor.nrf-kconfig",
@@ -55,24 +59,25 @@
       }
     }
   },
-  "remoteUser": "vscode",
   "mounts": [
     // Hardware access for PlatformIO
     "source=/dev/,target=/dev/,type=bind,consistency=consistent",
     // Persistent shell history (survives container rebuilds)
-    "source=pio-bash-history-${devcontainerId},target=/home/vscode/.history,type=volume",
+    "source=pio-bash-history-${devcontainerId},target=/home/${localEnv:USER}/.history,type=volume",
     // Persistent AI configs (survive container rebuilds)
-    "source=pio-claude-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
-    "source=pio-gemini-config-${devcontainerId},target=/home/vscode/.gemini,type=volume",
-    "source=pio-qwen-config-${devcontainerId},target=/home/vscode/.qwen,type=volume",
-    "source=pio-codex-config-${devcontainerId},target=/home/vscode/.codex,type=volume"
+    "source=pio-claude-config-${devcontainerId},target=/home/${localEnv:USER}/.claude,type=volume",
+    "source=pio-gemini-config-${devcontainerId},target=/home/${localEnv:USER}/.gemini,type=volume",
+    "source=pio-qwen-config-${devcontainerId},target=/home/${localEnv:USER}/.qwen,type=volume",
+    "source=pio-codex-config-${devcontainerId},target=/home/${localEnv:USER}/.codex,type=volume",
+    "source=pio-pi-config-${devcontainerId},target=/home/${localEnv:USER}/.pi,type=volume"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
-    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
-    "GEMINI_CONFIG_DIR": "/home/vscode/.gemini",
-    "QWEN_CONFIG_DIR": "/home/vscode/.qwen",
-    "CODEX_CONFIG_DIR": "/home/vscode/.codex"
+    "CLAUDE_CONFIG_DIR": "/home/${localEnv:USER}/.claude",
+    "GEMINI_CONFIG_DIR": "/home/${localEnv:USER}/.gemini",
+    "QWEN_CONFIG_DIR": "/home/${localEnv:USER}/.qwen",
+    "CODEX_CONFIG_DIR": "/home/${localEnv:USER}/.codex",
+    "PI_CONFIG_DIR": "/home/${localEnv:USER}/.pi"
   },
   "forwardPorts": [
     8008
@@ -83,6 +88,6 @@
       "onAutoForward": "notify"
     }
   },
-  "postAttachCommand": "sudo service udev restart",
+  "postAttachCommand": "sudo udevadm control --reload 2>/dev/null || true",
   "features": {}
 }

@@ -74,8 +74,8 @@ FusionVector FusionOffsetUpdate(FusionOffset * const offset, FusionVector gyrosc
     }
 
     // Adjust offset if timer has elapsed
-    offset->gyroscopeOffset =
-      FusionVectorAdd(offset->gyroscopeOffset, FusionVectorMultiplyScalar(gyroscope, offset->filterCoefficient));
+    offset->gyroscopeOffset = FusionVectorAdd(
+      offset->gyroscopeOffset, FusionVectorMultiplyScalar(gyroscope, offset->filterCoefficient));
     return gyroscope;
 }
 

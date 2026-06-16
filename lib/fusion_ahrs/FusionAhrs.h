@@ -88,14 +88,22 @@ void FusionAhrsReset(FusionAhrs * const ahrs);
 
 void FusionAhrsSetSettings(FusionAhrs * const ahrs, const FusionAhrsSettings * const settings);
 
-void FusionAhrsUpdate(FusionAhrs * const ahrs, const FusionVector gyroscope, const FusionVector accelerometer,
-                      const FusionVector magnetometer, const float deltaTime);
+void FusionAhrsUpdate(FusionAhrs * const ahrs,
+                      const FusionVector gyroscope,
+                      const FusionVector accelerometer,
+                      const FusionVector magnetometer,
+                      const float deltaTime);
 
-void FusionAhrsUpdateNoMagnetometer(FusionAhrs * const ahrs, const FusionVector gyroscope,
-                                    const FusionVector accelerometer, const float deltaTime);
+void FusionAhrsUpdateNoMagnetometer(FusionAhrs * const ahrs,
+                                    const FusionVector gyroscope,
+                                    const FusionVector accelerometer,
+                                    const float deltaTime);
 
-void FusionAhrsUpdateExternalHeading(FusionAhrs * const ahrs, const FusionVector gyroscope,
-                                     const FusionVector accelerometer, const float heading, const float deltaTime);
+void FusionAhrsUpdateExternalHeading(FusionAhrs * const ahrs,
+                                     const FusionVector gyroscope,
+                                     const FusionVector accelerometer,
+                                     const float heading,
+                                     const float deltaTime);
 
 FusionQuaternion FusionAhrsGetQuaternion(const FusionAhrs * const ahrs);
 

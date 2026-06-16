@@ -22,14 +22,15 @@ volatile bool is_calibrating = false;
 
 void setup_i2c()
 {
-    i2c_master_bus_config_t i2c_mst_config = {.i2c_port = I2C_PORT_NUM,
-                                              .sda_io_num = (gpio_num_t)PIN_SDA,
-                                              .scl_io_num = (gpio_num_t)PIN_CLK,
-                                              .clk_source = I2C_CLK_SRC_DEFAULT,
-                                              .glitch_ignore_cnt = 7,
-                                              .intr_priority = 0,
-                                              .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
+    i2c_master_bus_config_t i2c_mst_config = {
+      .i2c_port = I2C_PORT_NUM,
+      .sda_io_num = (gpio_num_t)PIN_SDA,
+      .scl_io_num = (gpio_num_t)PIN_CLK,
+      .clk_source = I2C_CLK_SRC_DEFAULT,
+      .glitch_ignore_cnt = 7,
+      .intr_priority = 0,
+      .trans_queue_depth = 0,
+      .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
     I2Cdev::init(bus_handle);
@@ -153,7 +154,10 @@ extern "C" void app_main(void)
         accel.get_acceleration(&ax, &ay, &az);
 
         ESP_LOGI(TAG, "Calibrated -> X: %d | Y: %d | Z: %d", ax, ay, az);
-        ESP_LOGI(TAG, "Scaled -> X: %f | Y: %f | Z: %f", ax * scaleX / 256.0f, ay * scaleY / 256.0f,
+        ESP_LOGI(TAG,
+                 "Scaled -> X: %f | Y: %f | Z: %f",
+                 ax * scaleX / 256.0f,
+                 ay * scaleY / 256.0f,
                  az * scaleZ / 256.0f);
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
@@ -201,7 +205,8 @@ extern "C" void app_main(void)
 // }
 
 // /**
-//  * Perform offset calibration. Assumes the sensor is placed flat on a level surface (Z-axis = 1g).
+//  * Perform offset calibration. Assumes the sensor is placed flat on a level surface (Z-axis =
+//  1g).
 //  * Calculates offsets for X, Y, and Z and writes them to the OFS registers.
 //  * @param samples Number of samples to take for averaging (default 100)
 //  */
@@ -228,8 +233,8 @@ extern "C" void app_main(void)
 
 //     // Completion Threshold:
 //     // 1g is ~256 LSB. A full rotation (+1g to -1g) is ~512 LSB.
-//     // We require a span of at least 400 LSB (approx 1.5g) on an axis to consider it "calibrated".
-//     const int16_t SPAN_THRESHOLD = 500;
+//     // We require a span of at least 400 LSB (approx 1.5g) on an axis to consider it
+//     "calibrated". const int16_t SPAN_THRESHOLD = 500;
 
 //     bool is_calibrating = true;
 

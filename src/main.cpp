@@ -16,7 +16,7 @@
  *   4.: IMU hardware driver init (IMUGY85)
  *   5.: Wheel encoders (ADC) + NVS ADC callbacks
  *   6.: Motor driver + WheelController
- *   7.: Radio + ProtocolHandler + TelemetryService
+ *   7.: Radio + ProtocolHandler + Telemetry
  *   8.: Calibration (blocking; loads NVS or runs interactive routine)
  *   9.: Start orientation task (OrientationHandler @ 100 Hz)
  *   Idle: debugging teleplot serial output
@@ -34,7 +34,7 @@
 #include "OrientationHandler.h"
 #include "ProtocolHandler.h"
 #include "RobotState.h"
-#include "TelemetryService.h"
+#include "Telemetry.h"
 #include "WheelController.h"
 #include "omni_robot.h"
 #include "vl53l5cx_api.h"
@@ -91,45 +91,49 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(wse.init(enc_channels, ADC_ATTEN_DB_12));
 
     // 6: Motor driver + WheelController
-    static BL48250 motor_driver(MOTOR_LEDC_TIMER, MOTOR_LEDC_SPEED_MODE, MOTOR_DUTY_RESOLUTION, MOTOR_PWM_FREQ_HZ,
-                                /* pwm pins  */
-                                std::array<gpio_num_t, 4>{
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_FL_PWM_GPIO),
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_BL_PWM_GPIO),
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_BR_PWM_GPIO),
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_FR_PWM_GPIO),
-                                },
-                                /* dir pins  */
-                                std::array<gpio_num_t, 4>{
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_FL_DIR_GPIO),
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_BL_DIR_GPIO),
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_BR_DIR_GPIO),
-                                  static_cast<gpio_num_t>(CONFIG_MOTOR_FR_DIR_GPIO),
-                                },
-                                /* channels  */
-                                std::array<ledc_channel_t, 4>{
-                                  LEDC_CHANNEL_0,
-                                  LEDC_CHANNEL_1,
-                                  LEDC_CHANNEL_2,
-                                  LEDC_CHANNEL_3,
-                                });
+    config::driver::MotorDriverConfig motor_config;
+    motor_config.timer = MOTOR_LEDC_TIMER;
+    motor_config.speed_mode = MOTOR_LEDC_SPEED_MODE;
+    motor_config.duty_resolution = MOTOR_DUTY_RESOLUTION;
+    motor_config.pwm_freq = MOTOR_PWM_FREQ_HZ;
+    motor_config.motor_pwm_pins = {
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FL_PWM_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BL_PWM_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BR_PWM_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FR_PWM_GPIO),
+    };
+    motor_config.motor_dir_pins = {
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FL_DIR_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BL_DIR_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BR_DIR_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FR_DIR_GPIO),
+    };
+    motor_config.motor_channels = {
+      LEDC_CHANNEL_0,
+      LEDC_CHANNEL_1,
+      LEDC_CHANNEL_2,
+      LEDC_CHANNEL_3,
+    };
 
-    ESP_ERROR_CHECK(WheelController::get_instance().init(&motor_driver));
+    ESP_ERROR_CHECK(BL48250::get_instance().configure(motor_config));
+    ESP_ERROR_CHECK(WheelController::get_instance().init());
 
-    // 7: Radio + ProtocolHandler + TelemetryService
+    // 7: Radio + ProtocolHandler + Telemetry
     static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
 
     // Kinematics model: wheel radius and robot centre-to-wheel distance from
     // the omni_robot config namespace.
-    static OmnidirectionalRobot robot(config::kinematic::OMNI_WHEEL_RADIUS, config::kinematic::OMNI_WHEEL_DISTANCE);
+    static OmnidirectionalRobot robot(config::kinematic::OMNI_WHEEL_RADIUS,
+                                      config::kinematic::OMNI_WHEEL_DISTANCE);
 
     if (radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK)
     {
         ProtocolHandler::get_instance().init(&radio, &WheelController::get_instance(), &robot);
-        TelemetryService::get_instance().init(&radio);
+        Telemetry::get_instance().init(&radio);
 
-        radio.start(
-          [](const uint8_t * payload, uint8_t len) { ProtocolHandler::get_instance().on_packet(payload, len); });
+        radio.start([](const uint8_t * payload, uint8_t len) {
+            ProtocolHandler::get_instance().on_packet(payload, len);
+        });
         ESP_LOGI(TAG, "Radio initialized on channel %d.", CONFIG_RADIO_CHANNEL);
     }
     else
@@ -156,10 +160,21 @@ extern "C" void app_main(void)
     {
         vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));
 
-        // -- Wheel encoder telemetry (Teleplot) --------------------------
+        // --Wheel velocity telemetry(Teleplot)-- -- -- -- -- -- -- -- -- -- -- -
+        // {
+        //     const auto current = WheelController::get_instance().get_current_velocities();
+        //     const auto target = WheelController::get_instance().get_target_velocities();
+        //     static const char * labels[4] = {"FL", "BL", "BR", "FR"};
+        //     for (int i = 0; i < 4; ++i)
+        //     {
+        //         printf(">wheel_%s_target:%.2f\n", labels[i], target[i]);
+        //         printf(">wheel_%s_current:%.2f\n", labels[i], current[i]);
+        //     }
+        // }
+
+        // -- Wheel encoder RPM (Teleplot) --------------------------------
         // const auto rpms = wse.get_filtered_rpm();
-        // for (int i = 0; i < 4; ++i)
-        //     printf(">w_%d_rpm:%f\n", i + 1, rpms[i]);
+        // for (int i = 0; i < 4; ++i) printf(">w_%d_rpm:%f\n", i + 1, rpms[i]);
 
         // -- IMU telemetry (Teleplot) ------------------------------------
         // printf(">pose.yaw:%.2f\n",   OrientationHandler::get_instance().get_yaw());

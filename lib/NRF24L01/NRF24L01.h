@@ -1,5 +1,5 @@
-#ifndef _NRF24L01_H_
-#define _NRF24L01_H_
+#ifndef NRF24L01_H
+#define NRF24L01_H
 
 #include <driver/gpio.h>
 #include <esp_log.h>
@@ -19,7 +19,10 @@ class NRF24L01
     explicit NRF24L01(gpio_num_t irq);
     ~NRF24L01();
 
-    esp_err_t init(uint8_t channel, uint8_t payload_size, const char * tx_addr, const char * rx_addr);
+    esp_err_t init(uint8_t channel,
+                   uint8_t payload_size,
+                   const char * tx_addr,
+                   const char * rx_addr);
     bool start(data_received_callback_t callback);
     esp_err_t send_raw(const uint8_t * data, uint8_t len);
 
@@ -37,4 +40,4 @@ class NRF24L01
     uint8_t m_payload_size;
 };
 
-#endif  // _NRF24L01_H_
+#endif  // NRF24L01_H

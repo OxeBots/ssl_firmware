@@ -9,9 +9,12 @@ WheelStateEstimator & WheelStateEstimator::get_instance()
 }
 
 WheelStateEstimator::WheelStateEstimator()
-: m_initialized(false), m_is_suspended(false), m_adc_handle(nullptr), m_task_handle(nullptr)
+: m_initialized(false),
+  m_is_suspended(false),
+  m_adc_handle(nullptr),
+  m_task_handle(nullptr),
+  m_data_mutex(xSemaphoreCreateMutex())
 {
-    m_data_mutex = xSemaphoreCreateMutex();
     m_channel_lookup.fill(nullptr);
 }
 
@@ -55,10 +58,11 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
             continue;
         }
 
-        adc_cali_line_fitting_config_t cali_config = {.unit_id = ADC_UNIT,
-                                                      .atten = attenuation,
-                                                      .bitwidth = ADC_BITWIDTH,
-                                                      .default_vref = ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF};
+        adc_cali_line_fitting_config_t cali_config = {
+          .unit_id = ADC_UNIT,
+          .atten = attenuation,
+          .bitwidth = ADC_BITWIDTH,
+          .default_vref = ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF};
         adc_cali_handle_t handle = nullptr;
         esp_err_t ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
         bool is_adc_calibrated = (ret == ESP_OK);
@@ -68,7 +72,8 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
         else
             ESP_LOGE(TAG, "ADC voltage calibration failed for channel %d with error %d", ch, ret);
 
-        auto encoder = std::make_unique<AS5600>(ch, handle, is_adc_calibrated, ADC_UNIT, ADC_BITWIDTH);
+        auto encoder =
+          std::make_unique<AS5600>(ch, handle, is_adc_calibrated, ADC_UNIT, ADC_BITWIDTH);
         m_enc_channels[i] = EncoderChannel{std::move(encoder), handle};
         m_channel_lookup[ch] = &m_enc_channels[i];
         ESP_LOGI(TAG, "Created AS5600 for channel %d", ch);
@@ -98,7 +103,7 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
     adc_continuous_config_t adc_config = {
       .pattern_num = static_cast<uint32_t>(channels.size()),
       .adc_pattern = pattern_config.data(),
-      .sample_freq_hz = SOC_ADC_SAMPLE_FREQ_THRES_LOW,
+      .sample_freq_hz = SOC_ADC_SAMPLE_FREQ_THRES_LOW * 2,
       .conv_mode = ADC_CONV_SINGLE_UNIT_1,
       .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
     };
@@ -107,7 +112,7 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
     adc_continuous_evt_cbs_t cb_config = {.on_conv_done = s_adc_callback, .on_pool_ovf = nullptr};
     ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(m_adc_handle, &cb_config, this));
 
-    xTaskCreate(s_adc_task_wrapper, "ADCReaderTask", 4096, this, 15, &m_task_handle);
+    xTaskCreate(s_adc_task_wrapper, "ADCReaderTask", 4096, this, 5, &m_task_handle);
 
     ESP_ERROR_CHECK(adc_continuous_start(m_adc_handle));
     m_initialized = true;
@@ -294,7 +299,8 @@ bool WheelStateEstimator::all_channels_full_range() const
 
 /**
  * @brief Retrieves the latest filtered angles (in radians) for all encoders.
- * @return Array of angles in radians. If mutex is unavailable, returns last known values without blocking.
+ * @return Array of angles in radians. If mutex is unavailable, returns last known values without
+ * blocking.
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad()
 {
@@ -302,7 +308,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
 
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) angles[i] = m_enc_channels[i].encoder->get_angle_rad();
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
+            angles[i] = m_enc_channels[i].encoder->get_angle_rad();
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -311,7 +318,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
 
 /**
  * @brief Retrieves the latest filtered angles (in degrees) for all encoders.
- * @return Array of angles in degrees. If mutex is unavailable, returns last known values without blocking.
+ * @return Array of angles in degrees. If mutex is unavailable, returns last known values without
+ * blocking.
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg()
 {
@@ -319,7 +327,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg(
 
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) angles[i] = m_enc_channels[i].encoder->get_angle_deg();
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
+            angles[i] = m_enc_channels[i].encoder->get_angle_deg();
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -327,15 +336,35 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg(
 }
 
 /**
+ * @brief Retrieves the latest filtered angular velocities (in rad/s) for all encoders.
+ * @return Array of velocities in rad/s. If mutex is unavailable, returns last known values without
+ * blocking.
+ */
+std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_velocity_rad_s()
+{
+    std::array<float, NUM_ENC_CHANNELS> velocities;
+    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    {
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
+            velocities[i] = m_enc_channels[i].encoder->get_velocity_rad_s();
+
+        xSemaphoreGive(m_data_mutex);
+    }
+    return velocities;
+}
+
+/**
  * @brief Retrieves the latest filtered velocities (in RPM) for all encoders.
- * @return Array of velocities in RPM. If mutex is unavailable, returns last known values without blocking.
+ * @return Array of velocities in RPM. If mutex is unavailable, returns last known values without
+ * blocking.
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
 {
     std::array<float, NUM_ENC_CHANNELS> rpms;
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) rpms[i] = m_enc_channels[i].encoder->get_rpm();
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
+            rpms[i] = m_enc_channels[i].encoder->get_rpm();
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -344,7 +373,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
 
 /**
  * @brief Retrieves the latest filtered accelerations (in rps^2) for all encoders.
- * @return Array of accelerations in rps^2. If mutex is unavailable, returns last known values without blocking.
+ * @return Array of accelerations in rps^2. If mutex is unavailable, returns last known values
+ * without blocking.
  * @note Acceleration is derived from the EKF state and may be noisy; use with caution.
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_acceleration_rps2()
@@ -352,7 +382,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_accelerati
     std::array<float, NUM_ENC_CHANNELS> accels;
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i) accels[i] = m_enc_channels[i].encoder->get_acceleration_rps2();
+        for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
+            accels[i] = m_enc_channels[i].encoder->get_acceleration_rps2();
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -380,7 +411,8 @@ void WheelStateEstimator::s_adc_task_wrapper(void * param)
  * @return true if a high-priority task (the ADC task) was woken up.
  */
 bool IRAM_ATTR WheelStateEstimator::s_adc_callback(adc_continuous_handle_t handle,
-                                                   const adc_continuous_evt_data_t * edata, void * user_data)
+                                                   const adc_continuous_evt_data_t * edata,
+                                                   void * user_data)
 {
     auto * estimator = static_cast<WheelStateEstimator *>(user_data);
     BaseType_t mustYield = pdFALSE;
@@ -409,7 +441,8 @@ void WheelStateEstimator::adc_task()
 
         do
         {
-            ret = adc_continuous_read(m_adc_handle, result_buffer, sizeof(result_buffer), &bytes_read, 0);
+            ret = adc_continuous_read(
+              m_adc_handle, result_buffer, sizeof(result_buffer), &bytes_read, 0);
 
             if (ret == ESP_OK && xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
             {
@@ -438,7 +471,8 @@ void WheelStateEstimator::adc_task()
  * @param settings The configuration settings to apply.
  * @return ESP_OK on success, ESP_ERR_TIMEOUT if sensor not found.
  */
-esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx, const AS5600Settings & settings)
+esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx,
+                                                 const AS5600Settings & settings)
 {
     if (channel_idx >= NUM_ENC_CHANNELS)
         return ESP_ERR_INVALID_ARG;
@@ -518,21 +552,27 @@ esp_err_t WheelStateEstimator::verify_i2c_settings(AS5600 * enc, const AS5600Set
 
     if (read_stage != settings.output_stage)
     {
-        ESP_LOGE(TAG, "Verify Failed: Output Stage mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.output_stage,
+        ESP_LOGE(TAG,
+                 "Verify Failed: Output Stage mismatch (Exp: 0x%02X, Got: 0x%02X)",
+                 (uint8_t)settings.output_stage,
                  (uint8_t)read_stage);
         match = false;
     }
 
     if (read_slow != settings.slow_filter)
     {
-        ESP_LOGE(TAG, "Verify Failed: Slow Filter mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.slow_filter,
+        ESP_LOGE(TAG,
+                 "Verify Failed: Slow Filter mismatch (Exp: 0x%02X, Got: 0x%02X)",
+                 (uint8_t)settings.slow_filter,
                  (uint8_t)read_slow);
         match = false;
     }
 
     if (read_fast != settings.fast_filter)
     {
-        ESP_LOGE(TAG, "Verify Failed: Fast Filter mismatch (Exp: 0x%02X, Got: 0x%02X)", (uint8_t)settings.fast_filter,
+        ESP_LOGE(TAG,
+                 "Verify Failed: Fast Filter mismatch (Exp: 0x%02X, Got: 0x%02X)",
+                 (uint8_t)settings.fast_filter,
                  (uint8_t)read_fast);
         match = false;
     }

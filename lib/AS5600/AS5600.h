@@ -7,8 +7,9 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <standard_constants.h>
 #include <stdint.h>
+
+#include "constants.h"
 
 #include <array>
 #include <atomic>
@@ -46,7 +47,10 @@ class AS5600
 
     static constexpr uint8_t AS5600_ADDR = 0x36;
 
-    AS5600(adc_channel_t channel, adc_cali_handle_t cali_handle, bool voltage_calibrated, adc_unit_t unit = ADC_UNIT_1,
+    AS5600(adc_channel_t channel,
+           adc_cali_handle_t cali_handle,
+           bool voltage_calibrated,
+           adc_unit_t unit = ADC_UNIT_1,
            adc_bitwidth_t bitwidth = ADC_BITWIDTH_12);
     ~AS5600() = default;
 
@@ -77,6 +81,7 @@ class AS5600
     // Getters
     float get_angle_rad() const;
     float get_angle_deg() const;
+    float get_velocity_rad_s() const;
     float get_rpm() const;
     float get_acceleration_rps2() const;
     int get_last_voltage_mv() const;
@@ -104,8 +109,6 @@ class AS5600
 
     const adc_bitwidth_t ADC_BITWIDTH;
     static constexpr int MIN_VALID_VOLTAGE_RANGE_MV = 500;
-    static constexpr double RAD_S_TO_RPM = 60.0 / (2.0 * PI);
-    static constexpr double RAD_S2_TO_RPS2 = 1.0 / (2.0 * PI);
     static constexpr size_t OVERSAMPLE_COUNT = 16;
     static constexpr const char * NVS_NS = "wheel_calib";
 

@@ -16,14 +16,15 @@ i2c_master_bus_handle_t bus_handle;
 
 void setup_i2c()
 {
-    i2c_master_bus_config_t i2c_mst_config = {.i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
-                                              .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
-                                              .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
-                                              .clk_source = I2C_CLK_SRC_DEFAULT,
-                                              .glitch_ignore_cnt = 7,
-                                              .intr_priority = 0,
-                                              .trans_queue_depth = 0,
-                                              .flags = {.enable_internal_pullup = true, .allow_pd = false}};
+    i2c_master_bus_config_t i2c_mst_config = {
+      .i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
+      .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
+      .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
+      .clk_source = I2C_CLK_SRC_DEFAULT,
+      .glitch_ignore_cnt = 7,
+      .intr_priority = 0,
+      .trans_queue_depth = 0,
+      .flags = {.enable_internal_pullup = true, .allow_pd = false}};
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
     I2Cdev::init(bus_handle);
@@ -61,7 +62,8 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGW(TAG, "This process will run for 10 seconds.");
     ESP_LOGW(TAG,
-             "When it starts, rotate the robot slowly in its axis (yaw) direction, ideally completing multiple full "
+             "When it starts, rotate the robot slowly in its axis (yaw) direction, ideally "
+             "completing multiple full "
              "rotations. Try to keep the sensor level and avoid tilting.");
     ESP_LOGI(TAG, "Starting in 5 seconds...");
 
@@ -92,7 +94,12 @@ extern "C" void app_main(void)
         int az = mag.get_azimuth();
         char dir[4];
         mag.get_direction(dir, az);
-        ESP_LOGI(TAG, "Azimuth: %d deg | Direction: %s | X: %d Y: %d Z: %d", az, dir, mag.get_x(), mag.get_y(),
+        ESP_LOGI(TAG,
+                 "Azimuth: %d deg | Direction: %s | X: %d Y: %d Z: %d",
+                 az,
+                 dir,
+                 mag.get_x(),
+                 mag.get_y(),
                  mag.get_z());
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }

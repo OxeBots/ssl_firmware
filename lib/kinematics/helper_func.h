@@ -8,9 +8,9 @@
  * @param angle in radians
  * @return normalized angle in radians
  */
-inline float normalize_angle(float angle)
+inline double normalize_angle(double angle)
 {
-    return angle - (2.0f * M_PI) * std::floor((angle + M_PI) / (2.0f * M_PI));
+    return angle - ((2.0f * M_PI) * std::floor((angle + M_PI) / (2.0f * M_PI)));
 }
 
 /**
@@ -20,7 +20,7 @@ inline float normalize_angle(float angle)
  * @param max_val Maximum value
  * @return Constrained value
  */
-inline float constrain(const float val, const float min_val, const float max_val)
+inline double constrain(const double val, const double min_val, const double max_val)
 {
     return std::min(std::max(val, min_val), max_val);
 }

@@ -42,9 +42,11 @@ class OmnidirectionalRobot
    public:
     OmnidirectionalRobot(double r, double d);
 
-    vt::numeric_vector<4> compute_wheel_velocities(const vt::numeric_vector<3> & body_velocities) const;
+    vt::numeric_vector<4> compute_wheel_velocities(
+      const vt::numeric_vector<3> & body_velocities) const;
 
-    vt::numeric_vector<3> compute_body_velocities(const vt::numeric_vector<4> & wheel_velocities) const;
+    vt::numeric_vector<3> compute_body_velocities(
+      const vt::numeric_vector<4> & wheel_velocities) const;
 
     OmnidirectionalRobot(const OmnidirectionalRobot &) = delete;
     OmnidirectionalRobot & operator=(const OmnidirectionalRobot &) = delete;

@@ -133,19 +133,21 @@ void test_gpio_irq_pin(void)
     cfg.intr_type = GPIO_INTR_DISABLE;
 
     esp_err_t err = gpio_config(&cfg);
-    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err,
-                              "gpio_config failed for IRQ pin. Check CONFIG_IRQ_GPIO value (should be 4).");
+    TEST_ASSERT_EQUAL_MESSAGE(
+      ESP_OK, err, "gpio_config failed for IRQ pin. Check CONFIG_IRQ_GPIO value (should be 4).");
 
     vTaskDelay(pdMS_TO_TICKS(5));  // let pull-up settle
 
     int level = gpio_get_level((gpio_num_t)PIN_IRQ);
     ESP_LOGI(TAG, "  IRQ GPIO %d level = %d  (expected 1 = idle / not asserted)", PIN_IRQ, level);
 
-    TEST_ASSERT_EQUAL_MESSAGE(1, level,
-                              "IRQ pin reads LOW on idle module. "
-                              "Possible causes: (a) pin shorted to GND, "
-                              "(b) module asserting IRQ due to uncleared STATUS flags — power-cycle and re-run, "
-                              "(c) CONFIG_IRQ_GPIO wrong — check sdkconfig.defaults.");
+    TEST_ASSERT_EQUAL_MESSAGE(
+      1,
+      level,
+      "IRQ pin reads LOW on idle module. "
+      "Possible causes: (a) pin shorted to GND, "
+      "(b) module asserting IRQ due to uncleared STATUS flags — power-cycle and re-run, "
+      "(c) CONFIG_IRQ_GPIO wrong — check sdkconfig.defaults.");
 }
 
 // ============================================================================
@@ -174,7 +176,10 @@ void test_gpio_ce_csn_pins(void)
 
         esp_err_t err = gpio_config(&cfg);
         char msg[80];
-        snprintf(msg, sizeof(msg), "%s gpio_config() failed for GPIO %d — invalid pin or already in use?", labels[i],
+        snprintf(msg,
+                 sizeof(msg),
+                 "%s gpio_config() failed for GPIO %d — invalid pin or already in use?",
+                 labels[i],
                  (int)pins[i]);
         TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err, msg);
 
@@ -200,19 +205,28 @@ void test_gpio_ce_csn_pins(void)
 void test_spi_status_plausible(void)
 {
     ESP_LOGI(TAG, "--- Test 3: SPI bus plausibility (STATUS register) ---");
-    ESP_LOGI(TAG, "  MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CE=%-2d  CSN=%-2d", PIN_MISO, PIN_MOSI, PIN_SCLK, PIN_CE,
+    ESP_LOGI(TAG,
+             "  MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CE=%-2d  CSN=%-2d",
+             PIN_MISO,
+             PIN_MOSI,
+             PIN_SCLK,
+             PIN_CE,
              PIN_CSN);
 
     uint8_t status = Nrf24_getStatus(&s_dev);
     ESP_LOGI(TAG, "  STATUS = 0x%02X", status);
 
-    TEST_ASSERT_NOT_EQUAL_MESSAGE(0xFF, status,
-                                  "STATUS=0xFF — MISO is floating or CSN is never asserted. "
-                                  "Check MISO wiring (GPIO 19), CSN wiring (GPIO 5), and module VCC (3.3V).");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(
+      0xFF,
+      status,
+      "STATUS=0xFF — MISO is floating or CSN is never asserted. "
+      "Check MISO wiring (GPIO 19), CSN wiring (GPIO 5), and module VCC (3.3V).");
 
-    TEST_ASSERT_NOT_EQUAL_MESSAGE(0x00, status,
-                                  "STATUS=0x00 — MOSI or SCLK appears shorted to GND, or the module is not powered. "
-                                  "Check MOSI (GPIO 23), SCLK (GPIO 18), VCC (3.3V only!), and GND.");
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(
+      0x00,
+      status,
+      "STATUS=0x00 — MOSI or SCLK appears shorted to GND, or the module is not powered. "
+      "Check MOSI (GPIO 23), SCLK (GPIO 18), VCC (3.3V only!), and GND.");
 }
 
 // ============================================================================
@@ -234,13 +248,18 @@ void test_status_reset_value(void)
     // RX_P_NO[2:0]=111b and TX_FULL=0 → lower nibble = 0x0E
     uint8_t lower_nibble = status & 0x0F;
 
-    ESP_LOGI(TAG, "  STATUS=0x%02X  [3:0]=0x%02X  (expected 0x0E on clean power-up)", status, lower_nibble);
+    ESP_LOGI(TAG,
+             "  STATUS=0x%02X  [3:0]=0x%02X  (expected 0x0E on clean power-up)",
+             status,
+             lower_nibble);
 
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(0x0E, lower_nibble,
-                                   "STATUS[3:0] != 0x0E — module may not be in power-on state. "
-                                   "Power-cycle the module and re-run. "
-                                   "If still failing and STATUS != 0xFF/0x00, the module is responding but in an "
-                                   "unexpected mode (leftover config from a previous firmware run).");
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(
+      0x0E,
+      lower_nibble,
+      "STATUS[3:0] != 0x0E — module may not be in power-on state. "
+      "Power-cycle the module and re-run. "
+      "If still failing and STATUS != 0xFF/0x00, the module is responding but in an "
+      "unexpected mode (leftover config from a previous firmware run).");
 }
 
 // ============================================================================
@@ -264,10 +283,12 @@ void test_config_register_rw(void)
     uint8_t readback = write_and_readback(CONFIG, WRITE_VALUE);
     ESP_LOGI(TAG, "  CONFIG written=0x%02X  read=0x%02X", WRITE_VALUE, readback);
 
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(WRITE_VALUE, readback,
-                                   "CONFIG register read-back mismatch. "
-                                   "If read=0xFF: MISO floating (GPIO 19). "
-                                   "If read=0x00 or wrong value: MOSI (GPIO 23) issue, or module not responding.");
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(
+      WRITE_VALUE,
+      readback,
+      "CONFIG register read-back mismatch. "
+      "If read=0xFF: MISO floating (GPIO 19). "
+      "If read=0x00 or wrong value: MOSI (GPIO 23) issue, or module not responding.");
 
     // Restore to RX mode for the address tests
     Nrf24_configRegister(&s_dev, CONFIG, mirf_CONFIG | (1 << PWR_UP) | (1 << PRIM_RX));
@@ -290,7 +311,8 @@ void test_rf_channel_rw(void)
 
     uint8_t rb_a = write_and_readback(RF_CH, CH_A);
     ESP_LOGI(TAG, "  RF_CH written=%3d  read=%3d", CH_A, rb_a);
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(CH_A, rb_a,
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(CH_A,
+                                   rb_a,
                                    "RF_CH first value read-back failed. "
                                    "Check MOSI (GPIO 23) and MISO (GPIO 19) are not swapped.");
 
@@ -320,7 +342,10 @@ void test_rf_channel_rw(void)
 
 void test_set_rx_tx_address(void)
 {
-    ESP_LOGI(TAG, "--- Test 7: Nrf24_setRADDR(\"%s\") / Nrf24_setTADDR(\"%s\") ---", PIPE_RX_ADDR, PIPE_TX_ADDR);
+    ESP_LOGI(TAG,
+             "--- Test 7: Nrf24_setRADDR(\"%s\") / Nrf24_setTADDR(\"%s\") ---",
+             PIPE_RX_ADDR,
+             PIPE_TX_ADDR);
 
     // ---- RX address — written to RX_ADDR_P1 by mirf ----
     esp_err_t err_rx = Nrf24_setRADDR(&s_dev, (uint8_t *)PIPE_RX_ADDR);
@@ -328,11 +353,22 @@ void test_set_rx_tx_address(void)
     uint8_t rx_rb[5] = {0};
     Nrf24_readRegister(&s_dev, RX_ADDR_P1, rx_rb, 5);
     ESP_LOGI(TAG, "  setRADDR → %s", (err_rx == ESP_OK) ? "OK" : "FAIL");
-    ESP_LOGI(TAG, "  RX_ADDR_P1 readback: [%c%c%c%c%c]  hex: %02X %02X %02X %02X %02X", rx_rb[0], rx_rb[1], rx_rb[2],
-             rx_rb[3], rx_rb[4], rx_rb[0], rx_rb[1], rx_rb[2], rx_rb[3], rx_rb[4]);
+    ESP_LOGI(TAG,
+             "  RX_ADDR_P1 readback: [%c%c%c%c%c]  hex: %02X %02X %02X %02X %02X",
+             rx_rb[0],
+             rx_rb[1],
+             rx_rb[2],
+             rx_rb[3],
+             rx_rb[4],
+             rx_rb[0],
+             rx_rb[1],
+             rx_rb[2],
+             rx_rb[3],
+             rx_rb[4]);
 
     TEST_ASSERT_EQUAL_MESSAGE(
-      ESP_OK, err_rx,
+      ESP_OK,
+      err_rx,
       "Nrf24_setRADDR failed — 5-byte burst write to RX_ADDR_P1 read back with errors. "
       "MOST LIKELY FIX: add a 10uF electrolytic capacitor between VCC and GND on the NRF module. "
       "Also check: MOSI (GPIO 23) and MISO (GPIO 19) are not swapped, "
@@ -347,12 +383,33 @@ void test_set_rx_tx_address(void)
     Nrf24_readRegister(&s_dev, TX_ADDR, tx_rb, 5);  // TX_ADDR = 0x10 from mirf.h
 
     ESP_LOGI(TAG, "  setTADDR  → %s", (err_tx == ESP_OK) ? "OK" : "FAIL");
-    ESP_LOGI(TAG, "  RX_ADDR_P0 readback: [%c%c%c%c%c]  hex: %02X %02X %02X %02X %02X", p0_rb[0], p0_rb[1], p0_rb[2],
-             p0_rb[3], p0_rb[4], p0_rb[0], p0_rb[1], p0_rb[2], p0_rb[3], p0_rb[4]);
-    ESP_LOGI(TAG, "  TX_ADDR    readback: [%c%c%c%c%c]  hex: %02X %02X %02X %02X %02X", tx_rb[0], tx_rb[1], tx_rb[2],
-             tx_rb[3], tx_rb[4], tx_rb[0], tx_rb[1], tx_rb[2], tx_rb[3], tx_rb[4]);
+    ESP_LOGI(TAG,
+             "  RX_ADDR_P0 readback: [%c%c%c%c%c]  hex: %02X %02X %02X %02X %02X",
+             p0_rb[0],
+             p0_rb[1],
+             p0_rb[2],
+             p0_rb[3],
+             p0_rb[4],
+             p0_rb[0],
+             p0_rb[1],
+             p0_rb[2],
+             p0_rb[3],
+             p0_rb[4]);
+    ESP_LOGI(TAG,
+             "  TX_ADDR    readback: [%c%c%c%c%c]  hex: %02X %02X %02X %02X %02X",
+             tx_rb[0],
+             tx_rb[1],
+             tx_rb[2],
+             tx_rb[3],
+             tx_rb[4],
+             tx_rb[0],
+             tx_rb[1],
+             tx_rb[2],
+             tx_rb[3],
+             tx_rb[4]);
 
-    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err_tx,
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK,
+                              err_tx,
                               "Nrf24_setTADDR failed — same root cause as RADDR. "
                               "Add a 10uF decoupling capacitor on the module VCC pin.");
 }
@@ -368,8 +425,14 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "=================================================================");
     ESP_LOGI(TAG, " NRF24L01 Hardware Diagnostic");
-    ESP_LOGI(TAG, " MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CE=%-2d  CSN=%-2d  IRQ=%-2d", PIN_MISO, PIN_MOSI, PIN_SCLK, PIN_CE,
-             PIN_CSN, PIN_IRQ);
+    ESP_LOGI(TAG,
+             " MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CE=%-2d  CSN=%-2d  IRQ=%-2d",
+             PIN_MISO,
+             PIN_MOSI,
+             PIN_SCLK,
+             PIN_CE,
+             PIN_CSN,
+             PIN_IRQ);
     ESP_LOGI(TAG, "=================================================================");
 
     // --- Phase 1: raw GPIO tests (before Nrf24_init touches the pins) ---
