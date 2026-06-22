@@ -38,7 +38,7 @@ RUN apt-get update \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Node.js (for AI agent CLIs)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y nodejs \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -88,9 +88,21 @@ RUN mkdir -p /home/$USERNAME/.history \
  && touch /home/$USERNAME/.history/.zsh_history \
  && chown -R $USERNAME:$USERNAME /home/$USERNAME/.history
 
-# Workspace, AI config dirs
-RUN mkdir -p /workspace /home/$USERNAME/.claude /home/$USERNAME/.gemini /home/$USERNAME/.qwen /home/$USERNAME/.codex /home/$USERNAME/.pi \
- && chown -R $USERNAME:$USERNAME /workspace /home/$USERNAME/.claude /home/$USERNAME/.gemini /home/$USERNAME/.qwen /home/$USERNAME/.codex /home/$USERNAME/.pi
+# Workspace, AI config dirs (bind-mounted from host)
+RUN mkdir -p /workspace \
+      /home/$USERNAME/.claude \
+      /home/$USERNAME/.gemini \
+      /home/$USERNAME/.qwen \
+      /home/$USERNAME/.codex \
+      /home/$USERNAME/.pi \
+      /home/$USERNAME/.config/opencode \
+      /home/$USERNAME/.local/share/opencode \
+      /home/$USERNAME/.local/state/opencode \
+  && chown -R $USERNAME:$USERNAME \
+      /workspace /home/$USERNAME/.claude /home/$USERNAME/.gemini /home/$USERNAME/.qwen \
+      /home/$USERNAME/.codex /home/$USERNAME/.pi \
+      /home/$USERNAME/.config/opencode /home/$USERNAME/.local/share/opencode \
+      /home/$USERNAME/.local/state/opencode
 
 # Environment variables
 ENV DEVCONTAINER=true
@@ -173,7 +185,7 @@ RUN if [ "$INSTALL_QWEN" = "1" ]; then \
 # Pi Code CLI
 ARG INSTALL_PI=1
 RUN if [ "$INSTALL_PI" = "1" ]; then \
-      npm install -g @mariozechner/pi-coding-agent; \
+      npm install -g @earendil-works/pi-coding-agent; \
     fi
 
 USER $USERNAME

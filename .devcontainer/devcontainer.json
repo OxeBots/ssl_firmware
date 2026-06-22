@@ -64,20 +64,38 @@
     "source=/dev/,target=/dev/,type=bind,consistency=consistent",
     // Persistent shell history (survives container rebuilds)
     "source=pio-bash-history-${devcontainerId},target=/home/${localEnv:USER}/.history,type=volume",
-    // Persistent AI configs (survive container rebuilds)
-    "source=pio-claude-config-${devcontainerId},target=/home/${localEnv:USER}/.claude,type=volume",
-    "source=pio-gemini-config-${devcontainerId},target=/home/${localEnv:USER}/.gemini,type=volume",
-    "source=pio-qwen-config-${devcontainerId},target=/home/${localEnv:USER}/.qwen,type=volume",
-    "source=pio-codex-config-${devcontainerId},target=/home/${localEnv:USER}/.codex,type=volume",
-    "source=pio-pi-config-${devcontainerId},target=/home/${localEnv:USER}/.pi,type=volume"
+    // Persistent AI agent configs (bind mount from host so config/keys are inherited)
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/${localEnv:USER}/.claude,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gemini,target=/home/${localEnv:USER}/.gemini,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.qwen,target=/home/${localEnv:USER}/.qwen,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.codex,target=/home/${localEnv:USER}/.codex,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.pi,target=/home/${localEnv:USER}/.pi,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.config/opencode,target=/home/${localEnv:USER}/.config/opencode,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.local/share/opencode,target=/home/${localEnv:USER}/.local/share/opencode,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.local/state/opencode,target=/home/${localEnv:USER}/.local/state/opencode,type=bind",
+    // Host SSH agent (for git push/pull inside the container)
+    "source=${env:SSH_AUTH_SOCK},target=/ssh-agent.sock,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/${localEnv:USER}/.ssh,type=bind"
   ],
   "containerEnv": {
+    "SSH_AUTH_SOCK": "/ssh-agent.sock",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/${localEnv:USER}/.claude",
     "GEMINI_CONFIG_DIR": "/home/${localEnv:USER}/.gemini",
     "QWEN_CONFIG_DIR": "/home/${localEnv:USER}/.qwen",
     "CODEX_CONFIG_DIR": "/home/${localEnv:USER}/.codex",
-    "PI_CONFIG_DIR": "/home/${localEnv:USER}/.pi"
+    "PI_CONFIG_DIR": "/home/${localEnv:USER}/.pi",
+    // API keys passed through from host
+    "ANTHROPIC_API_KEY": "${localEnv:ANTHROPIC_API_KEY}",
+    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}",
+    "GOOGLE_API_KEY": "${localEnv:GOOGLE_API_KEY}",
+    "GEMINI_API_KEY": "${localEnv:GEMINI_API_KEY}",
+    "QWEN_API_KEY": "${localEnv:QWEN_API_KEY}",
+    "DEEPSEEK_API_KEY": "${localEnv:DEEPSEEK_API_KEY}",
+    "GROQ_API_KEY": "${localEnv:GROQ_API_KEY}",
+    "MISTRAL_API_KEY": "${localEnv:MISTRAL_API_KEY}",
+    // Workspace path inside the container (for scripts)
+    "WORKSPACE_FOLDER": "${containerWorkspaceFolder}"
   },
   "forwardPorts": [
     8008
@@ -88,6 +106,8 @@
       "onAutoForward": "notify"
     }
   },
+  "initializeCommand": "${localWorkspaceFolder}/.devcontainer/initialize-command.sh",
+  "postCreateCommand": "${containerWorkspaceFolder}/.devcontainer/post-create-command.sh",
   "postAttachCommand": "sudo udevadm control --reload 2>/dev/null || true",
   "features": {}
 }

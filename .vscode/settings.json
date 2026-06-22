@@ -9,7 +9,7 @@
         "--query-driver=/home/vscode/.platformio/packages/toolchain-xtensa-esp-elf/bin/*"
     ],
     // Python 
-    "python.defaultInterpreterPath": "/home/vscode/.platformio/penv/bin/python",
+    "python.defaultInterpreterPath": "${userHome}/.platformio/penv/bin/python",
     "python.languageServer": "None",
     "python.terminal.activateEnvironment": true,
     // Ruff (Python Linter)
