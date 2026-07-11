@@ -14,7 +14,7 @@
       "ZSH_IN_DOCKER_VERSION": "1.2.0",
       // AI agents — set to "1" to install
       "INSTALL_CLAUDE": "0",
-      "INSTALL_GEMINI": "0",
+      "INSTALL_GEMINI": "1",
       "INSTALL_QWEN": "0",
       "INSTALL_CODEX": "0",
       "INSTALL_OPENCODE": "0",
@@ -26,7 +26,7 @@
     // Combined with udev rules in Dockerfile — replaces --privileged
     "--device-cgroup-rule=c 188:* rmw",
     "--device-cgroup-rule=c 166:* rmw",
-    "--group-add=dialout"
+    "--group-add=dialout""--device=/dev/ttyUSB0:/dev/ttyUSB0"
   ],
   "customizations": {
     "vscode": {
