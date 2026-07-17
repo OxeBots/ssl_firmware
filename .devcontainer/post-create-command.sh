@@ -6,5 +6,9 @@ cd "$WORKSPACE_FOLDER"
 # Ensure the workspace is owned by the current user (avoids permission issues)
 sudo chown -R "$(whoami)" "$WORKSPACE_FOLDER"
 
+# Fix vscode-dev-containers first-run-notice permission error
+sudo mkdir -p /home/"$(whoami)"/.config/vscode-dev-containers
+sudo chown -R "$(whoami)" /home/"$(whoami)"/.config/vscode-dev-containers
+
 # Reload udev rules (PlatformIO USB devices)
 sudo udevadm control --reload 2>/dev/null || true

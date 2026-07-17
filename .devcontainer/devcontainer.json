@@ -108,6 +108,6 @@
   },
   "initializeCommand": "${localWorkspaceFolder}/.devcontainer/initialize-command.sh",
   "postCreateCommand": "${containerWorkspaceFolder}/.devcontainer/post-create-command.sh",
-  "postAttachCommand": "sudo udevadm control --reload 2>/dev/null || true",
+  "postAttachCommand": "${containerWorkspaceFolder}/.devcontainer/post-attach-command.sh",
   "features": {}
 }

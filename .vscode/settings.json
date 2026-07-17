@@ -6,13 +6,16 @@
         "--completion-style=detailed",
         "--header-insertion=never",
         "--all-scopes-completion",
-        "--query-driver=/home/vscode/.platformio/packages/toolchain-xtensa-esp-elf/bin/*"
+        "--query-driver=**/.platformio/packages/toolchain-xtensa-esp-elf/bin/*"
     ],
-    // Python 
+    // Pylance - intellisense, completions, hover, type checking for scripts
     "python.defaultInterpreterPath": "${userHome}/.platformio/penv/bin/python",
-    "python.languageServer": "None",
-    "python.terminal.activateEnvironment": true,
-    // Ruff (Python Linter)
+    "python.languageServer": "Pylance",
+    "python.terminal.activateEnvironment": false,
+    // Ruff (Python linter) - uses penv binary
+    "ruff.path": [
+        "${userHome}/.platformio/penv/bin/ruff"
+    ],
     "ruff.lineLength": 120,
     "ruff.lint.select": [
         "E",

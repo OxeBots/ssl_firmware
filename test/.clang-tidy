@@ -1,0 +1,6 @@
+---
+# Test files are interactive hardware tests, not production code.
+# Disable all clang-tidy checks to avoid false positives (e.g. bugprone-branch-clone
+# triggered by repeated TEST_ASSERT_* macros in polling loops).
+# Production code in src/ and lib/ is still checked by the root .clang-tidy.
+Checks: '-*'

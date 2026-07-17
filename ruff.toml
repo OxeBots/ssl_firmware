@@ -1,0 +1,14 @@
+# Ruff configuration for the Python tooling in scripts/.
+# Mirrors the editor settings in .vscode/settings.json so the CLI
+# (`ruff check scripts/`) and the VSCode Ruff extension apply identical rules.
+# Run: ruff check scripts/   (lint)   |   ruff format scripts/   (format)
+
+line-length = 120
+
+[lint]
+select = ["E", "F", "W"]
+ignore = ["F821", "F405"]
+
+[lint.per-file-ignores]
+# Generated bitproto Python bindings (also gitignored) — not hand-maintained.
+"ssl_robot_protocol_bp.py" = ["ALL"]

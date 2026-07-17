@@ -137,7 +137,18 @@ RUN curl -fsSL -o /tmp/get-platformio.py \
       https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py \
  && python3 /tmp/get-platformio.py
 
-RUN $HOME/.platformio/penv/bin/pip install flawfinder lizard bitproto pyserial
+RUN $HOME/.platformio/penv/bin/pip install flawfinder lizard bitproto pyserial ruff
+
+# Pre-warm toolchain + IDF venv. Without this, PIO Home and first `pio run` race in
+# espidf.py's `_create_venv` (rm -rf + recreate); whichever finishes first gets undone.
+RUN mkdir -p /tmp/pio-warmup/src \
+ && printf '%s\n' 'extern "C" void app_main(void) {}' > /tmp/pio-warmup/src/main.cpp \
+ && printf '%s\n' '[platformio]' 'default_envs = esp32dev' '' '[env:esp32dev]' \
+        'platform = espressif32@6.13.0' 'framework = espidf' 'board = esp32dev' \
+        > /tmp/pio-warmup/platformio.ini \
+ && cd /tmp/pio-warmup \
+ && $HOME/.platformio/penv/bin/pio run \
+ && rm -rf /tmp/pio-warmup
 
 RUN echo 'export PATH="$HOME/.platformio/penv/bin:$PATH"' \
       | tee -a /home/$USERNAME/.bashrc /home/$USERNAME/.zshrc

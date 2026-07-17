@@ -122,9 +122,11 @@ def compile_bitprotos(env):
         print("No C source files found in output directory.")
 
 
-try:
-    Import("env")
+_Import = globals().get("Import")
+if _Import is not None:
+    _Import("env")
+    env = globals()["env"]
     compile_bitprotos(env)
-except ImportError:
+else:
     print("This script is intended to be run inside PlatformIO.")
     exit(1)
