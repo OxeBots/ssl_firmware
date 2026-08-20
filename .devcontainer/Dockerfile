@@ -110,7 +110,7 @@ ENV SHELL=/bin/zsh
 ENV EDITOR=nano
 ENV VISUAL=nano
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin
+ENV PATH=$PATH:/usr/local/share/npm-global/bin:/home/${USERNAME}/.platformio/penv/bin
 
 WORKDIR /workspace
 # Expose PlatformIO PATH for all users (including root) via profile.d
