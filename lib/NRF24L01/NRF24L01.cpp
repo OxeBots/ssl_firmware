@@ -103,10 +103,28 @@ esp_err_t NRF24L01::init(uint8_t channel,
     if (ret != ESP_OK)
         return ret;
 
+    // The IRQ handler is negative-edge triggered. If RX_DR (or any other
+    // interrupt flag) was already latched during init — e.g. a packet arrived
+    // while the radio was powering up — the IRQ line is already low when the
+    // handler is registered, the falling edge is missed, and the receiver
+    // task would never wake up (and never flush queued TX either). Clear the
+    // flags and flush the RX FIFO so the line returns to idle first.
+    Nrf24_configRegister(&m_dev, REG_STATUS, (1 << RX_DR) | (1 << TX_DS) | (1 << MAX_RT));
+    Nrf24_flushRx(&m_dev);
+
     // gpio_install_isr_service() must be called in main.cpp before this.
     ret = gpio_isr_handler_add(m_irq_pin, NRF24L01::isr_handler, (void *)this);
     if (ret != ESP_OK)
         return ret;
+
+    // A packet arriving in the window between clearing STATUS and registering
+    // the handler would again be missed. If the line is already low, push one
+    // synthetic interrupt so the receiver task drains whatever is pending.
+    if (gpio_get_level(m_irq_pin) == 0)
+    {
+        uint32_t irq_pin = static_cast<uint32_t>(m_irq_pin);
+        xQueueSend(m_interrupt_queue, &irq_pin, 0);
+    }
 
     return ESP_OK;
 }
