@@ -1,5 +1,6 @@
 #include "BL48250.h"
 
+#include "DigitalOutputExpander.h"
 #include "helper_func.h"
 
 using namespace config::driver;
@@ -20,6 +21,9 @@ BL48250::BL48250()
   motor_pwm_pins_{},
   motor_dir_pins_{},
   motor_channels_{},
+  direction_expander_(nullptr),
+  direction_bits_{0, 1, 2, 3},
+  direction_mask_(0),
   max_duty_(0),
   directions_{MOTOR_CW, MOTOR_CW, MOTOR_CW, MOTOR_CW},
   duty_cycles_{0, 0, 0, 0},
@@ -42,10 +46,8 @@ BL48250::~BL48250()
         {
             gpio_reset_pin(pin);
         }
-        for (auto pin : motor_dir_pins_)
-        {
-            gpio_reset_pin(pin);
-        }
+        if (direction_expander_ == nullptr)
+            for (auto pin : motor_dir_pins_) gpio_reset_pin(pin);
     }
 }
 
@@ -70,6 +72,25 @@ esp_err_t BL48250::configure(const MotorDriverConfig & config)
     motor_pwm_pins_ = config.motor_pwm_pins;
     motor_dir_pins_ = config.motor_dir_pins;
     motor_channels_ = config.motor_channels;
+    direction_expander_ = config.direction_expander;
+    direction_bits_ = config.direction_bits;
+
+    direction_mask_ = 0;
+    for (uint8_t bit : direction_bits_)
+    {
+        if (bit >= 8 || (direction_mask_ & (1U << bit)) != 0)
+        {
+            ESP_LOGE(TAG, "Invalid or duplicate motor direction bit: %u", bit);
+            return ESP_ERR_INVALID_ARG;
+        }
+        direction_mask_ |= static_cast<uint8_t>(1U << bit);
+    }
+
+    if (direction_expander_ != nullptr && !direction_expander_->is_initialized())
+    {
+        ESP_LOGE(TAG, "Direction expander is not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
 
     max_duty_ = (1 << static_cast<int>(duty_resolution_)) - 1;
 
@@ -108,12 +129,28 @@ esp_err_t BL48250::configure(const MotorDriverConfig & config)
             return err;
         }
 
-        gpio_reset_pin(motor_dir_pins_[i]);
-        gpio_set_direction(motor_dir_pins_[i], GPIO_MODE_OUTPUT_OD);
-        gpio_set_level(motor_dir_pins_[i], MOTOR_CW);
+        if (direction_expander_ == nullptr)
+        {
+            gpio_reset_pin(motor_dir_pins_[i]);
+            gpio_set_direction(motor_dir_pins_[i], GPIO_MODE_OUTPUT_OD);
+            gpio_set_level(motor_dir_pins_[i], MOTOR_CW);
+        }
 
         directions_[i] = MOTOR_CW;
         duty_cycles_[i] = 0;
+    }
+
+    if (direction_expander_ != nullptr)
+    {
+        uint8_t direction_value = 0;
+        for (uint8_t bit : direction_bits_) direction_value |= static_cast<uint8_t>(1U << bit);
+        esp_err_t direction_err =
+          direction_expander_->update_mask(direction_mask_, direction_value);
+        if (direction_err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to initialize motor direction outputs");
+            return direction_err;
+        }
     }
 
     m_configured = true;
@@ -145,12 +182,11 @@ void BL48250::deinit()
     {
         gpio_reset_pin(pin);
     }
-    for (auto pin : motor_dir_pins_)
-    {
-        gpio_reset_pin(pin);
-    }
+    if (direction_expander_ == nullptr)
+        for (auto pin : motor_dir_pins_) gpio_reset_pin(pin);
 
     m_configured = false;
+    direction_expander_ = nullptr;
     ESP_LOGI(TAG, "BL48250 deinitialized.");
 }
 
@@ -166,10 +202,22 @@ void BL48250::set_duties(const std::array<uint32_t, 4> & duties,
     for (size_t i = 0; i < 4; ++i)
     {
         directions_[i] = directions[i];
-        gpio_set_level(motor_dir_pins_[i], directions[i]);
+        if (direction_expander_ == nullptr)
+            gpio_set_level(motor_dir_pins_[i], directions[i]);
 
-        duty_cycles_[i] = duties[i];
-        ledc_set_duty(speed_mode_, motor_channels_[i], duties[i]);
+        duty_cycles_[i] = std::min(duties[i], max_duty_);
+        ledc_set_duty(speed_mode_, motor_channels_[i], duty_cycles_[i]);
         ledc_update_duty(speed_mode_, motor_channels_[i]);
+    }
+
+    if (direction_expander_ != nullptr)
+    {
+        uint8_t direction_value = 0;
+        for (size_t i = 0; i < 4; ++i)
+            if (directions_[i] != 0)
+                direction_value |= static_cast<uint8_t>(1U << direction_bits_[i]);
+
+        if (direction_expander_->update_mask(direction_mask_, direction_value) != ESP_OK)
+            ESP_LOGE(TAG, "Failed to update motor direction outputs");
     }
 }

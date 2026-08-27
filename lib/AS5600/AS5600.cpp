@@ -5,10 +5,10 @@
 
 #include "AS5600.h"
 
+#include <standard_constants.h>
+
 #include <algorithm>
 #include <numeric>
-
-#include <standard_constants.h>
 
 #include "I2Cdev.h"
 #include "NVSManager.h"
@@ -56,6 +56,11 @@ esp_err_t AS5600::init_i2c()
     m_i2c_initialized = true;
     ESP_LOGI(TAG, "AS5600 I2C interface initialized successfully.");
     return ESP_OK;
+}
+
+bool AS5600::is_i2c_initialized() const
+{
+    return m_i2c_initialized;
 }
 
 /**

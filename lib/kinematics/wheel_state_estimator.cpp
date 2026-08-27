@@ -44,10 +44,13 @@ WheelStateEstimator::~WheelStateEstimator()
  * @return ESP_OK on success.
  */
 esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
-                                    adc_atten_t attenuation)
+                                    adc_atten_t attenuation,
+                                    EncoderMux * encoder_mux)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
+
+    m_encoder_mux = encoder_mux;
 
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
@@ -119,6 +122,11 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
     m_is_suspended = false;
 
     return ESP_OK;
+}
+
+void WheelStateEstimator::set_encoder_mux(EncoderMux * encoder_mux)
+{
+    m_encoder_mux = encoder_mux;
 }
 
 /**
@@ -304,7 +312,7 @@ bool WheelStateEstimator::all_channels_full_range() const
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad()
 {
-    std::array<float, NUM_ENC_CHANNELS> angles;
+    std::array<float, NUM_ENC_CHANNELS> angles = {};
 
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
@@ -323,7 +331,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg()
 {
-    std::array<float, NUM_ENC_CHANNELS> angles;
+    std::array<float, NUM_ENC_CHANNELS> angles = {};
 
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
@@ -342,7 +350,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg(
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_velocity_rad_s()
 {
-    std::array<float, NUM_ENC_CHANNELS> velocities;
+    std::array<float, NUM_ENC_CHANNELS> velocities = {};
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
@@ -360,7 +368,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_velocity_r
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
 {
-    std::array<float, NUM_ENC_CHANNELS> rpms;
+    std::array<float, NUM_ENC_CHANNELS> rpms = {};
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
@@ -379,7 +387,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
  */
 std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_acceleration_rps2()
 {
-    std::array<float, NUM_ENC_CHANNELS> accels;
+    std::array<float, NUM_ENC_CHANNELS> accels = {};
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
@@ -482,10 +490,13 @@ esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx,
     // Suspend ADC to prevent I2C/Flash conflicts
     suspend();
 
-    esp_err_t ret = ESP_ERR_NOT_FOUND;
+    esp_err_t ret = ESP_OK;
     auto * enc = m_enc_channels[channel_idx].encoder.get();
 
-    if (enc && enc->init_i2c() == ESP_OK)
+    if (m_encoder_mux != nullptr)
+        ret = m_encoder_mux->select(channel_idx);
+
+    if (ret == ESP_OK && enc != nullptr && (enc->is_i2c_initialized() || enc->init_i2c() == ESP_OK))
     {
         ret = apply_i2c_settings(enc, settings);
 
@@ -506,7 +517,19 @@ esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx,
             ESP_LOGE(TAG, "I2C Config Failed during settings verification on Ch %d", channel_idx);
     }
     else
-        ESP_LOGE(TAG, "Sensor not found on I2C bus (Address 0x%02X).", AS5600::AS5600_ADDR);
+    {
+        if (m_encoder_mux == nullptr)
+            ESP_LOGE(TAG, "Encoder mux is not configured.");
+        else
+            ESP_LOGE(TAG, "Sensor not found on I2C bus (Address 0x%02X).", AS5600::AS5600_ADDR);
+    }
+
+    if (m_encoder_mux != nullptr)
+    {
+        esp_err_t mux_err = m_encoder_mux->disable();
+        if (ret == ESP_OK && mux_err != ESP_OK)
+            ret = mux_err;
+    }
 
     // Resume ADC Task
     resume();

@@ -9,12 +9,11 @@
 #include <freertos/task.h>
 #include <stdint.h>
 
-#include "constants.h"
-
 #include <array>
 #include <atomic>
 #include <memory>
 
+#include "constants.h"
 #include "wheel_ekf.h"
 
 class AS5600
@@ -56,6 +55,7 @@ class AS5600
 
     // I2C methods
     esp_err_t init_i2c();
+    bool is_i2c_initialized() const;
 
     esp_err_t set_output_stage(OutputStage stage);
     esp_err_t set_slow_filter(SlowFilter filter);

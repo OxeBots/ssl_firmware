@@ -11,6 +11,8 @@
 
 #include "constants.h"
 
+class DigitalOutputExpander;
+
 namespace config
 {
 namespace driver
@@ -29,8 +31,12 @@ struct MotorDriverConfig
     ledc_timer_bit_t duty_resolution;
     uint32_t pwm_freq;
     std::array<gpio_num_t, 4> motor_pwm_pins;
-    std::array<gpio_num_t, 4> motor_dir_pins;
+    // Used only when direction_expander is null. The production schematic
+    // routes these four signals through the 74HC595.
+    std::array<gpio_num_t, 4> motor_dir_pins{};
     std::array<ledc_channel_t, 4> motor_channels;
+    DigitalOutputExpander * direction_expander = nullptr;
+    std::array<uint8_t, 4> direction_bits = {0, 1, 2, 3};
 };
 }  // namespace driver
 }  // namespace config
@@ -62,6 +68,9 @@ class BL48250
     std::array<gpio_num_t, 4> motor_pwm_pins_;
     std::array<gpio_num_t, 4> motor_dir_pins_;
     std::array<ledc_channel_t, 4> motor_channels_;
+    DigitalOutputExpander * direction_expander_;
+    std::array<uint8_t, 4> direction_bits_;
+    uint8_t direction_mask_;
     uint32_t max_duty_;
 
     std::array<uint8_t, 4> directions_;

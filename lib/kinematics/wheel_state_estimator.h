@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "AS5600.h"
+#include "EncoderMux.h"
 
 static constexpr adc_unit_t ADC_UNIT = ADC_UNIT_1;
 static constexpr uint8_t NUM_ENC_CHANNELS = 4;
@@ -44,7 +45,10 @@ class WheelStateEstimator
 
     // Lifecycle
     esp_err_t init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
-                   adc_atten_t attenuation = ADC_ATTEN_DB_12);
+                   adc_atten_t attenuation = ADC_ATTEN_DB_12,
+                   EncoderMux * encoder_mux = nullptr);
+
+    void set_encoder_mux(EncoderMux * encoder_mux);
 
     void suspend();
     void resume();
@@ -103,6 +107,7 @@ class WheelStateEstimator
     std::array<EncoderChannel, NUM_ENC_CHANNELS> m_enc_channels;
     std::array<const EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
     SemaphoreHandle_t m_data_mutex;
+    EncoderMux * m_encoder_mux = nullptr;
 };
 
 #endif  // KINEMATICS_WHEEL_STATE_ESTIMATOR_H
