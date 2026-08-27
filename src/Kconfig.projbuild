@@ -55,14 +55,14 @@ menu "Oxebots Robot Configuration"
 
     endmenu
 
-    menu "74HC595 Output Expander"
+    menu "SN74HC595 Shift Register"
 
         config SHIFT_REGISTER_LATCH_GPIO
-            int "74HC595 latch GPIO"
+            int "SN74HC595 RCKSR latch GPIO"
             range 0 GPIO_MAX_INDEX
             default 17 if IDF_TARGET_ESP32
             help
-                GPIO connected to the 74HC595 RCKSR latch input.
+                GPIO connected to the SN74HC595 RCKSR latch input.
                 Schematic net: RCKSR.
                 ESP32 pin: GPIO17.
 
@@ -71,7 +71,7 @@ menu "Oxebots Robot Configuration"
             range 0 255
             default 254
             help
-                Software key used by the shared SPI driver. The 74HC595 has
+                Software key used by the shared SPI driver. The SN74HC595 has
                 no chip-select input, so this is not a GPIO number.
 
         config SHIFT_REGISTER_DIR1_BIT

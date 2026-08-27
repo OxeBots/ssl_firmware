@@ -18,7 +18,7 @@ CONFIG_MOSI_GPIO=23
 CONFIG_SCLK_GPIO=18
 
 #
-# 74HC595 output expander
+# SN74HC595 output shift register
 #
 # RCKSR latch
 CONFIG_SHIFT_REGISTER_LATCH_GPIO=17

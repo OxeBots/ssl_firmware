@@ -1,5 +1,5 @@
 #include <BL48250.h>
-#include <DigitalOutputExpander.h>
+#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <freertos/FreeRTOS.h>
@@ -38,9 +38,9 @@ constexpr uint32_t MAX_DUTY = (1 << static_cast<int>(DUTY_RESOLUTION)) - 1;
 // Helper macros
 #define DELAY_MS(ms) vTaskDelay((ms) / portTICK_PERIOD_MS)
 
-DigitalOutputExpander & output_expander()
+SN74HC595 & shift_register()
 {
-    static DigitalOutputExpander expander;
+    static SN74HC595 expander;
     static bool initialized = false;
     if (!initialized)
     {
@@ -53,7 +53,7 @@ DigitalOutputExpander & output_expander()
         TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
         SPIdev::init(SPI2_HOST);
 
-        DigitalOutputExpander::Config expander_config = {
+        SN74HC595::Config expander_config = {
           .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
           .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
           .clock_hz = 1000000};
@@ -65,7 +65,7 @@ DigitalOutputExpander & output_expander()
 
 void configure_driver()
 {
-    auto & expander = output_expander();
+    auto & expander = shift_register();
     config::driver::MotorDriverConfig motor_cfg;
     motor_cfg.timer = LEDC_TIMER_0;
     motor_cfg.speed_mode = LEDC_LOW_SPEED_MODE;
@@ -73,7 +73,7 @@ void configure_driver()
     motor_cfg.pwm_freq = config::test::PWM_FREQ;
     motor_cfg.motor_pwm_pins = config::test::MOTOR_PWM_PINS;
     motor_cfg.motor_channels = config::test::MOTOR_CHANNELS;
-    motor_cfg.direction_expander = &expander;
+    motor_cfg.direction_shift_register = &expander;
     motor_cfg.direction_bits = config::test::MOTOR_DIR_BITS;
     TEST_ASSERT_EQUAL(ESP_OK, BL48250::get_instance().configure(motor_cfg));
 }
@@ -81,7 +81,7 @@ void configure_driver()
 void assert_motor_direction(size_t motor_idx, int expected, const char * context)
 {
     const int actual =
-      (output_expander().get_output() >> config::test::MOTOR_DIR_BITS[motor_idx]) & 1U;
+      (shift_register().get_output() >> config::test::MOTOR_DIR_BITS[motor_idx]) & 1U;
     char msg[128];
     snprintf(msg,
              sizeof(msg),

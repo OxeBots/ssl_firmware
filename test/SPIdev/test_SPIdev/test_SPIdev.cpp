@@ -1,4 +1,4 @@
-#include <DigitalOutputExpander.h>
+#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <sdkconfig.h>

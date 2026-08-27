@@ -56,7 +56,7 @@ package "Control and Publication" as ControlLane #F0FDF4 {
     database "ActuationSetpoint\nwheel targets + kick + inhibit\nPRIORITY_P0" as ActuationSetpoint <<implemented>>
     component "WheelController::control_task\n100 Hz PID x4\nPRIORITY_DONE" as WheelTask <<implemented>>
     component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<implemented>>
-    component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<implemented>>
+    component "SN74HC595\noutput byte + RCKSR latch\nPRIORITY_P0" as SN74HC595Driver <<implemented>>
     component "Telemetry\nRobotTelemetry encoder\nPRIORITY_P1" as Telemetry <<partial>>
 
     SafetySupervisor -down-> GoalPose
@@ -64,7 +64,7 @@ package "Control and Publication" as ControlLane #F0FDF4 {
     CascadedControl -down-> ActuationSetpoint
     ActuationSetpoint -down-> WheelTask : <back:#FFFFFF>wheel-speed targets</back>
     WheelTask -down-> MotorOutput : <back:#FFFFFF>signed duties</back>
-    MotorOutput -right-> OutputExpander : <back:#FFFFFF>direction-bit update</back>
+    MotorOutput -right-> SN74HC595Driver : <back:#FFFFFF>direction-bit update</back>
     RobotState -down-> Telemetry
 }
 

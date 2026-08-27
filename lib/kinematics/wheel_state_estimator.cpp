@@ -45,12 +45,12 @@ WheelStateEstimator::~WheelStateEstimator()
  */
 esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHANNELS> & channels,
                                     adc_atten_t attenuation,
-                                    EncoderMux * encoder_mux)
+                                    CD4052B * cd4052b)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
 
-    m_encoder_mux = encoder_mux;
+    m_cd4052b = cd4052b;
 
     for (size_t i = 0; i < NUM_ENC_CHANNELS; i++)
     {
@@ -124,9 +124,9 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
     return ESP_OK;
 }
 
-void WheelStateEstimator::set_encoder_mux(EncoderMux * encoder_mux)
+void WheelStateEstimator::set_cd4052b(CD4052B * cd4052b)
 {
-    m_encoder_mux = encoder_mux;
+    m_cd4052b = cd4052b;
 }
 
 /**
@@ -493,8 +493,8 @@ esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx,
     esp_err_t ret = ESP_OK;
     auto * enc = m_enc_channels[channel_idx].encoder.get();
 
-    if (m_encoder_mux != nullptr)
-        ret = m_encoder_mux->select(channel_idx);
+    if (m_cd4052b != nullptr)
+        ret = m_cd4052b->select(channel_idx);
 
     if (ret == ESP_OK && enc != nullptr && (enc->is_i2c_initialized() || enc->init_i2c() == ESP_OK))
     {
@@ -518,15 +518,15 @@ esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx,
     }
     else
     {
-        if (m_encoder_mux == nullptr)
-            ESP_LOGE(TAG, "Encoder mux is not configured.");
+        if (m_cd4052b == nullptr)
+            ESP_LOGE(TAG, "CD4052B is not configured.");
         else
             ESP_LOGE(TAG, "Sensor not found on I2C bus (Address 0x%02X).", AS5600::AS5600_ADDR);
     }
 
-    if (m_encoder_mux != nullptr)
+    if (m_cd4052b != nullptr)
     {
-        esp_err_t mux_err = m_encoder_mux->disable();
+        esp_err_t mux_err = m_cd4052b->disable();
         if (ret == ESP_OK && mux_err != ESP_OK)
             ret = mux_err;
     }

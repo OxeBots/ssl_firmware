@@ -1,5 +1,5 @@
-#include <DigitalOutputExpander.h>
-#include <EncoderMux.h>
+#include <CD4052B.h>
+#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
@@ -51,8 +51,8 @@ const std::array<adc_channel_t, 4> WHEEL_ADC_CHANNELS = {
 }  // namespace test
 }  // namespace config
 
-static DigitalOutputExpander s_output_expander;
-static EncoderMux s_encoder_mux;
+static SN74HC595 s_shift_register;
+static CD4052B s_cd4052b;
 
 // Serial buffer
 static constexpr int SERIAL_BUFFER_SIZE = 64;
@@ -264,7 +264,7 @@ void test_wheel_controller_interactive()
         // NVS
         NVSManager::init();
 
-        // SPI for the 74HC595 direction and encoder selector outputs
+        // SPI for the SN74HC595 direction and encoder selector outputs
         spi_bus_config_t spi_config = {};
         spi_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
         spi_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
@@ -273,15 +273,15 @@ void test_wheel_controller_interactive()
         spi_config.quadhd_io_num = -1;
         spi_bus_initialize(SPI2_HOST, &spi_config, SPI_DMA_CH_AUTO);
         SPIdev::init(SPI2_HOST);
-        DigitalOutputExpander::Config expander_config = {
+        SN74HC595::Config expander_config = {
           .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
           .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
           .clock_hz = 1000000};
-        TEST_ASSERT_EQUAL(ESP_OK, s_output_expander.init(expander_config));
-        EncoderMux::Config mux_config = {.select_a_bit = CONFIG_SHIFT_REGISTER_MUX_A_BIT,
-                                         .select_b_bit = CONFIG_SHIFT_REGISTER_MUX_B_BIT,
-                                         .inhibit_bit = CONFIG_SHIFT_REGISTER_MUX_INH_BIT};
-        TEST_ASSERT_EQUAL(ESP_OK, s_encoder_mux.init(&s_output_expander, mux_config));
+        TEST_ASSERT_EQUAL(ESP_OK, s_shift_register.init(expander_config));
+        CD4052B::Config mux_config = {.select_a_bit = CONFIG_SHIFT_REGISTER_MUX_A_BIT,
+                                      .select_b_bit = CONFIG_SHIFT_REGISTER_MUX_B_BIT,
+                                      .inhibit_bit = CONFIG_SHIFT_REGISTER_MUX_INH_BIT};
+        TEST_ASSERT_EQUAL(ESP_OK, s_cd4052b.init(&s_shift_register, mux_config));
 
         // I2C for AS5600
         static i2c_master_bus_handle_t bus_handle;
@@ -299,7 +299,7 @@ void test_wheel_controller_interactive()
 
         // ADC / Estimator
         WheelStateEstimator::get_instance().init(
-          config::test::WHEEL_ADC_CHANNELS, ADC_ATTEN_DB_12, &s_encoder_mux);
+          config::test::WHEEL_ADC_CHANNELS, ADC_ATTEN_DB_12, &s_cd4052b);
 
         // Motor driver
         config::driver::MotorDriverConfig motor_cfg;
@@ -309,7 +309,7 @@ void test_wheel_controller_interactive()
         motor_cfg.pwm_freq = config::test::PWM_FREQ;
         motor_cfg.motor_pwm_pins = config::test::MOTOR_PWM_PINS;
         motor_cfg.motor_channels = config::test::MOTOR_CHANNELS;
-        motor_cfg.direction_expander = &s_output_expander;
+        motor_cfg.direction_shift_register = &s_shift_register;
         motor_cfg.direction_bits = config::test::MOTOR_DIR_BITS;
         TEST_ASSERT_EQUAL(ESP_OK, BL48250::get_instance().configure(motor_cfg));
 

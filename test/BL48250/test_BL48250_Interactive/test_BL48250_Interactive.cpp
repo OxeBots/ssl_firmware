@@ -1,5 +1,5 @@
 #include <BL48250.h>
-#include <DigitalOutputExpander.h>
+#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
@@ -34,12 +34,12 @@ constexpr uint32_t MAX_DUTY = (1 << static_cast<int>(DUTY_RESOLUTION)) - 1;
 }  // namespace test
 }  // namespace config
 
-static DigitalOutputExpander s_output_expander;
-static bool s_output_expander_initialized = false;
+static SN74HC595 s_shift_register;
+static bool s_shift_register_initialized = false;
 
 void setUp(void)
 {
-    if (!s_output_expander_initialized)
+    if (!s_shift_register_initialized)
     {
         spi_bus_config_t bus_config = {};
         bus_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
@@ -49,12 +49,12 @@ void setUp(void)
         bus_config.quadhd_io_num = -1;
         TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
         SPIdev::init(SPI2_HOST);
-        DigitalOutputExpander::Config expander_config = {
+        SN74HC595::Config expander_config = {
           .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
           .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
           .clock_hz = 1000000};
-        TEST_ASSERT_EQUAL(ESP_OK, s_output_expander.init(expander_config));
-        s_output_expander_initialized = true;
+        TEST_ASSERT_EQUAL(ESP_OK, s_shift_register.init(expander_config));
+        s_shift_register_initialized = true;
     }
 
     config::driver::MotorDriverConfig motor_cfg;
@@ -64,7 +64,7 @@ void setUp(void)
     motor_cfg.pwm_freq = config::test::PWM_FREQ;
     motor_cfg.motor_pwm_pins = config::test::MOTOR_PWM_PINS;
     motor_cfg.motor_channels = config::test::MOTOR_CHANNELS;
-    motor_cfg.direction_expander = &s_output_expander;
+    motor_cfg.direction_shift_register = &s_shift_register;
     motor_cfg.direction_bits = config::test::MOTOR_DIR_BITS;
     TEST_ASSERT_EQUAL(ESP_OK, BL48250::get_instance().configure(motor_cfg));
 }

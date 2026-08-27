@@ -1,12 +1,12 @@
-#ifndef ENCODER_MUX_H
-#define ENCODER_MUX_H
+#ifndef CD4052B_H
+#define CD4052B_H
 
 #include <esp_err.h>
 #include <stdint.h>
 
-#include "DigitalOutputExpander.h"
+#include "SN74HC595.h"
 
-class EncoderMux
+class CD4052B
 {
    public:
     struct Config
@@ -16,9 +16,9 @@ class EncoderMux
         uint8_t inhibit_bit;
     };
 
-    EncoderMux() = default;
+    CD4052B() = default;
 
-    esp_err_t init(DigitalOutputExpander * output_expander, const Config & config);
+    esp_err_t init(SN74HC595 * shift_register, const Config & config);
     esp_err_t select(uint8_t channel);
     esp_err_t disable();
 
@@ -26,10 +26,10 @@ class EncoderMux
     bool is_enabled() const;
 
    private:
-    DigitalOutputExpander * m_output_expander = nullptr;
+    SN74HC595 * m_shift_register = nullptr;
     Config m_config = {};
     uint8_t m_selected_channel = 0;
     bool m_enabled = false;
 };
 
-#endif  // ENCODER_MUX_H
+#endif  // CD4052B_H

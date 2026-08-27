@@ -1,11 +1,11 @@
-#ifndef DIGITAL_OUTPUT_EXPANDER_H
-#define DIGITAL_OUTPUT_EXPANDER_H
+#ifndef SN74HC595_H
+#define SN74HC595_H
 
 #include <driver/gpio.h>
 #include <esp_err.h>
 #include <stdint.h>
 
-class DigitalOutputExpander
+class SN74HC595
 {
    public:
     static constexpr uint8_t DEFAULT_DEVICE_KEY = 0xFE;
@@ -17,7 +17,7 @@ class DigitalOutputExpander
         uint32_t clock_hz = 1000000;
     };
 
-    DigitalOutputExpander() = default;
+    SN74HC595() = default;
 
     esp_err_t init(const Config & config, uint8_t initial_value = 0);
     esp_err_t write(uint8_t value);
@@ -32,4 +32,4 @@ class DigitalOutputExpander
     bool m_initialized = false;
 };
 
-#endif  // DIGITAL_OUTPUT_EXPANDER_H
+#endif  // SN74HC595_H
