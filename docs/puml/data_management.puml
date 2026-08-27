@@ -11,7 +11,7 @@ package "Runtime Producers" as ProducerLane #EFF6FF {
     component "AdcAcquisitionService::task\nAS5600 + VMON\nPRIORITY_P0" as ADCTask <<partial>>
     component "BL48250_FeedbackService::task\nFB wheel-velocity pulses\nPRIORITY_P0" as FBTask <<target>>
     component "OrientationHandler::task_loop\ninterrupt-paced IMU\nPRIORITY_P1" as OrientationTask <<partial>>
-    component "ToFPerceptionService::task\nrange processing\nPRIORITY_P2" as ToFTask <<target>>
+    component "ToFPerceptionService::task\nvalidated range-frame publication\nPRIORITY_P2" as ToFTask <<partial>>
     component "KickerClient::task\nstatus + command exchange\nPRIORITY_P2" as KickerTask <<target>>
     component "NRF24L01::receiver_task\nRX events + TX queue\nPRIORITY_DONE" as RadioTask <<implemented>>
     component "ProtocolHandler::on_packet\ndecode + address filter\nPRIORITY_DONE" as Protocol <<implemented>>
@@ -55,8 +55,8 @@ package "Control and Publication" as ControlLane #F0FDF4 {
     component "CascadedMotionController\npose -> body velocity -> wheel speed\nPRIORITY_P1" as CascadedControl <<target>>
     database "ActuationSetpoint\nwheel targets + kick + inhibit\nPRIORITY_P0" as ActuationSetpoint <<target>>
     component "WheelController::control_task\n100 Hz PID x4\nPRIORITY_DONE" as WheelTask <<implemented>>
-    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<partial>>
-    component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<target>>
+    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<implemented>>
+    component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<implemented>>
     component "Telemetry\nRobotTelemetry encoder\nPRIORITY_P1" as Telemetry <<partial>>
 
     SafetySupervisor -down-> GoalPose

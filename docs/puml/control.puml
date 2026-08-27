@@ -22,8 +22,8 @@ package "Command and Cascaded Motion" #EFF6FF {
     }
 
     component "WheelController\n100 Hz PID x4 + feed-forward\nPRIORITY_DONE" as WheelController <<implemented>>
-    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorDriver <<partial>>
-    component "DigitalOutputExpander\n74HC595 shift register\nPRIORITY_P0" as OutputExpander <<target>>
+    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorDriver <<implemented>>
+    component "DigitalOutputExpander\n74HC595 shift register\nPRIORITY_P0" as OutputExpander <<implemented>>
     node "ESP32 LEDC x4" as PWMHardware
     node "74HC595" as ShiftRegister
     node "BL48250 Motors x4" as Motors
