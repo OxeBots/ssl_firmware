@@ -52,6 +52,7 @@ class I2Cdev
     I2Cdev();
 
     static void init(i2c_master_bus_handle_t bus_handle);
+    static i2c_master_bus_handle_t get_bus_handle();
 
     static int8_t readBit(uint8_t devAddr,
                           uint8_t regAddr,

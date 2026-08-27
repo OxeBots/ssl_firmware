@@ -68,6 +68,11 @@ void I2Cdev::init(i2c_master_bus_handle_t bus_handle)
     memset(device_cache, 0, sizeof(device_cache));
 }
 
+i2c_master_bus_handle_t I2Cdev::get_bus_handle()
+{
+    return global_bus_handle;
+}
+
 /** Get or create device handle for given address
  * @param devAddr I2C slave device address
  * @return Device handle or NULL on failure

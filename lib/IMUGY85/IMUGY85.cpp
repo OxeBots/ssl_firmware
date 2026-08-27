@@ -1,6 +1,7 @@
 
 #include "IMUGY85.h"
 
+#include <driver/gpio.h>
 #include <sdkconfig.h>
 
 static const char * TAG = "IMUGY85";
@@ -21,6 +22,9 @@ IMUGY85::IMUGY85() : m_i2c_bus(nullptr)
  */
 esp_err_t IMUGY85::init()
 {
+    if (m_initialized)
+        return ESP_OK;
+
     // ---- I2C master bus ----
     i2c_master_bus_config_t i2c_cfg = {
       .i2c_port = static_cast<i2c_port_t>(CONFIG_I2C_PORT_NUM),
@@ -45,12 +49,27 @@ esp_err_t IMUGY85::init()
 
     // ---- Initialize individual sensors ----
     m_accel.init();
+    if (!m_accel.test_connection())
+    {
+        ESP_LOGE(TAG, "ADXL345 accelerometer was not detected.");
+        return ESP_ERR_NOT_FOUND;
+    }
     ESP_LOGI(TAG, "ADXL345 accelerometer initialized.");
 
     m_gyro.init();
+    if (!m_gyro.test_connection())
+    {
+        ESP_LOGE(TAG, "ITG3200 gyroscope was not detected.");
+        return ESP_ERR_NOT_FOUND;
+    }
     ESP_LOGI(TAG, "ITG3200 gyroscope initialized.");
 
     m_mag.init();
+    if (!m_mag.test_connection())
+    {
+        ESP_LOGE(TAG, "QMC5883L magnetometer was not detected.");
+        return ESP_ERR_NOT_FOUND;
+    }
     m_mag.set_smoothing(10, true);
     ESP_LOGI(TAG, "QMC5883L magnetometer initialized.");
 
@@ -59,7 +78,33 @@ esp_err_t IMUGY85::init()
     update_g_res();
     update_m_res();
 
+    // The interrupt lines are routed to the ESP32 by the board schematic.
+    // Sensor data is still read by the fixed-rate orientation task so a
+    // missed edge cannot leave the estimator stalled.
+    gpio_config_t interrupt_config = {};
+    interrupt_config.intr_type = GPIO_INTR_DISABLE;
+    interrupt_config.pin_bit_mask =
+      (1ULL << CONFIG_GY85_AINT1_GPIO) | (1ULL << CONFIG_GY85_GINT_GPIO);
+    interrupt_config.mode = GPIO_MODE_INPUT;
+    interrupt_config.pull_up_en = GPIO_PULLUP_DISABLE;
+    interrupt_config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    err = gpio_config(&interrupt_config);
+    if (err != ESP_OK)
+        return err;
+
+    m_initialized = true;
+
     return ESP_OK;
+}
+
+i2c_master_bus_handle_t IMUGY85::get_i2c_bus() const
+{
+    return m_i2c_bus;
+}
+
+bool IMUGY85::is_initialized() const
+{
+    return m_initialized;
 }
 
 /**

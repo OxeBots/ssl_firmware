@@ -23,6 +23,8 @@ class IMUGY85
     static IMUGY85 & get_instance();
 
     esp_err_t init();
+    i2c_master_bus_handle_t get_i2c_bus() const;
+    bool is_initialized() const;
 
     void read_acceleration(int16_t * x, int16_t * y, int16_t * z);
 
@@ -70,6 +72,7 @@ class IMUGY85
     float m_a_res = 0.0f;
     float m_g_res = 0.0f;
     float m_m_res = 0.0f;
+    bool m_initialized = false;
 
     void update_a_res();
     void update_g_res();
