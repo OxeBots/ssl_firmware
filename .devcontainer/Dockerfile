@@ -33,6 +33,10 @@ RUN apt-get update \
       aggregate \
       jq \
       wget \
+      default-jre-headless \
+      fonts-dejavu \
+      graphviz \
+      plantuml \
       clang-format \
       clangd \
  && apt-get clean && rm -rf /var/lib/apt/lists/*

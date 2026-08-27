@@ -41,7 +41,8 @@
         "mhutchie.git-graph",
         "yzhang.markdown-all-in-one",
         "dnut.rewrap-revived",
-        "llvm-vs-code-extensions.vscode-clangd"
+        "llvm-vs-code-extensions.vscode-clangd",
+        "jebbs.plantuml"
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "zsh",
@@ -55,7 +56,10 @@
           }
         },
         "editor.formatOnSave": true,
-        "platformio-ide.pioHomeServerHttpPort": 8008
+        "platformio-ide.pioHomeServerHttpPort": 8008,
+        // Render .puml diagrams locally with the baked-in JRE, graphviz, and plantuml jar
+        "plantuml.render": "Local",
+        "plantuml.jar": "/usr/share/plantuml/plantuml.jar"
       }
     }
   },
