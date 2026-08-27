@@ -1,8 +1,8 @@
 #include "ProtocolHandler.h"
 
 #include <esp_system.h>
+#include <esp_timer.h>
 
-#include <algorithm>
 #include <cstring>
 
 #include "BL48250.h"
@@ -41,7 +41,12 @@ void ProtocolHandler::init(NRF24L01 * radio,
 
     m_radio = radio;
     m_wheel_ctrl = wheel_ctrl;
-    m_kinematics = kinematics;
+    configASSERT(m_command_inbox.init());
+    m_motion_controller.init(*kinematics);
+    m_safety_supervisor.mark_self_test_complete(true);
+    m_health_state = {};
+    m_health_state.severity = HealthSeverity::HEALTHY;
+    m_health_state.kick_inhibited = true;
     m_wheel_ctrl->set_tuning_done_callback(on_tuning_done);
 
     ESP_LOGI(TAG, "ProtocolHandler initialized.");
@@ -96,6 +101,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             memset(&cmd, 0, sizeof(RobotCommand));
             DecodeRobotCommand(&cmd, const_cast<uint8_t *>(payload));
             handle_command(cmd);
+            update(static_cast<uint64_t>(esp_timer_get_time()));
             break;
         }
 
@@ -149,27 +155,40 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
              cmd.target_pose.angular_vel,
              cmd.kick_velocity);
 
-    // Convert body-frame velocities to wheel velocities via omni kinematics.
-    vt::numeric_vector<3> body_vel;
-    body_vel(0) = static_cast<float>(cmd.target_pose.x_v) / 1000.0f;         // mm/s  → m/s
-    body_vel(1) = static_cast<float>(cmd.target_pose.y_v) / 1000.0f;         // mm/s  → m/s
-    body_vel(2) = static_cast<float>(cmd.target_pose.angular_vel) / 100.0f;  // 0.01 rad/s → rad/s
-
-    vt::numeric_vector<4> wheel_vels = m_kinematics->compute_wheel_velocities(body_vel);
-
-    std::array<float, 4> wheel_arr = {
-      static_cast<float>(wheel_vels(0)),
-      static_cast<float>(wheel_vels(1)),
-      static_cast<float>(wheel_vels(2)),
-      static_cast<float>(wheel_vels(3)),
-    };
-    m_wheel_ctrl->set_target_velocities(wheel_arr);
+    if (!m_command_inbox.push(cmd, static_cast<uint64_t>(esp_timer_get_time())))
+    {
+        ESP_LOGW(TAG, "Command inbox full — command was not accepted.");
+        return;
+    }
 
     // Broadcast commands: execute without reply.
     if (cmd.header.robot_id == ROBOT_ID_BROADCAST)
         return;
 
     Telemetry::get_instance().send(cmd.header.timestamp);
+}
+
+/**
+ * @brief Consume queued commands and publish the current safe wheel target.
+ */
+void ProtocolHandler::update(uint64_t now_us)
+{
+    if (m_wheel_ctrl == nullptr)
+        return;
+
+    CommandEnvelope envelope = {};
+    while (m_command_inbox.pop(&envelope))
+    {
+        m_latest_command = envelope;
+        m_has_latest_command = true;
+    }
+
+    const CommandEnvelope * command = m_has_latest_command ? &m_latest_command : nullptr;
+    const SafetyDecision decision = m_safety_supervisor.update(now_us, command, m_health_state, {});
+    RobotStateEstimate state = {};
+    state.health = m_health_state;
+    const ActuationSetpoint setpoint = m_motion_controller.compute(decision.goal, state);
+    m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
 }
 
 /**

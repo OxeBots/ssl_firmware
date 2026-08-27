@@ -1,6 +1,7 @@
 #ifndef RUNTIME_TYPES_H
 #define RUNTIME_TYPES_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <array>

@@ -5,6 +5,8 @@
 #include <freertos/queue.h>
 #include <stdint.h>
 
+#include <atomic>
+
 #include "RuntimeTypes.h"
 
 class CommandInbox
@@ -24,7 +26,7 @@ class CommandInbox
 
    private:
     QueueHandle_t m_queue = nullptr;
-    uint32_t m_next_sequence = 1;
+    std::atomic<uint32_t> m_next_sequence = 1;
 };
 
 #endif  // COMMAND_INBOX_H

@@ -25,6 +25,7 @@
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <nvs_flash.h>
 #include <sdkconfig.h>
 
@@ -207,6 +208,9 @@ extern "C" void app_main(void)
     while (true)
     {
         vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));
+
+        if (radio_ready)
+            ProtocolHandler::get_instance().update(static_cast<uint64_t>(esp_timer_get_time()));
 
         // --Wheel velocity telemetry(Teleplot)-- -- -- -- -- -- -- -- -- -- -- -
         // {

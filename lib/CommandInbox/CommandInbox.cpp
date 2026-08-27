@@ -23,7 +23,7 @@ bool CommandInbox::push(const RobotCommand & command, uint64_t received_at_us)
     CommandEnvelope envelope = {};
     envelope.command = command;
     envelope.received_at_us = received_at_us;
-    envelope.sequence = m_next_sequence++;
+    envelope.sequence = m_next_sequence.fetch_add(1);
     return xQueueSend(m_queue, &envelope, 0) == pdPASS;
 }
 
