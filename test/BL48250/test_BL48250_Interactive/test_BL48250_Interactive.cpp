@@ -1,4 +1,7 @@
 #include <BL48250.h>
+#include <DigitalOutputExpander.h>
+#include <SPIdev.h>
+#include <driver/spi_master.h>
 #include <driver/uart.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -17,10 +20,10 @@ constexpr std::array<gpio_num_t, 4> MOTOR_PWM_PINS = {(gpio_num_t)CONFIG_MOTOR_F
                                                       (gpio_num_t)CONFIG_MOTOR_BR_PWM_GPIO,
                                                       (gpio_num_t)CONFIG_MOTOR_FR_PWM_GPIO};
 
-constexpr std::array<gpio_num_t, 4> MOTOR_DIR_PINS = {(gpio_num_t)CONFIG_MOTOR_FL_DIR_GPIO,
-                                                      (gpio_num_t)CONFIG_MOTOR_BL_DIR_GPIO,
-                                                      (gpio_num_t)CONFIG_MOTOR_BR_DIR_GPIO,
-                                                      (gpio_num_t)CONFIG_MOTOR_FR_DIR_GPIO};
+constexpr std::array<uint8_t, 4> MOTOR_DIR_BITS = {CONFIG_SHIFT_REGISTER_DIR1_BIT,
+                                                   CONFIG_SHIFT_REGISTER_DIR2_BIT,
+                                                   CONFIG_SHIFT_REGISTER_DIR3_BIT,
+                                                   CONFIG_SHIFT_REGISTER_DIR4_BIT};
 
 constexpr std::array<ledc_channel_t, 4> MOTOR_CHANNELS = {
   LEDC_CHANNEL_1, LEDC_CHANNEL_2, LEDC_CHANNEL_3, LEDC_CHANNEL_4};
@@ -31,17 +34,39 @@ constexpr uint32_t MAX_DUTY = (1 << static_cast<int>(DUTY_RESOLUTION)) - 1;
 }  // namespace test
 }  // namespace config
 
+static DigitalOutputExpander s_output_expander;
+static bool s_output_expander_initialized = false;
+
 void setUp(void)
 {
+    if (!s_output_expander_initialized)
+    {
+        spi_bus_config_t bus_config = {};
+        bus_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
+        bus_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
+        bus_config.sclk_io_num = (gpio_num_t)CONFIG_SCLK_GPIO;
+        bus_config.quadwp_io_num = -1;
+        bus_config.quadhd_io_num = -1;
+        TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
+        SPIdev::init(SPI2_HOST);
+        DigitalOutputExpander::Config expander_config = {
+          .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
+          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
+          .clock_hz = 1000000};
+        TEST_ASSERT_EQUAL(ESP_OK, s_output_expander.init(expander_config));
+        s_output_expander_initialized = true;
+    }
+
     config::driver::MotorDriverConfig motor_cfg;
     motor_cfg.timer = LEDC_TIMER_0;
     motor_cfg.speed_mode = LEDC_LOW_SPEED_MODE;
     motor_cfg.duty_resolution = config::test::DUTY_RESOLUTION;
     motor_cfg.pwm_freq = config::test::PWM_FREQ;
     motor_cfg.motor_pwm_pins = config::test::MOTOR_PWM_PINS;
-    motor_cfg.motor_dir_pins = config::test::MOTOR_DIR_PINS;
     motor_cfg.motor_channels = config::test::MOTOR_CHANNELS;
-    BL48250::get_instance().configure(motor_cfg);
+    motor_cfg.direction_expander = &s_output_expander;
+    motor_cfg.direction_bits = config::test::MOTOR_DIR_BITS;
+    TEST_ASSERT_EQUAL(ESP_OK, BL48250::get_instance().configure(motor_cfg));
 }
 
 void tearDown(void)

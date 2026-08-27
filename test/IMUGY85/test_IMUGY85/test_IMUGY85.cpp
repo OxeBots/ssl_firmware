@@ -25,15 +25,11 @@ void test_initialization(void)
 {
     ESP_LOGI(TAG, "Initializing IMU sensors...");
     esp_err_t err = imu.init();
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err, "IMUGY85 initialization failed");
+    TEST_ASSERT_TRUE(imu.is_initialized());
 
     // Allow hardware to settle and initial readings to stabilize
     vTaskDelay(200 / portTICK_PERIOD_MS);
-
-    // Report result but don't fail hard — I2C errors may be wiring-related
-    if (err != ESP_OK)
-    {
-        ESP_LOGW(TAG, "IMU init returned %d — sensor may not be connected.", err);
-    }
 }
 
 void test_raw_acceleration(void)

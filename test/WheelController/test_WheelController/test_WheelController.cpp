@@ -1,3 +1,7 @@
+#include <DigitalOutputExpander.h>
+#include <EncoderMux.h>
+#include <SPIdev.h>
+#include <driver/spi_master.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <sdkconfig.h>
@@ -22,10 +26,10 @@ constexpr std::array<gpio_num_t, 4> MOTOR_PWM_PINS = {(gpio_num_t)CONFIG_MOTOR_F
                                                       (gpio_num_t)CONFIG_MOTOR_BR_PWM_GPIO,
                                                       (gpio_num_t)CONFIG_MOTOR_FR_PWM_GPIO};
 
-constexpr std::array<gpio_num_t, 4> MOTOR_DIR_PINS = {(gpio_num_t)CONFIG_MOTOR_FL_DIR_GPIO,
-                                                      (gpio_num_t)CONFIG_MOTOR_BL_DIR_GPIO,
-                                                      (gpio_num_t)CONFIG_MOTOR_BR_DIR_GPIO,
-                                                      (gpio_num_t)CONFIG_MOTOR_FR_DIR_GPIO};
+constexpr std::array<uint8_t, 4> MOTOR_DIR_BITS = {CONFIG_SHIFT_REGISTER_DIR1_BIT,
+                                                   CONFIG_SHIFT_REGISTER_DIR2_BIT,
+                                                   CONFIG_SHIFT_REGISTER_DIR3_BIT,
+                                                   CONFIG_SHIFT_REGISTER_DIR4_BIT};
 
 constexpr std::array<ledc_channel_t, 4> MOTOR_CHANNELS = {
   LEDC_CHANNEL_0, LEDC_CHANNEL_1, LEDC_CHANNEL_2, LEDC_CHANNEL_3};
@@ -42,6 +46,8 @@ const std::array<adc_channel_t, 4> WHEEL_ADC_CHANNELS = {
 }  // namespace config
 
 static i2c_master_bus_handle_t bus_handle;
+static DigitalOutputExpander output_expander;
+static EncoderMux encoder_mux;
 
 void setUp(void)
 {
@@ -51,6 +57,25 @@ void setUp(void)
 
     // NVS
     NVSManager::init();
+
+    // SPI for the 74HC595 direction and encoder selector outputs
+    spi_bus_config_t spi_config = {};
+    spi_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
+    spi_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
+    spi_config.sclk_io_num = (gpio_num_t)CONFIG_SCLK_GPIO;
+    spi_config.quadwp_io_num = -1;
+    spi_config.quadhd_io_num = -1;
+    TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &spi_config, SPI_DMA_CH_AUTO));
+    SPIdev::init(SPI2_HOST);
+    DigitalOutputExpander::Config expander_config = {
+      .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
+      .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
+      .clock_hz = 1000000};
+    TEST_ASSERT_EQUAL(ESP_OK, output_expander.init(expander_config));
+    EncoderMux::Config mux_config = {.select_a_bit = CONFIG_SHIFT_REGISTER_MUX_A_BIT,
+                                     .select_b_bit = CONFIG_SHIFT_REGISTER_MUX_B_BIT,
+                                     .inhibit_bit = CONFIG_SHIFT_REGISTER_MUX_INH_BIT};
+    TEST_ASSERT_EQUAL(ESP_OK, encoder_mux.init(&output_expander, mux_config));
 
     // I2C for AS5600
     i2c_master_bus_config_t i2c_mst_config = {
@@ -66,7 +91,8 @@ void setUp(void)
     I2Cdev::init(bus_handle);
 
     // ADC / Estimator
-    WheelStateEstimator::get_instance().init(config::test::WHEEL_ADC_CHANNELS, ADC_ATTEN_DB_12);
+    WheelStateEstimator::get_instance().init(
+      config::test::WHEEL_ADC_CHANNELS, ADC_ATTEN_DB_12, &encoder_mux);
 
     // Motor driver singleton
     config::driver::MotorDriverConfig motor_cfg;
@@ -75,11 +101,10 @@ void setUp(void)
     motor_cfg.duty_resolution = config::test::DUTY_RESOLUTION;
     motor_cfg.pwm_freq = config::test::PWM_FREQ;
     motor_cfg.motor_pwm_pins = config::test::MOTOR_PWM_PINS;
-    motor_cfg.motor_dir_pins = config::test::MOTOR_DIR_PINS;
     motor_cfg.motor_channels = config::test::MOTOR_CHANNELS;
-    BL48250::get_instance().configure(motor_cfg);
-
-    for (auto pin : config::test::MOTOR_DIR_PINS) gpio_set_direction(pin, GPIO_MODE_INPUT_OUTPUT);
+    motor_cfg.direction_expander = &output_expander;
+    motor_cfg.direction_bits = config::test::MOTOR_DIR_BITS;
+    TEST_ASSERT_EQUAL(ESP_OK, BL48250::get_instance().configure(motor_cfg));
 
     initialized = true;
 }
