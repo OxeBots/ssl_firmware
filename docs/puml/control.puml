@@ -9,12 +9,12 @@ top to bottom direction
 
 package "Command and Cascaded Motion" #EFF6FF {
     component "ProtocolHandler\nPRIORITY_DONE" as Protocol <<implemented>>
-    queue "CommandInbox\nRobotCommand FIFO + receive time\nPRIORITY_P0" as CommandInbox <<target>>
-    component "SafetySupervisor\ntimeout + health gates + ball alignment + collision guard\nPRIORITY_P0" as SafetySupervisor <<target>>
+    queue "CommandInbox\nRobotCommand FIFO + receive time\nPRIORITY_P0" as CommandInbox <<implemented>>
+    component "SafetySupervisor\ntimeout + health gates + collision guard\nPRIORITY_P0" as SafetySupervisor <<implemented>>
 
     package "CascadedMotionController" #F8FAFC {
-        component "PoseController\nposition + heading\nPRIORITY_P1" as PoseController <<target>>
-        component "VelocityController\nvx + vy + angular velocity\nPRIORITY_P1" as VelocityController <<target>>
+        component "PoseController\nposition + heading\nPRIORITY_P1" as PoseController <<implemented>>
+        component "VelocityController\nvx + vy + angular velocity\nPRIORITY_P1" as VelocityController <<implemented>>
         component "OmnidirectionalInvKinematics\nPRIORITY_DONE" as Kinematics <<implemented>>
 
         PoseController -down-> VelocityController : <back:#FFFFFF>body-velocity setpoint</back>
@@ -41,10 +41,10 @@ package "Command and Cascaded Motion" #EFF6FF {
 }
 
 package "Typed Feedback" #FFF7ED {
-    database "LocalPerceptionState\nball pose + obstacle ranges + validity\nPRIORITY_P2" as ToFState <<target>>
-    database "RobotStateEstimate\npose + body velocity + validity\nPRIORITY_P1" as RobotState <<target>>
-    database "WheelStateEstimate\nangle + velocity + validity\nPRIORITY_P0" as WheelState <<target>>
-    database "HEALTH_STATE_LABEL" as HealthState <<target>>
+    database "LocalPerceptionState\nnearest range + obstacle validity\nPRIORITY_P2" as ToFState <<partial>>
+    database "RobotStateEstimate\npose + body velocity + validity\nPRIORITY_P1" as RobotState <<implemented>>
+    database "WheelStateEstimate\nangle + velocity + validity\nPRIORITY_P0" as WheelState <<implemented>>
+    database "HEALTH_STATE_LABEL" as HealthState <<implemented>>
 
     ToFState -[hidden]down-> RobotState
     RobotState -[hidden]down-> WheelState

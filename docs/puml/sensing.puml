@@ -38,10 +38,10 @@ package "Acquisition and Estimation Implementations" as SensingLane #F8FAFC {
     component "OrientationHandler\ninterrupt-paced acquisition + calibrated AHRS\nPRIORITY_P1" as Orientation <<partial>>
     component "ToFPerceptionService\nvalidated range-frame publication\nPRIORITY_P2" as ToFPerception <<partial>>
     component "WheelStateEstimator\nAS5600 angle + FB velocity fusion\nPRIORITY_P0" as WheelEstimator <<partial>>
-    component "PowerMonitor\nVMON conversion + limits\nPRIORITY_P0" as PowerMonitor <<target>>
-    component "RobotStateEstimator\nvision pose + odometry + IMU fusion\nPRIORITY_P1" as RobotEstimator <<target>>
-    database "BaseStationPose\nvision pose + timestamp\nPRIORITY_P1" as BasePose <<target>>
-    database "RobotStateEstimate\npose + velocity + perception + health\nPRIORITY_P1" as RobotState <<target>>
+    component "PowerMonitor\nVMON sample conversion + limits\nPRIORITY_P0" as PowerMonitor <<implemented>>
+    component "RobotStateEstimator\nvision pose + odometry + IMU fusion\nPRIORITY_P1" as RobotEstimator <<implemented>>
+    database "BaseStationPose\nvision pose + timestamp\nPRIORITY_P1" as BasePose <<implemented>>
+    database "RobotStateEstimate\npose + velocity + perception + health\nPRIORITY_P1" as RobotState <<implemented>>
 
     Orientation -down-> RobotEstimator : <back:#FFFFFF>IMU state</back>
     WheelEstimator -down-> RobotEstimator : <back:#FFFFFF>odometry</back>
@@ -51,9 +51,9 @@ package "Acquisition and Estimation Implementations" as SensingLane #F8FAFC {
 }
 
 package "Health Monitoring Implementation" as HealthLane #FFF7ED {
-    database "HEALTH_OBSERVATION_FRAME_LABEL" as HealthObservations <<target>>
-    component "HealthMonitor\nconsistency checks + fault classification\nPRIORITY_P0" as HealthMonitor <<target>>
-    database "HEALTH_STATE_LABEL" as HealthState <<target>>
+    database "HEALTH_OBSERVATION_FRAME_LABEL" as HealthObservations <<implemented>>
+    component "HealthMonitor\nconsistency checks + fault classification\nPRIORITY_P0" as HealthMonitor <<implemented>>
+    database "HEALTH_STATE_LABEL" as HealthState <<implemented>>
 
     HealthObservations -right-> HealthMonitor : <back:#FFFFFF>typed observations</back>
     HealthMonitor -right-> HealthState : <back:#FFFFFF>diagnosed HealthState</back>

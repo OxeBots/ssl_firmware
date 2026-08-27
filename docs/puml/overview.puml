@@ -25,13 +25,13 @@ cloud "USB radio bridge\n+ nRF24L01+" as RadioLink #FEF3C7
 
 package "Robot - ESP32 Firmware" #F0FDF4 {
     component "ProtocolHandler\ndecode + dispatch\nPRIORITY_DONE" as Transport <<implemented>>
-    component "CommandInbox\nFIFO + receive timestamps\nPRIORITY_P0" as Commands <<target>>
-    component "LifecycleSupervisor\ncommand authority + safety\nPRIORITY_P0" as Safety <<target>>
-    component "HealthMonitor\nHealthObservationFrame -> HealthState\nPRIORITY_P0" as Health <<target>>
-    component "CascadedMotionController\npose + velocity + kinematics\nPRIORITY_P1" as Control <<target>>
+    component "CommandInbox\nFIFO + receive timestamps\nPRIORITY_P0" as Commands <<implemented>>
+    component "LifecycleSupervisor\ncommand authority + safety\nPRIORITY_P0" as Safety <<implemented>>
+    component "HealthMonitor\nHealthObservationFrame -> HealthState\nPRIORITY_P0" as Health <<implemented>>
+    component "CascadedMotionController\npose + velocity + kinematics\nPRIORITY_P1" as Control <<implemented>>
     component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<implemented>>
     component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<implemented>>
-    component "RobotStateEstimator\npose + velocity + perception fusion\nPRIORITY_P1" as State <<target>>
+    component "RobotStateEstimator\npose + velocity + perception fusion\nPRIORITY_P1" as State <<implemented>>
     component "NVSManager\nserialized persistence\nPRIORITY_DONE" as Persistence <<implemented>>
 
     Transport -down-> Commands : <back:#FFFFFF>validated command</back>

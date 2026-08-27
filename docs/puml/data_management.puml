@@ -15,7 +15,7 @@ package "Runtime Producers" as ProducerLane #EFF6FF {
     component "KickerClient::task\nstatus + command exchange\nPRIORITY_P2" as KickerTask <<target>>
     component "NRF24L01::receiver_task\nRX events + TX queue\nPRIORITY_DONE" as RadioTask <<implemented>>
     component "ProtocolHandler::on_packet\ndecode + address filter\nPRIORITY_DONE" as Protocol <<implemented>>
-    queue "CommandInbox\nRobotCommand FIFO + receive times\nPRIORITY_P0" as CommandInbox <<target>>
+    queue "CommandInbox\nRobotCommand FIFO + receive times\nPRIORITY_P0" as CommandInbox <<implemented>>
 
     RadioTask -right-> Protocol : <back:#FFFFFF>received frame</back>
     Protocol -right-> CommandInbox : <back:#FFFFFF>decoded command</back>
@@ -23,13 +23,13 @@ package "Runtime Producers" as ProducerLane #EFF6FF {
 
 package "State Data and Estimation" as StateData #FFF7ED {
     component "WheelStateEstimator\nangle + FB velocity fusion\nPRIORITY_P0" as WheelEstimator <<partial>>
-    database "WheelStateEstimate\nangle + velocity + timestamp + validity\nPRIORITY_P0" as WheelState <<target>>
+    database "WheelStateEstimate\nangle + velocity + timestamp + validity\nPRIORITY_P0" as WheelState <<implemented>>
     database "ImuState\nacceleration + velocity + orientation\nPRIORITY_P1" as ImuState <<partial>>
-    database "LocalPerceptionState\nball pose + obstacle ranges\nPRIORITY_P2" as LocalState <<target>>
-    database "BaseStationPose\nvision pose + timestamp\nPRIORITY_P1" as BasePose <<target>>
-    database "FusionInputFrame\nsynchronized values + validity\nPRIORITY_P1" as FusionInputs <<target>>
-    component "RobotStateEstimator\nvision pose + odometry + IMU fusion\nPRIORITY_P1" as StateEstimator <<target>>
-    database "RobotStateEstimate\npose + velocity + perception + health\nPRIORITY_P1" as RobotState <<target>>
+    database "LocalPerceptionState\nnearest range + obstacle validity\nPRIORITY_P2" as LocalState <<partial>>
+    database "BaseStationPose\nvision pose + timestamp\nPRIORITY_P1" as BasePose <<implemented>>
+    database "FusionInputFrame\nsynchronized values + validity\nPRIORITY_P1" as FusionInputs <<implemented>>
+    component "RobotStateEstimator\nvision pose + odometry + IMU fusion\nPRIORITY_P1" as StateEstimator <<implemented>>
+    database "RobotStateEstimate\npose + velocity + perception + health\nPRIORITY_P1" as RobotState <<implemented>>
 
     WheelEstimator -down-> WheelState
     WheelState -down-> FusionInputs
@@ -41,19 +41,19 @@ package "State Data and Estimation" as StateData #FFF7ED {
 }
 
 package "Health Monitoring" as HealthLane #F8FAFC {
-    database "HEALTH_OBSERVATION_FRAME_LABEL" as HealthObservations <<target>>
-    component "HealthMonitor::update\nconsistency + stall diagnosis\nPRIORITY_P0" as HealthMonitor <<target>>
-    database "HEALTH_STATE_LABEL" as HealthState <<target>>
+    database "HEALTH_OBSERVATION_FRAME_LABEL" as HealthObservations <<implemented>>
+    component "HealthMonitor::update\nconsistency + stall diagnosis\nPRIORITY_P0" as HealthMonitor <<implemented>>
+    database "HEALTH_STATE_LABEL" as HealthState <<implemented>>
 
     HealthObservations -right-> HealthMonitor : <back:#FFFFFF>typed observations</back>
     HealthMonitor -right-> HealthState : <back:#FFFFFF>diagnosed HealthState</back>
 }
 
 package "Control and Publication" as ControlLane #F0FDF4 {
-    component "SafetySupervisor\ncommand timeout + ToF goal adjustment\nPRIORITY_P0" as SafetySupervisor <<target>>
-    database "GoalPose\ncollision-constrained + ball-aligned\nPRIORITY_P1" as GoalPose <<target>>
-    component "CascadedMotionController\npose -> body velocity -> wheel speed\nPRIORITY_P1" as CascadedControl <<target>>
-    database "ActuationSetpoint\nwheel targets + kick + inhibit\nPRIORITY_P0" as ActuationSetpoint <<target>>
+    component "SafetySupervisor\ncommand timeout + ToF goal adjustment\nPRIORITY_P0" as SafetySupervisor <<implemented>>
+    database "GoalPose\ncollision-constrained + kick gate\nPRIORITY_P1" as GoalPose <<implemented>>
+    component "CascadedMotionController\npose -> body velocity -> wheel speed\nPRIORITY_P1" as CascadedControl <<implemented>>
+    database "ActuationSetpoint\nwheel targets + kick + inhibit\nPRIORITY_P0" as ActuationSetpoint <<implemented>>
     component "WheelController::control_task\n100 Hz PID x4\nPRIORITY_DONE" as WheelTask <<implemented>>
     component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<implemented>>
     component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<implemented>>
