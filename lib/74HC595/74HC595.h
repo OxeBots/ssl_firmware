@@ -1,11 +1,11 @@
-#ifndef SN74HC595_H
-#define SN74HC595_H
+#ifndef _74HC595_H_
+#define _74HC595_H_
 
 #include <driver/gpio.h>
 #include <esp_err.h>
 #include <stdint.h>
 
-class SN74HC595
+class HC595
 {
    public:
     static constexpr uint8_t DEFAULT_DEVICE_KEY = 0xFE;
@@ -17,7 +17,7 @@ class SN74HC595
         uint32_t clock_hz = 1000000;
     };
 
-    SN74HC595() = default;
+    HC595() = default;
 
     esp_err_t init(const Config & config, uint8_t initial_value = 0);
     esp_err_t write(uint8_t value);
@@ -32,4 +32,4 @@ class SN74HC595
     bool m_initialized = false;
 };
 
-#endif  // SN74HC595_H
+#endif  // _74HC595_H_

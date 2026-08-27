@@ -10,10 +10,10 @@ top to bottom direction
 package "Shared SPI Implementations" #EFF6FF {
     component "SPIdev\nMOSI GPIO23, MISO GPIO19, SCLK GPIO18\nPRIORITY_P0" as SPIBus <<implemented>>
     component "NRF24L01\nnRF24L01+ driver; CE GPIO2, CSN GPIO0, IRQ GPIO4\nPRIORITY_DONE" as Radio <<implemented>>
-    component "SN74HC595\n8-bit output shift register; RCKSR GPIO17\nPRIORITY_P0" as SN74HC595Driver <<implemented>>
+    component "74HC595\n8-bit output shift register; RCKSR GPIO17\nPRIORITY_P0" as HC595Driver <<implemented>>
 
     SPIBus -down-> Radio : <back:#FFFFFF>serialized transaction</back>
-    SPIBus -down-> SN74HC595Driver : <back:#FFFFFF>serialized transaction</back>
+    SPIBus -down-> HC595Driver : <back:#FFFFFF>serialized transaction</back>
 }
 
 package "Shared I2C Implementations" as I2CLane #F0FDF4 {
@@ -59,7 +59,7 @@ package "Health Monitoring Implementation" as HealthLane #FFF7ED {
     HealthMonitor -right-> HealthState : <back:#FFFFFF>diagnosed HealthState</back>
 }
 
-SN74HC595Driver -down-> CD4052B : <back:#FFFFFF>calibration select bits</back>
+HC595Driver -down-> CD4052B : <back:#FFFFFF>calibration select bits</back>
 IMUDriver -down-> Orientation : <back:#FFFFFF>fixed-rate data-ready interrupts</back>
 ToFDriver -down-> ToFPerception : <back:#FFFFFF>range frames</back>
 ADCService -down-> WheelEstimator : <back:#FFFFFF>primary wheel angle</back>

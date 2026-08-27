@@ -1,4 +1,4 @@
-#include <SN74HC595.h>
+#include <74HC595.h>
 #include <SPIdev.h>
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
@@ -6,7 +6,7 @@
 #include <sdkconfig.h>
 #include <unity.h>
 
-static SN74HC595 s_expander;
+static HC595 s_expander;
 
 void setup_expander()
 {
@@ -19,9 +19,9 @@ void setup_expander()
     TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
     SPIdev::init(SPI2_HOST);
 
-    SN74HC595::Config config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
-                                .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
-                                .clock_hz = 1000000};
+    HC595::Config config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
+                            .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
+                            .clock_hz = 1000000};
     TEST_ASSERT_EQUAL(ESP_OK, s_expander.init(config));
 }
 

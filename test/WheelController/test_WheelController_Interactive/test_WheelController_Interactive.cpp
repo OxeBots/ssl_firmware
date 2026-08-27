@@ -1,5 +1,5 @@
+#include <74HC595.h>
 #include <CD4052B.h>
-#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
@@ -51,7 +51,7 @@ const std::array<adc_channel_t, 4> WHEEL_ADC_CHANNELS = {
 }  // namespace test
 }  // namespace config
 
-static SN74HC595 s_shift_register;
+static HC595 s_shift_register;
 static CD4052B s_cd4052b;
 
 // Serial buffer
@@ -264,7 +264,7 @@ void test_wheel_controller_interactive()
         // NVS
         NVSManager::init();
 
-        // SPI for the SN74HC595 direction and encoder selector outputs
+        // SPI for the 74HC595 direction and encoder selector outputs
         spi_bus_config_t spi_config = {};
         spi_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
         spi_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
@@ -273,10 +273,9 @@ void test_wheel_controller_interactive()
         spi_config.quadhd_io_num = -1;
         spi_bus_initialize(SPI2_HOST, &spi_config, SPI_DMA_CH_AUTO);
         SPIdev::init(SPI2_HOST);
-        SN74HC595::Config expander_config = {
-          .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
-          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
-          .clock_hz = 1000000};
+        HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
+                                         .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
+                                         .clock_hz = 1000000};
         TEST_ASSERT_EQUAL(ESP_OK, s_shift_register.init(expander_config));
         CD4052B::Config mux_config = {.select_a_bit = CONFIG_SHIFT_REGISTER_MUX_A_BIT,
                                       .select_b_bit = CONFIG_SHIFT_REGISTER_MUX_B_BIT,

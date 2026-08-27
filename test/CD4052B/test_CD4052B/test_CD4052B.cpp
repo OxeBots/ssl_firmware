@@ -1,5 +1,5 @@
+#include <74HC595.h>
 #include <CD4052B.h>
-#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <sdkconfig.h>
@@ -7,7 +7,7 @@
 
 #include <array>
 
-static SN74HC595 s_expander;
+static HC595 s_expander;
 static CD4052B s_mux;
 
 void setup_mux()
@@ -21,9 +21,9 @@ void setup_mux()
     TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
     SPIdev::init(SPI2_HOST);
 
-    SN74HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
-                                         .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
-                                         .clock_hz = 1000000};
+    HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
+                                     .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
+                                     .clock_hz = 1000000};
     TEST_ASSERT_EQUAL(ESP_OK, s_expander.init(expander_config));
 
     CD4052B::Config mux_config = {.select_a_bit = CONFIG_SHIFT_REGISTER_MUX_A_BIT,

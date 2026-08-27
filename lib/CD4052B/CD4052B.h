@@ -4,7 +4,7 @@
 #include <esp_err.h>
 #include <stdint.h>
 
-#include "SN74HC595.h"
+#include "74HC595.h"
 
 class CD4052B
 {
@@ -18,7 +18,7 @@ class CD4052B
 
     CD4052B() = default;
 
-    esp_err_t init(SN74HC595 * shift_register, const Config & config);
+    esp_err_t init(HC595 * shift_register, const Config & config);
     esp_err_t select(uint8_t channel);
     esp_err_t disable();
 
@@ -26,7 +26,7 @@ class CD4052B
     bool is_enabled() const;
 
    private:
-    SN74HC595 * m_shift_register = nullptr;
+    HC595 * m_shift_register = nullptr;
     Config m_config = {};
     uint8_t m_selected_channel = 0;
     bool m_enabled = false;

@@ -1,18 +1,18 @@
 /**
- * @file SN74HC595.cpp
- * @brief Driver for the SPI-connected SN74HC595 output shift register.
+ * @file 74HC595.cpp
+ * @brief Driver for the SPI-connected 74HC595 output shift register.
  */
 
-#include "SN74HC595.h"
+#include "74HC595.h"
 
 #include <driver/spi_master.h>
 #include <esp_log.h>
 
 #include "SPIdev.h"
 
-static const char * TAG = "SN74HC595";
+static const char * TAG = "74HC595";
 
-esp_err_t SN74HC595::init(const Config & config, uint8_t initial_value)
+esp_err_t HC595::init(const Config & config, uint8_t initial_value)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
@@ -29,7 +29,7 @@ esp_err_t SN74HC595::init(const Config & config, uint8_t initial_value)
 
     if (!SPIdev::register_device(config.device_key, &device_config))
     {
-        ESP_LOGE(TAG, "Failed to register SN74HC595 on SPI device key %u", config.device_key);
+        ESP_LOGE(TAG, "Failed to register 74HC595 on SPI device key %u", config.device_key);
         return ESP_FAIL;
     }
 
@@ -47,7 +47,7 @@ esp_err_t SN74HC595::init(const Config & config, uint8_t initial_value)
     return write(initial_value);
 }
 
-esp_err_t SN74HC595::write(uint8_t value)
+esp_err_t HC595::write(uint8_t value)
 {
     if (!m_initialized)
         return ESP_ERR_INVALID_STATE;
@@ -66,18 +66,18 @@ esp_err_t SN74HC595::write(uint8_t value)
     return err;
 }
 
-esp_err_t SN74HC595::update_mask(uint8_t mask, uint8_t value)
+esp_err_t HC595::update_mask(uint8_t mask, uint8_t value)
 {
     const uint8_t next = static_cast<uint8_t>((m_output & ~mask) | (value & mask));
     return write(next);
 }
 
-uint8_t SN74HC595::get_output() const
+uint8_t HC595::get_output() const
 {
     return m_output;
 }
 
-bool SN74HC595::is_initialized() const
+bool HC595::is_initialized() const
 {
     return m_initialized;
 }

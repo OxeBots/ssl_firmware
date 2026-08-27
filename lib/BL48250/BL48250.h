@@ -11,7 +11,7 @@
 
 #include "constants.h"
 
-class SN74HC595;
+class HC595;
 
 namespace config
 {
@@ -32,10 +32,10 @@ struct MotorDriverConfig
     uint32_t pwm_freq;
     std::array<gpio_num_t, 4> motor_pwm_pins;
     // Used only when direction_shift_register is null. The production schematic
-    // routes these four signals through the SN74HC595.
+    // routes these four signals through the 74HC595.
     std::array<gpio_num_t, 4> motor_dir_pins{};
     std::array<ledc_channel_t, 4> motor_channels;
-    SN74HC595 * direction_shift_register = nullptr;
+    HC595 * direction_shift_register = nullptr;
     std::array<uint8_t, 4> direction_bits = {0, 1, 2, 3};
 };
 }  // namespace driver
@@ -68,7 +68,7 @@ class BL48250
     std::array<gpio_num_t, 4> motor_pwm_pins_;
     std::array<gpio_num_t, 4> motor_dir_pins_;
     std::array<ledc_channel_t, 4> motor_channels_;
-    SN74HC595 * direction_shift_register_;
+    HC595 * direction_shift_register_;
     std::array<uint8_t, 4> direction_bits_;
     uint8_t direction_mask_;
     uint32_t max_duty_;

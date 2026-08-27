@@ -1,6 +1,6 @@
 /**
  * @file CD4052B.cpp
- * @brief CD4052B analog switch control through the SN74HC595.
+ * @brief CD4052B analog switch control through the 74HC595.
  */
 
 #include "CD4052B.h"
@@ -14,7 +14,7 @@ static bool valid_bit(uint8_t bit)
     return bit < 8;
 }
 
-esp_err_t CD4052B::init(SN74HC595 * shift_register, const Config & config)
+esp_err_t CD4052B::init(HC595 * shift_register, const Config & config)
 {
     if (shift_register == nullptr || !shift_register->is_initialized() ||
         !valid_bit(config.select_a_bit) || !valid_bit(config.select_b_bit) ||

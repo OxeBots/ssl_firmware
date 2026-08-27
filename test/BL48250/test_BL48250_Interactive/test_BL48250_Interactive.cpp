@@ -1,5 +1,5 @@
+#include <74HC595.h>
 #include <BL48250.h>
-#include <SN74HC595.h>
 #include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
@@ -34,7 +34,7 @@ constexpr uint32_t MAX_DUTY = (1 << static_cast<int>(DUTY_RESOLUTION)) - 1;
 }  // namespace test
 }  // namespace config
 
-static SN74HC595 s_shift_register;
+static HC595 s_shift_register;
 static bool s_shift_register_initialized = false;
 
 void setUp(void)
@@ -49,10 +49,9 @@ void setUp(void)
         bus_config.quadhd_io_num = -1;
         TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
         SPIdev::init(SPI2_HOST);
-        SN74HC595::Config expander_config = {
-          .latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
-          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
-          .clock_hz = 1000000};
+        HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
+                                         .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
+                                         .clock_hz = 1000000};
         TEST_ASSERT_EQUAL(ESP_OK, s_shift_register.init(expander_config));
         s_shift_register_initialized = true;
     }

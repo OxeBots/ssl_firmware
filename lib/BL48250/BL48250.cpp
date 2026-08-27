@@ -1,6 +1,6 @@
 #include "BL48250.h"
 
-#include "SN74HC595.h"
+#include "74HC595.h"
 #include "helper_func.h"
 
 using namespace config::driver;
