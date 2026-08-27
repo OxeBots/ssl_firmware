@@ -118,7 +118,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(wse.init(enc_channels, ADC_ATTEN_DB_12));
 
     // 6: Radio initializes the shared SPI bus. The 74HC595 is then added to
-    // that bus as a device without chip select; its RCLK pin is the latch.
+    // that bus as a device without chip select; its RCKSR pin is the latch.
     SPIdev::init(SPI_HOST_ID);
     static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
     const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;

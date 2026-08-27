@@ -62,7 +62,9 @@ menu "Oxebots Robot Configuration"
             range 0 GPIO_MAX_INDEX
             default 17 if IDF_TARGET_ESP32
             help
-                GPIO connected to the 74HC595 RCLK latch input.
+                GPIO connected to the 74HC595 RCKSR latch input.
+                Schematic net: RCKSR.
+                ESP32 pin: GPIO17.
 
         config SHIFT_REGISTER_DEVICE_KEY
             int "SPI device key"
@@ -270,6 +272,15 @@ menu "Oxebots Robot Configuration"
                 Schematic net: GINT.
                 ESP32 pin: GPIO15.
 
+        config GY85_MDRDY_GPIO
+            int "Magnetometer data-ready GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 16 if IDF_TARGET_ESP32
+            help
+                Interrupt input from the GY-85 magnetometer data-ready output.
+                Schematic net: MDRDY.
+                ESP32 pin: GPIO16.
+
     endmenu
 
     menu "Time-of-Flight Sensor"
@@ -282,26 +293,6 @@ menu "Oxebots Robot Configuration"
                 Interrupt input from the VL53L5CX sensor.
                 Schematic net: INTTOF.
                 ESP32 pin: GPIO1.
-
-    endmenu
-
-    menu "Kicker Board Interface"
-
-        config KICKER_RCKSR_GPIO
-            int "RCKSR GPIO"
-            range 0 GPIO_MAX_INDEX
-            default 17 if IDF_TARGET_ESP32
-            help
-                Kicker-board RCKSR signal.
-                ESP32 pin: GPIO17.
-
-        config KICKER_MORDY_GPIO
-            int "MORDY GPIO"
-            range 0 GPIO_MAX_INDEX
-            default 16 if IDF_TARGET_ESP32
-            help
-                Kicker-board MORDY signal.
-                ESP32 pin: GPIO16.
 
     endmenu
 

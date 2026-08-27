@@ -10,7 +10,7 @@ top to bottom direction
 package "Shared SPI Implementations" #EFF6FF {
     component "SPIdev\nMOSI GPIO23, MISO GPIO19, SCLK GPIO18\nPRIORITY_P0" as SPIBus <<implemented>>
     component "NRF24L01\nnRF24L01+ driver; CE GPIO2, CSN GPIO0, IRQ GPIO4\nPRIORITY_DONE" as Radio <<implemented>>
-    component "DigitalOutputExpander\n74HC595 output byte + latch; RCLK GPIO17\nPRIORITY_P0" as OutputExpander <<implemented>>
+    component "DigitalOutputExpander\n74HC595 output byte + latch; RCKSR GPIO17\nPRIORITY_P0" as OutputExpander <<implemented>>
 
     SPIBus -down-> Radio : <back:#FFFFFF>serialized transaction</back>
     SPIBus -down-> OutputExpander : <back:#FFFFFF>serialized transaction</back>
@@ -18,7 +18,7 @@ package "Shared SPI Implementations" #EFF6FF {
 
 package "Shared I2C Implementations" as I2CLane #F0FDF4 {
     component "I2Cdev\nSDA GPIO21, SCL GPIO22\nPRIORITY_P1" as I2CBus <<partial>>
-    component "IMUGY85\nADXL345 + ITG3200 + QMC5883L drivers\ninterrupts GPIO5, GPIO15\nPRIORITY_DONE" as IMUDriver <<implemented>>
+    component "IMUGY85\nADXL345 + ITG3200 + QMC5883L drivers\ninterrupts GPIO5, GPIO15, GPIO16\nPRIORITY_DONE" as IMUDriver <<implemented>>
     component "VL53L5CX\nranging driver; INT GPIO1\nPRIORITY_P2" as ToFDriver <<implemented>>
     component "KickerClient\nSTM32 command + status\nPRIORITY_P2" as KickerClient <<target>>
     component "EncoderMux\n74HC4052 select + one AS5600 at 0x36\nPRIORITY_P3" as EncoderMux <<implemented>>

@@ -83,8 +83,9 @@ esp_err_t IMUGY85::init()
     // missed edge cannot leave the estimator stalled.
     gpio_config_t interrupt_config = {};
     interrupt_config.intr_type = GPIO_INTR_DISABLE;
-    interrupt_config.pin_bit_mask =
-      (1ULL << CONFIG_GY85_AINT1_GPIO) | (1ULL << CONFIG_GY85_GINT_GPIO);
+    interrupt_config.pin_bit_mask = (1ULL << CONFIG_GY85_AINT1_GPIO) |
+                                    (1ULL << CONFIG_GY85_GINT_GPIO) |
+                                    (1ULL << CONFIG_GY85_MDRDY_GPIO);
     interrupt_config.mode = GPIO_MODE_INPUT;
     interrupt_config.pull_up_en = GPIO_PULLUP_DISABLE;
     interrupt_config.pull_down_en = GPIO_PULLDOWN_DISABLE;

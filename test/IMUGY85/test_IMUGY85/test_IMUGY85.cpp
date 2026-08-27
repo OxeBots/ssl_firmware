@@ -1,8 +1,10 @@
+#include <driver/gpio.h>
 #include <driver/i2c_master.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <math.h>
+#include <sdkconfig.h>
 #include <unity.h>
 
 #include "IMUGY85.h"
@@ -27,6 +29,15 @@ void test_initialization(void)
     esp_err_t err = imu.init();
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err, "IMUGY85 initialization failed");
     TEST_ASSERT_TRUE(imu.is_initialized());
+
+    const gpio_num_t interrupt_pins[] = {static_cast<gpio_num_t>(CONFIG_GY85_AINT1_GPIO),
+                                         static_cast<gpio_num_t>(CONFIG_GY85_GINT_GPIO),
+                                         static_cast<gpio_num_t>(CONFIG_GY85_MDRDY_GPIO)};
+    for (gpio_num_t pin : interrupt_pins)
+    {
+        const int level = gpio_get_level(pin);
+        TEST_ASSERT_TRUE(level == 0 || level == 1);
+    }
 
     // Allow hardware to settle and initial readings to stabilize
     vTaskDelay(200 / portTICK_PERIOD_MS);
