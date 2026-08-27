@@ -1,0 +1,100 @@
+@startuml oxebots_architecture_overview
+title OxeBots Firmware Architecture - System Context and Migration Scope
+
+top to bottom direction
+
+!include style.iuml
+!include implementation_priorities.iuml
+!include health_types.iuml
+
+package "Competition and Base Station" #F8FAFC {
+    component "ssl_vision_client" as VisionClient
+    component "game_controller_client" as GameClient
+    component "world_model_node" as WorldModel
+    component "strategy_node" as Strategy
+    component "robot_gateway_node" as BaseGateway
+
+    VisionClient -down-> WorldModel : <back:#FFFFFF>robot + ball observations</back>
+    GameClient -down-> Strategy : <back:#FFFFFF>referee state</back>
+    WorldModel -down-> Strategy : <back:#FFFFFF>filtered world state</back>
+    WorldModel -down-> BaseGateway : <back:#FFFFFF>actual robot pose</back>
+    Strategy -down-> BaseGateway : <back:#FFFFFF>per-robot goal</back>
+}
+
+cloud "USB radio bridge\n+ nRF24L01+" as RadioLink #FEF3C7
+
+package "Robot - ESP32 Firmware" #F0FDF4 {
+    component "ProtocolHandler\ndecode + dispatch\nPRIORITY_DONE" as Transport <<implemented>>
+    component "CommandInbox\nFIFO + receive timestamps\nPRIORITY_P0" as Commands <<target>>
+    component "LifecycleSupervisor\ncommand authority + safety\nPRIORITY_P0" as Safety <<target>>
+    component "HealthMonitor\nHealthObservationFrame -> HealthState\nPRIORITY_P0" as Health <<target>>
+    component "CascadedMotionController\npose + velocity + kinematics\nPRIORITY_P1" as Control <<target>>
+    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<partial>>
+    component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<target>>
+    component "RobotStateEstimator\npose + velocity + perception fusion\nPRIORITY_P1" as State <<target>>
+    component "NVSManager\nserialized persistence\nPRIORITY_DONE" as Persistence <<implemented>>
+
+    Transport -down-> Commands : <back:#FFFFFF>validated command</back>
+    Commands -down-> Safety : <back:#FFFFFF>value + receive time</back>
+    Health -right-> Safety : <back:#FFFFFF>HealthState severity + inhibit reasons</back>
+    Safety -down-> Control : <back:#FFFFFF>permitted goal</back>
+    State <-left-> Safety : <back:#FFFFFF>pose down / state up</back>
+    Health -down-> State : <back:#FFFFFF>HealthState snapshot</back>
+    State -left-> Control : <back:#FFFFFF>pose + velocity feedback</back>
+    Control -down-> MotorOutput : <back:#FFFFFF>wheel setpoints</back>
+    MotorOutput -right-> OutputExpander : <back:#FFFFFF>direction-bit updates</back>
+    Persistence -up-> State : <back:#FFFFFF>identity + calibration</back>
+    State -up-> Transport : <back:#FFFFFF>telemetry snapshot</back>
+}
+
+package "Robot Electronics" #FAF5FF {
+    node "Main Board\nESP32 + 74HC595" as MainBoard
+    node "Four BL48250 Motors\n+AS5600 encoders " as Drive
+    node "GY-85 IMU +\nVL53L5CX ToF" as Sensors
+    node "Power Board\nVMON" as Power
+    node "Kicker Board\nSTM32 + high voltage" as Kicker
+
+    MainBoard -down-> Drive
+    MainBoard -down-> Sensors
+    MainBoard -down-> Power
+    MainBoard -down-> Kicker : <back:#FFFFFF>I2C</back>
+}
+
+BaseGateway <-down-> RadioLink : <back:#FFFFFF>commands down / telemetry up</back>
+RadioLink <-down-> Transport : <back:#FFFFFF>RF frames</back>
+MotorOutput -down-> MainBoard : <back:#FFFFFF>LEDC PWM</back>
+OutputExpander -down-> MainBoard : <back:#FFFFFF>latched direction outputs</back>
+MainBoard -up-> State : <back:#FFFFFF>sensor measurements</back>
+MainBoard -up-> Health : <back:#FFFFFF>device observations</back>
+
+note as StrategyNote
+  Global perception, tactics, roles and path planning
+  remain on the base station. The ESP32 owns bounded
+  execution, local safety, timing and hardware access.
+end note
+
+note as KickerNote
+  The ESP32 requests actions over I2C.
+  The STM32 owns charging, high-voltage protection,
+  discharge and bleeder sequencing.
+end note
+
+Strategy -left..-> StrategyNote
+Kicker -left..-> KickerNote
+
+legend bottom
+  |= Color |= Meaning |
+  |<#DCFCE7> Green | Implemented and compatible boundary |
+  |<#FEF3C7> Amber | Partially implemented |
+  |<#DBEAFE> Blue | Target component |
+  |<#FEE2E2> Red | Existing component to replace or adapt |
+  |= Priority |= Implementation order |
+  | P0 | Safety and drivable foundation |
+  | P1 | Closed-loop motion and state estimation |
+  | P2 | Local perception and game features |
+  | P3 | Calibration and tuning support |
+  | DONE | Compatible implementation already exists |
+  Priorities apply only to ESP32 firmware modules and runtime data types.
+endlegend
+
+@enduml

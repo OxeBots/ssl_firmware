@@ -1,0 +1,107 @@
+@startuml oxebots_lifecycle_safety_architecture
+title OxeBots Firmware Architecture - LifecycleSupervisor State Machine
+
+left to right direction
+
+!include style.iuml
+!include implementation_priorities.iuml
+!include health_types.iuml
+
+state "LifecycleState::BOOT" as Boot
+state "LifecycleState::SELF_TEST" as SelfTest
+state "LifecycleState::DISARMED" as Disarmed
+state "LifecycleState::ACTIVE" as Active
+state "LifecycleState::DEGRADED" as Degraded
+state "LifecycleState::SAFE_STOP" as SafeStop
+state "LifecycleState::CALIBRATION" as Calibration
+
+Boot : outputs forced safe
+Boot : load identity + calibration
+
+SelfTest : verify mandatory buses + actuators
+SelfTest : classify optional sensor failures
+
+Disarmed : PWM = 0
+Disarmed : kick inhibited
+
+Active : execute bounded motion command
+Active : kick only through independent gate
+
+Degraded : keep only capabilities marked safe
+Degraded : report fault + fallback in telemetry
+
+SafeStop : PWM = 0 before direction update
+SafeStop : kick inhibited
+SafeStop : latch reason in HealthState.latched_faults
+
+Calibration : wheel encoders + IMU sensors
+Calibration : wheel PID tuning
+Calibration : command execution disabled
+
+[*] -right-> Boot
+Boot -right-> SelfTest : <back:#FFFFFF>platform initialized</back>
+SelfTest -right-> Disarmed : <back:#FFFFFF>mandatory interfaces ready</back>
+Disarmed -right-> Active : <back:#FFFFFF>fresh permitted command</back>
+Active -right-> Degraded : <back:#FFFFFF>HealthState.severity = recoverable</back>
+
+Active -down-> SafeStop : <back:#FFFFFF>command timeout</back>\n<back:#FFFFFF>or HealthState.severity = critical</back>
+SafeStop -left-> Disarmed : <back:#FFFFFF>explicit clear + HealthState restored</back>
+Disarmed -down-> Calibration : <back:#FFFFFF>calibration request</back>
+
+note top of Active
+  LifecycleSupervisor PRIORITY_P0
+
+  LifecycleSupervisor command-authority order:
+  1. electrical + actuator safety
+  2. command freshness
+  3. calibration-mode
+  4. base-station motion + kick intent
+end note
+
+note right of SelfTest
+  Mandatory initialization failure enters SAFE_STOP.
+end note
+
+note right of Degraded
+  Recovery returns to ACTIVE.
+  Explicit disable returns to DISARMED.
+  A critical fault enters SAFE_STOP.
+
+  Examples:
+  - ToF unavailable: motion allowed, kick inhibited
+  - rejected magnetometer: use vision/gyro heading
+  - one wheel feedback source lost: use remaining estimate
+  - telemetry TX failure: receive until timeout
+end note
+
+note bottom of Calibration
+  Completion or cancellation returns to DISARMED.
+  Any unsafe condition enters SAFE_STOP.
+
+  Calibration routines include the accelerometer,
+  gyroscope, magnetometer and wheel encoders.
+end note
+
+note right of SafeStop
+  This transition is available from every mode for:
+  - command timeout
+  - unsafe supply voltage
+  - motor stall or implausible wheel motion
+  - loss of all feedback for any driven wheel
+end note
+
+legend bottom
+  |= Color |= Meaning |
+  |<#DCFCE7> Green | Implemented and compatible boundary |
+  |<#FEF3C7> Amber | Partially implemented |
+  |<#DBEAFE> Blue | Target component |
+  |<#FEE2E2> Red | Existing component to replace or adapt |
+  |= Priority |= Implementation order |
+  | P0 | Safety and drivable foundation |
+  | P1 | Closed-loop motion and state estimation |
+  | P2 | Local perception and game features |
+  | P3 | Calibration and tuning support |
+  | DONE | Compatible implementation already exists |
+endlegend
+
+@enduml

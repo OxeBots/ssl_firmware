@@ -1,0 +1,111 @@
+@startuml oxebots_runtime_architecture
+title OxeBots Firmware Architecture - Runtime Data, Fusion and Control Flow
+
+top to bottom direction
+
+!include style.iuml
+!include implementation_priorities.iuml
+!include health_types.iuml
+
+package "Runtime Producers" as ProducerLane #EFF6FF {
+    component "AdcAcquisitionService::task\nAS5600 + VMON\nPRIORITY_P0" as ADCTask <<partial>>
+    component "BL48250_FeedbackService::task\nFB wheel-velocity pulses\nPRIORITY_P0" as FBTask <<target>>
+    component "OrientationHandler::task_loop\ninterrupt-paced IMU\nPRIORITY_P1" as OrientationTask <<partial>>
+    component "ToFPerceptionService::task\nrange processing\nPRIORITY_P2" as ToFTask <<target>>
+    component "KickerClient::task\nstatus + command exchange\nPRIORITY_P2" as KickerTask <<target>>
+    component "NRF24L01::receiver_task\nRX events + TX queue\nPRIORITY_DONE" as RadioTask <<implemented>>
+    component "ProtocolHandler::on_packet\ndecode + address filter\nPRIORITY_DONE" as Protocol <<implemented>>
+    queue "CommandInbox\nRobotCommand FIFO + receive times\nPRIORITY_P0" as CommandInbox <<target>>
+
+    RadioTask -right-> Protocol : <back:#FFFFFF>received frame</back>
+    Protocol -right-> CommandInbox : <back:#FFFFFF>decoded command</back>
+}
+
+package "State Data and Estimation" as StateData #FFF7ED {
+    component "WheelStateEstimator\nangle + FB velocity fusion\nPRIORITY_P0" as WheelEstimator <<partial>>
+    database "WheelStateEstimate\nangle + velocity + timestamp + validity\nPRIORITY_P0" as WheelState <<target>>
+    database "ImuState\nacceleration + velocity + orientation\nPRIORITY_P1" as ImuState <<partial>>
+    database "LocalPerceptionState\nball pose + obstacle ranges\nPRIORITY_P2" as LocalState <<target>>
+    database "BaseStationPose\nvision pose + timestamp\nPRIORITY_P1" as BasePose <<target>>
+    database "FusionInputFrame\nsynchronized values + validity\nPRIORITY_P1" as FusionInputs <<target>>
+    component "RobotStateEstimator\nvision pose + odometry + IMU fusion\nPRIORITY_P1" as StateEstimator <<target>>
+    database "RobotStateEstimate\npose + velocity + perception + health\nPRIORITY_P1" as RobotState <<target>>
+
+    WheelEstimator -down-> WheelState
+    WheelState -down-> FusionInputs
+    ImuState -down-> FusionInputs
+    LocalState -down-> FusionInputs
+    BasePose -down-> FusionInputs
+    FusionInputs -down-> StateEstimator
+    StateEstimator -down-> RobotState
+}
+
+package "Health Monitoring" as HealthLane #F8FAFC {
+    database "HEALTH_OBSERVATION_FRAME_LABEL" as HealthObservations <<target>>
+    component "HealthMonitor::update\nconsistency + stall diagnosis\nPRIORITY_P0" as HealthMonitor <<target>>
+    database "HEALTH_STATE_LABEL" as HealthState <<target>>
+
+    HealthObservations -right-> HealthMonitor : <back:#FFFFFF>typed observations</back>
+    HealthMonitor -right-> HealthState : <back:#FFFFFF>diagnosed HealthState</back>
+}
+
+package "Control and Publication" as ControlLane #F0FDF4 {
+    component "SafetySupervisor\ncommand timeout + ToF goal adjustment\nPRIORITY_P0" as SafetySupervisor <<target>>
+    database "GoalPose\ncollision-constrained + ball-aligned\nPRIORITY_P1" as GoalPose <<target>>
+    component "CascadedMotionController\npose -> body velocity -> wheel speed\nPRIORITY_P1" as CascadedControl <<target>>
+    database "ActuationSetpoint\nwheel targets + kick + inhibit\nPRIORITY_P0" as ActuationSetpoint <<target>>
+    component "WheelController::control_task\n100 Hz PID x4\nPRIORITY_DONE" as WheelTask <<implemented>>
+    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<partial>>
+    component "DigitalOutputExpander\n74HC595 output byte + latch\nPRIORITY_P0" as OutputExpander <<target>>
+    component "Telemetry\nRobotTelemetry encoder\nPRIORITY_P1" as Telemetry <<partial>>
+
+    SafetySupervisor -down-> GoalPose
+    GoalPose -down-> CascadedControl
+    CascadedControl -down-> ActuationSetpoint
+    ActuationSetpoint -down-> WheelTask : <back:#FFFFFF>wheel-speed targets</back>
+    WheelTask -down-> MotorOutput : <back:#FFFFFF>signed duties</back>
+    MotorOutput -right-> OutputExpander : <back:#FFFFFF>direction-bit update</back>
+    RobotState -down-> Telemetry
+}
+
+package "Serialized Persistence" #FAF5FF {
+    component "NVSManager\noperation queue + sole writer task\nPRIORITY_DONE" as NVSManager <<implemented>>
+}
+
+ADCTask -down-> WheelEstimator : <back:#FFFFFF>angle samples</back>
+FBTask -down-> WheelEstimator : <back:#FFFFFF>velocity samples</back>
+OrientationTask -down-> ImuState
+ToFTask -down-> LocalState
+Protocol -down-> BasePose : <back:#FFFFFF>actual pose field</back>
+
+ProducerLane -[#94A3B8,dashed]down-> HealthObservations
+StateData -[#94A3B8,dashed]down-> HealthObservations
+ControlLane -[#94A3B8,dashed,norank]-> HealthObservations
+
+CommandInbox -down-> SafetySupervisor : <back:#FFFFFF>requested goal + age</back>
+RobotState -down-> SafetySupervisor : <back:#FFFFFF>pose + local safety state</back>
+HealthState -[norank]-> SafetySupervisor : <back:#FFFFFF>severity + inhibit reasons</back>
+HealthState -[norank]-> RobotState : <back:#FFFFFF>HealthState snapshot</back>
+RobotState -down-> CascadedControl : <back:#FFFFFF>pose + velocity feedback</back>
+ActuationSetpoint -right-> KickerTask : <back:#FFFFFF>kick / inhibit</back>
+Telemetry -up-> RadioTask : <back:#FFFFFF>queued telemetry frame</back>
+StateEstimator -right-> NVSManager : <back:#FFFFFF>calibration reads</back>
+
+RobotState -[hidden]down-> HealthObservations
+
+legend bottom
+  |= Color |= Meaning |
+  |<#DCFCE7> Green | Implemented and compatible boundary |
+  |<#FEF3C7> Amber | Partially implemented |
+  |<#DBEAFE> Blue | Target component |
+  |<#FEE2E2> Red | Existing component to replace or adapt |
+  |= Priority |= Implementation order |
+  | P0 | Safety and drivable foundation |
+  | P1 | Closed-loop motion and state estimation |
+  | P2 | Local perception and game features |
+  | P3 | Calibration and tuning support |
+  | DONE | Compatible implementation already exists |
+  Gray dashed arrows carry health observations.
+endlegend
+
+@enduml

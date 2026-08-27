@@ -1,0 +1,2 @@
+!define HEALTH_OBSERVATION_FRAME_LABEL HealthObservationFrame\nsupply + wheels[4] + sensors + kicker\nstatus + timestamps\nPRIORITY_P0
+!define HEALTH_STATE_LABEL HealthState\nsupply + wheels[4] + sensors + kicker\nstatus + severity\nactive/latched faults + inhibit reasons + timestamp\nPRIORITY_P0

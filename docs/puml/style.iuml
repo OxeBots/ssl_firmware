@@ -1,0 +1,35 @@
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam linetype polyline
+skinparam nodesep 65
+skinparam ranksep 75
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.8
+skinparam ArrowFontColor #0F172A
+skinparam ArrowFontStyle bold
+skinparam packageBorderColor #64748B
+skinparam componentBorderColor #475569
+skinparam defaultFontName SansSerif
+skinparam component<<implemented>> {
+    BackgroundColor #DCFCE7
+    BorderColor #15803D
+}
+skinparam component<<partial>> {
+    BackgroundColor #FEF3C7
+    BorderColor #B45309
+}
+skinparam component<<target>> {
+    BackgroundColor #DBEAFE
+    BorderColor #2563EB
+}
+skinparam component<<replace>> {
+    BackgroundColor #FEE2E2
+    BorderColor #B91C1C
+}
+skinparam state {
+    BackgroundColor #DBEAFE
+    BorderColor #2563EB
+    FontColor #0F172A
+}

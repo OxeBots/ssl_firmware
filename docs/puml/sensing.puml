@@ -1,0 +1,95 @@
+@startuml oxebots_sensing_architecture
+title OxeBots Firmware Architecture - Sensing, Acquisition and State Estimation
+
+top to bottom direction
+
+!include style.iuml
+!include implementation_priorities.iuml
+!include health_types.iuml
+
+package "Shared SPI Implementations" #EFF6FF {
+    component "SPIdev\nMOSI GPIO23, MISO GPIO19, SCLK GPIO18\nPRIORITY_P0" as SPIBus <<target>>
+    component "NRF24L01\nnRF24L01+ driver; CE GPIO2, CSN GPIO0, IRQ GPIO4\nPRIORITY_DONE" as Radio <<implemented>>
+    component "DigitalOutputExpander\n74HC595 output byte + latch; RCLK GPIO17\nPRIORITY_P0" as OutputExpander <<target>>
+
+    SPIBus -down-> Radio : <back:#FFFFFF>serialized transaction</back>
+    SPIBus -down-> OutputExpander : <back:#FFFFFF>serialized transaction</back>
+}
+
+package "Shared I2C Implementations" as I2CLane #F0FDF4 {
+    component "I2Cdev\nSDA GPIO21, SCL GPIO22\nPRIORITY_P1" as I2CBus <<partial>>
+    component "IMUGY85\nADXL345 + ITG3200 + QMC5883L drivers\ninterrupts GPIO5, GPIO16, GPIO15\nPRIORITY_DONE" as IMUDriver <<implemented>>
+    component "VL53L5CX\nranging driver; INT GPIO1\nPRIORITY_P2" as ToFDriver <<partial>>
+    component "KickerClient\nSTM32 command + status\nPRIORITY_P2" as KickerClient <<target>>
+    component "EncoderMux\n74HC4052 select + one AS5600 at 0x36\nPRIORITY_P3" as EncoderMux <<target>>
+
+    I2CBus -down-> IMUDriver
+    I2CBus -down-> ToFDriver
+    I2CBus -down-> KickerClient
+    I2CBus -down-> EncoderMux
+}
+
+package "ADC1 and Digital Motor Feedback Implementations" #FFF7ED {
+    component "AdcAcquisitionService\nAS5600 x4 + VMON continuous sampling\nGPIO36, GPIO35, GPIO34, GPIO39, GPIO33\nPRIORITY_P0" as ADCService <<partial>>
+    component "BL48250_FeedbackService\nMotor feedback velocity measurement x4\nGPIO25, GPIO27, GPIO13, GPIO3\nPRIORITY_P0" as FBService <<target>>
+}
+
+package "Acquisition and Estimation Implementations" as SensingLane #F8FAFC {
+    component "OrientationHandler\ninterrupt-paced acquisition + calibrated AHRS\nPRIORITY_P1" as Orientation <<partial>>
+    component "ToFPerceptionService\nball + obstacle extraction\nPRIORITY_P2" as ToFPerception <<target>>
+    component "WheelStateEstimator\nAS5600 angle + FB velocity fusion\nPRIORITY_P0" as WheelEstimator <<partial>>
+    component "PowerMonitor\nVMON conversion + limits\nPRIORITY_P0" as PowerMonitor <<target>>
+    component "RobotStateEstimator\nvision pose + odometry + IMU fusion\nPRIORITY_P1" as RobotEstimator <<target>>
+    database "BaseStationPose\nvision pose + timestamp\nPRIORITY_P1" as BasePose <<target>>
+    database "RobotStateEstimate\npose + velocity + perception + health\nPRIORITY_P1" as RobotState <<target>>
+
+    Orientation -down-> RobotEstimator : <back:#FFFFFF>IMU state</back>
+    WheelEstimator -down-> RobotEstimator : <back:#FFFFFF>odometry</back>
+    BasePose -down-> RobotEstimator : <back:#FFFFFF>global pose correction</back>
+    RobotEstimator -down-> RobotState
+    ToFPerception -down-> RobotState : <back:#FFFFFF>local perception</back>
+}
+
+package "Health Monitoring Implementation" as HealthLane #FFF7ED {
+    database "HEALTH_OBSERVATION_FRAME_LABEL" as HealthObservations <<target>>
+    component "HealthMonitor\nconsistency checks + fault classification\nPRIORITY_P0" as HealthMonitor <<target>>
+    database "HEALTH_STATE_LABEL" as HealthState <<target>>
+
+    HealthObservations -right-> HealthMonitor : <back:#FFFFFF>typed observations</back>
+    HealthMonitor -right-> HealthState : <back:#FFFFFF>diagnosed HealthState</back>
+}
+
+OutputExpander -down-> EncoderMux : <back:#FFFFFF>calibration select bits</back>
+IMUDriver -down-> Orientation : <back:#FFFFFF>fixed-rate data-ready interrupts</back>
+ToFDriver -down-> ToFPerception : <back:#FFFFFF>range frames</back>
+ADCService -down-> WheelEstimator : <back:#FFFFFF>primary wheel angle</back>
+FBService -down-> WheelEstimator : <back:#FFFFFF>primary wheel velocity</back>
+ADCService -down-> PowerMonitor : <back:#FFFFFF>VMON samples</back>
+
+SensingLane -[#94A3B8,dashed]down-> HealthObservations : <back:#FFFFFF>wheel + sensor + supply observations</back>
+I2CLane -[#94A3B8,dashed,norank]-> HealthObservations : <back:#FFFFFF>kicker</back>
+HealthState -[norank]-> RobotState : <back:#FFFFFF>HealthState snapshot</back>
+
+RobotState -[hidden]down-> HealthObservations
+
+note bottom of EncoderMux
+  Normal encoder operation uses four analog outputs.
+  I2C connects one AS5600 only during calibration.
+end note
+
+legend bottom
+  |= Color |= Meaning |
+  |<#DCFCE7> Green | Implemented and compatible boundary |
+  |<#FEF3C7> Amber | Partially implemented |
+  |<#DBEAFE> Blue | Target component |
+  |<#FEE2E2> Red | Existing component to replace or adapt |
+  |= Priority |= Implementation order |
+  | P0 | Safety and drivable foundation |
+  | P1 | Closed-loop motion and state estimation |
+  | P2 | Local perception and game features |
+  | P3 | Calibration and tuning support |
+  | DONE | Compatible implementation already exists |
+  Gray dashed arrows carry health observations.
+endlegend
+
+@enduml

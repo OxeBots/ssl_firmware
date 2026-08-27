@@ -1,0 +1,90 @@
+@startuml oxebots_control_architecture
+title OxeBots Firmware Architecture - Cascaded Control and Actuation Migration
+
+top to bottom direction
+
+!include style.iuml
+!include implementation_priorities.iuml
+!include health_types.iuml
+
+package "Command and Cascaded Motion" #EFF6FF {
+    component "ProtocolHandler\nPRIORITY_DONE" as Protocol <<implemented>>
+    queue "CommandInbox\nRobotCommand FIFO + receive time\nPRIORITY_P0" as CommandInbox <<target>>
+    component "SafetySupervisor\ntimeout + health gates + ball alignment + collision guard\nPRIORITY_P0" as SafetySupervisor <<target>>
+
+    package "CascadedMotionController" #F8FAFC {
+        component "PoseController\nposition + heading\nPRIORITY_P1" as PoseController <<target>>
+        component "VelocityController\nvx + vy + angular velocity\nPRIORITY_P1" as VelocityController <<target>>
+        component "OmnidirectionalInvKinematics\nPRIORITY_DONE" as Kinematics <<implemented>>
+
+        PoseController -down-> VelocityController : <back:#FFFFFF>body-velocity setpoint</back>
+        VelocityController -down-> Kinematics : <back:#FFFFFF>corrected body velocity</back>
+    }
+
+    component "WheelController\n100 Hz PID x4 + feed-forward\nPRIORITY_DONE" as WheelController <<implemented>>
+    component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorDriver <<partial>>
+    component "DigitalOutputExpander\n74HC595 shift register\nPRIORITY_P0" as OutputExpander <<target>>
+    node "ESP32 LEDC x4" as PWMHardware
+    node "74HC595" as ShiftRegister
+    node "BL48250 Motors x4" as Motors
+
+    Protocol -down-> CommandInbox : <back:#FFFFFF>decoded command</back>
+    CommandInbox -down-> SafetySupervisor : <back:#FFFFFF>requested goal + age</back>
+    SafetySupervisor -down-> PoseController : <back:#FFFFFF>safe, ball-aligned goal pose</back>
+    Kinematics -down-> WheelController : <back:#FFFFFF>wheel-speed setpoints</back>
+    WheelController -down-> MotorDriver : <back:#FFFFFF>signed duties</back>
+    MotorDriver -down-> PWMHardware : <back:#FFFFFF>PWM duties</back>
+    MotorDriver -right-> OutputExpander : <back:#FFFFFF>direction-bit update</back>
+    OutputExpander -down-> ShiftRegister : <back:#FFFFFF>SPI shift + atomic latch</back>
+    PWMHardware -down-> Motors
+    ShiftRegister -down-> Motors
+}
+
+package "Typed Feedback" #FFF7ED {
+    database "LocalPerceptionState\nball pose + obstacle ranges + validity\nPRIORITY_P2" as ToFState <<target>>
+    database "RobotStateEstimate\npose + body velocity + validity\nPRIORITY_P1" as RobotState <<target>>
+    database "WheelStateEstimate\nangle + velocity + validity\nPRIORITY_P0" as WheelState <<target>>
+    database "HEALTH_STATE_LABEL" as HealthState <<target>>
+
+    ToFState -[hidden]down-> RobotState
+    RobotState -[hidden]down-> WheelState
+    WheelState -[hidden]down-> HealthState
+}
+
+package "Kicker Client" #FAF5FF {
+    component "KickerClient\ncommand gate + status cache\nPRIORITY_P2" as KickerClient <<target>>
+    node "STM32 Kicker Board" as KickerMCU
+
+    KickerClient -down-> KickerMCU : <back:#FFFFFF>I2C command</back>
+    KickerMCU -up-> KickerClient : <back:#FFFFFF>I2C status</back>
+}
+
+SafetySupervisor -[hidden]right-> ToFState
+PoseController -[hidden]right-> RobotState
+WheelController -[hidden]right-> WheelState
+SafetySupervisor -[hidden]right-> HealthState
+
+ToFState -left-> SafetySupervisor
+RobotState -left-> SafetySupervisor
+RobotState -left-> PoseController
+RobotState -left-> VelocityController
+WheelState -left-> WheelController
+HealthState -left-> SafetySupervisor : <back:#FFFFFF>severity + inhibit reasons</back>
+SafetySupervisor -right-> KickerClient : <back:#FFFFFF>authorized kick</back>
+ToFState -right-> KickerClient : <back:#FFFFFF>ball alignment</back>
+
+legend bottom
+  |= Color |= Meaning |
+  |<#DCFCE7> Green | Implemented and compatible boundary |
+  |<#FEF3C7> Amber | Partially implemented |
+  |<#DBEAFE> Blue | Target component |
+  |<#FEE2E2> Red | Existing component to replace or adapt |
+  |= Priority |= Implementation order |
+  | P0 | Safety and drivable foundation |
+  | P1 | Closed-loop motion and state estimation |
+  | P2 | Local perception and game features |
+  | P3 | Calibration and tuning support |
+  | DONE | Compatible implementation already exists |
+endlegend
+
+@enduml

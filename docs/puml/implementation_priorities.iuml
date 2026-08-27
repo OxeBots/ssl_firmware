@@ -1,0 +1,5 @@
+!define PRIORITY_P0 <b>[P0]</b>
+!define PRIORITY_P1 <b>[P1]</b>
+!define PRIORITY_P2 <b>[P2]</b>
+!define PRIORITY_P3 <b>[P3]</b>
+!define PRIORITY_DONE <b>[DONE]</b>
