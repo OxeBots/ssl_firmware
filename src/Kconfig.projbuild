@@ -5,182 +5,303 @@ menu "Oxebots Robot Configuration"
         default 39 if IDF_TARGET_ESP32
         default 48 if IDF_TARGET_ESP32S3
 
-    menu "System"
-        config BLINK_GPIO
-            int "Blink LED GPIO"
-            range 0 GPIO_MAX_INDEX
-            default 2 if IDF_TARGET_ESP32
-            help
-                GPIO number for the onboard or status LED.
-    endmenu
-
     menu "Radio (nRF24L01)"
+
         config IRQ_GPIO
             int "IRQ GPIO"
             range 0 GPIO_MAX_INDEX
-            default 15 if IDF_TARGET_ESP32
+            default 4 if IDF_TARGET_ESP32
             help
-                GPIO connected to the nRF24L01 IRQ pin (active low).
+                GPIO connected to the nRF24L01 IRQ output.
+                Schematic net: IRQRF24.
+                ESP32 pin: GPIO4.
 
         config RETRANSMIT_COUNT
             int "Retransmit Count"
             range 0 15
-            default 3 if IDF_TARGET_ESP32
+            default 15 if IDF_TARGET_ESP32
             help
-                Number of retransmissions for failed transmissions (0-15).
-                A value of 0 means disabled, while 15 means up to 15 retransmissions.
+                Number of automatic retransmissions after a failed
+                transmission. A value of 0 disables retransmission.
+
     endmenu
 
     menu "I2C"
+
         config SDA_GPIO
             int "I2C SDA GPIO"
             range 0 GPIO_MAX_INDEX
             default 21 if IDF_TARGET_ESP32
             help
-                GPIO for I2C Serial Data line.
+                GPIO for the I2C serial-data line.
+                Schematic net: SDAI2C.
+                ESP32 pin: GPIO21.
 
         config SCL_GPIO
             int "I2C SCL GPIO"
             range 0 GPIO_MAX_INDEX
             default 22 if IDF_TARGET_ESP32
             help
-                GPIO for I2C Serial Clock line.
+                GPIO for the I2C serial-clock line.
+                Schematic net: SCLI2C.
+                ESP32 pin: GPIO22.
 
         config I2C_PORT_NUM
             int "I2C Port Number"
             range 0 1
             default 0 if IDF_TARGET_ESP32
             help
-                I2C Port number to use (0 or 1 on ESP32).
+                ESP32 hardware I2C controller number.
+
     endmenu
 
-    menu "Motors"
+    menu "74HC595 Output Expander"
+
+        config SHIFT_REGISTER_LATCH_GPIO
+            int "74HC595 latch GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 17 if IDF_TARGET_ESP32
+            help
+                GPIO connected to the 74HC595 RCLK latch input.
+
+        config SHIFT_REGISTER_DEVICE_KEY
+            int "SPI device key"
+            range 0 255
+            default 254
+            help
+                Software key used by the shared SPI driver. The 74HC595 has
+                no chip-select input, so this is not a GPIO number.
+
+        config SHIFT_REGISTER_DIR1_BIT
+            int "M1 direction output bit"
+            range 0 7
+            default 0
+
+        config SHIFT_REGISTER_DIR2_BIT
+            int "M2 direction output bit"
+            range 0 7
+            default 1
+
+        config SHIFT_REGISTER_DIR3_BIT
+            int "M3 direction output bit"
+            range 0 7
+            default 2
+
+        config SHIFT_REGISTER_DIR4_BIT
+            int "M4 direction output bit"
+            range 0 7
+            default 3
+
+        config SHIFT_REGISTER_MUX_A_BIT
+            int "4052 A select output bit"
+            range 0 7
+            default 4
+
+        config SHIFT_REGISTER_MUX_B_BIT
+            int "4052 B select output bit"
+            range 0 7
+            default 5
+
+        config SHIFT_REGISTER_MUX_INH_BIT
+            int "4052 inhibit output bit"
+            range 0 7
+            default 6
+
+    endmenu
+
+    menu "Motor Interfaces"
+
         menu "Front Left (M1)"
-            config MOTOR_FL_DIR_GPIO
-                int "Direction GPIO"
+
+            config MOTOR_FL_FB_GPIO
+                int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
-                default 33 if IDF_TARGET_ESP32
+                default 25 if IDF_TARGET_ESP32
                 help
-                    Output pin for Front Left motor (M1) direction.
-            
+                    Digital feedback input from motor M1.
+                    Schematic net: FBM1.
+                    ESP32 pin: GPIO25.
+
             config MOTOR_FL_PWM_GPIO
                 int "PWM GPIO"
                 range 0 GPIO_MAX_INDEX
                 default 32 if IDF_TARGET_ESP32
                 help
-                    Output pin for Front Left motor (M1) speed (PWM).
+                    PWM output for motor M1.
+                    Schematic net: PWMM1.
+                    ESP32 pin: GPIO32.
 
             config MOTOR_FL_ENC_CHANNEL
-                int "Encoder ADC Channel (ADC1)"
-                range 0 9
+                int "Encoder ADC1 Channel"
+                range 0 7
                 default 0 if IDF_TARGET_ESP32
                 help
-                    ADC1 Channel Number for Front Left motor (M1).
-                    Available ADC1 channels on ESP32:
-                        Channel 0 -> GPIO 36 (VP)
-                        Channel 1 -> UNUSABLE (GPIO 37)
-                        Channel 2 -> UNUSABLE (GPIO 38)
-                        Channel 3 -> GPIO 39 (VN)
-                        Channel 4 -> GPIO 32
-                        Channel 5 -> GPIO 33
-                        Channel 6 -> GPIO 34
-                        Channel 7 -> GPIO 35
+                    Analog encoder input for motor M1.
+                    Schematic net: ENCM1.
+                    ADC1 Channel 0 corresponds to GPIO36.
+
         endmenu
 
         menu "Back Left (M2)"
-            config MOTOR_BL_DIR_GPIO
-                int "Direction GPIO"
+
+            config MOTOR_BL_FB_GPIO
+                int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
-                default 25 if IDF_TARGET_ESP32
+                default 27 if IDF_TARGET_ESP32
                 help
-                    Output pin for Back Left motor (M2) direction.
-            
+                    Digital feedback input from motor M2.
+                    Schematic net: FBM2.
+                    ESP32 pin: GPIO27.
+
             config MOTOR_BL_PWM_GPIO
                 int "PWM GPIO"
                 range 0 GPIO_MAX_INDEX
                 default 26 if IDF_TARGET_ESP32
                 help
-                    Output pin for Back Left motor (M2) speed (PWM).
+                    PWM output for motor M2.
+                    Schematic net: PWMM2.
+                    ESP32 pin: GPIO26.
 
             config MOTOR_BL_ENC_CHANNEL
-                int "Encoder ADC Channel (ADC1)"
+                int "Encoder ADC1 Channel"
                 range 0 7
                 default 7 if IDF_TARGET_ESP32
                 help
-                    ADC1 Channel Number for Back Left motor (M2).
-                    Available ADC1 channels on ESP32:
-                        Channel 0 -> GPIO 36 (VP)
-                        Channel 1 -> UNUSABLE (GPIO 37)
-                        Channel 2 -> UNUSABLE (GPIO 38)
-                        Channel 3 -> GPIO 39 (VN)
-                        Channel 4 -> GPIO 32
-                        Channel 5 -> GPIO 33
-                        Channel 6 -> GPIO 34
-                        Channel 7 -> GPIO 35
+                    Analog encoder input for motor M2.
+                    Schematic net: ENCM2.
+                    ADC1 Channel 7 corresponds to GPIO35.
+
         endmenu
 
         menu "Back Right (M3)"
-            config MOTOR_BR_DIR_GPIO
-                int "Direction GPIO"
+
+            config MOTOR_BR_FB_GPIO
+                int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
-                default 27 if IDF_TARGET_ESP32
+                default 13 if IDF_TARGET_ESP32
                 help
-                    Output pin for Back Right motor (M3) direction.
+                    Digital feedback input from motor M3.
+                    Schematic net: FBM3.
+                    ESP32 pin: GPIO13.
+
             config MOTOR_BR_PWM_GPIO
                 int "PWM GPIO"
                 range 0 GPIO_MAX_INDEX
                 default 14 if IDF_TARGET_ESP32
                 help
-                    Output pin for Back Right motor (M3) speed (PWM).
+                    PWM output for motor M3.
+                    Schematic net: PWMM3.
+                    ESP32 pin: GPIO14.
 
             config MOTOR_BR_ENC_CHANNEL
-                int "Encoder ADC Channel (ADC1)"
+                int "Encoder ADC1 Channel"
                 range 0 7
                 default 6 if IDF_TARGET_ESP32
                 help
-                    ADC1 Channel Number for Back Right motor (M3).
-                    Available ADC1 channels on ESP32:
-                        Channel 0 -> GPIO 36 (VP)
-                        Channel 1 -> UNUSABLE (GPIO 37)
-                        Channel 2 -> UNUSABLE (GPIO 38)
-                        Channel 3 -> GPIO 39 (VN)
-                        Channel 4 -> GPIO 32
-                        Channel 5 -> GPIO 33
-                        Channel 6 -> GPIO 34
-                        Channel 7 -> GPIO 35
+                    Analog encoder input for motor M3.
+                    Schematic net: ENCM3.
+                    ADC1 Channel 6 corresponds to GPIO34.
+
         endmenu
 
         menu "Front Right (M4)"
-            config MOTOR_FR_DIR_GPIO
-                int "Direction GPIO"
+
+            config MOTOR_FR_FB_GPIO
+                int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
-                default 17 if IDF_TARGET_ESP32
+                default 3 if IDF_TARGET_ESP32
                 help
-                    Output pin for Front Right motor (M4) direction.
-            
+                    Digital feedback input from motor M4.
+                    Schematic net: FBM4.
+                    ESP32 pin: GPIO3.
+
             config MOTOR_FR_PWM_GPIO
                 int "PWM GPIO"
                 range 0 GPIO_MAX_INDEX
-                default 16 if IDF_TARGET_ESP32
+                default 12 if IDF_TARGET_ESP32
                 help
-                    Output pin for Front Right motor (M4) speed (PWM).
+                    PWM output for motor M4.
+                    Schematic net: PWMM4.
+                    ESP32 pin: GPIO12.
 
             config MOTOR_FR_ENC_CHANNEL
-                int "Encoder ADC Channel (ADC1)"
+                int "Encoder ADC1 Channel"
                 range 0 7
                 default 3 if IDF_TARGET_ESP32
                 help
-                    ADC1 Channel Number for Front Right motor (M4).
-                    Available ADC1 channels on ESP32:
-                        Channel 0 -> GPIO 36 (VP)
-                        Channel 1 -> UNUSABLE (GPIO 37)
-                        Channel 2 -> UNUSABLE (GPIO 38)
-                        Channel 3 -> GPIO 39 (VN)
-                        Channel 4 -> GPIO 32
-                        Channel 5 -> GPIO 33
-                        Channel 6 -> GPIO 34
-                        Channel 7 -> GPIO 35
+                    Analog encoder input for motor M4.
+                    Schematic net: ENCM4.
+                    ADC1 Channel 3 corresponds to GPIO39.
+
         endmenu
+
+    endmenu
+
+    menu "Analog Monitoring"
+
+        config VMON_ADC_CHANNEL
+            int "VMON ADC1 Channel"
+            range 0 7
+            default 5 if IDF_TARGET_ESP32
+            help
+                ADC1 channel used to measure the monitored supply voltage.
+                Schematic net: Vmon.
+                ADC1 Channel 5 corresponds to GPIO33.
+
+    endmenu
+
+    menu "GY-85 Interrupts"
+
+        config GY85_AINT1_GPIO
+            int "Accelerometer INT1 GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 5 if IDF_TARGET_ESP32
+            help
+                Interrupt input from the GY-85 accelerometer.
+                Schematic net: AINT1.
+                ESP32 pin: GPIO5.
+
+        config GY85_GINT_GPIO
+            int "Gyroscope interrupt GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 15 if IDF_TARGET_ESP32
+            help
+                Interrupt input from the GY-85 gyroscope.
+                Schematic net: GINT.
+                ESP32 pin: GPIO15.
+
+    endmenu
+
+    menu "Time-of-Flight Sensor"
+
+        config TOF_INT_GPIO
+            int "VL53L5CX interrupt GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 1 if IDF_TARGET_ESP32
+            help
+                Interrupt input from the VL53L5CX sensor.
+                Schematic net: INTTOF.
+                ESP32 pin: GPIO1.
+
+    endmenu
+
+    menu "Kicker Board Interface"
+
+        config KICKER_RCKSR_GPIO
+            int "RCKSR GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 17 if IDF_TARGET_ESP32
+            help
+                Kicker-board RCKSR signal.
+                ESP32 pin: GPIO17.
+
+        config KICKER_MORDY_GPIO
+            int "MORDY GPIO"
+            range 0 GPIO_MAX_INDEX
+            default 16 if IDF_TARGET_ESP32
+            help
+                Kicker-board MORDY signal.
+                ESP32 pin: GPIO16.
 
     endmenu
 
