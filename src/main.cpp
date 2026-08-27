@@ -29,15 +29,19 @@
 #include <sdkconfig.h>
 
 #include "BL48250.h"
+#include "DigitalOutputExpander.h"
+#include "EncoderMux.h"
+#include "I2Cdev.h"
 #include "NRF24L01.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
 #include "ProtocolHandler.h"
 #include "RobotState.h"
+#include "SPIdev.h"
 #include "Telemetry.h"
+#include "ToFPerceptionService.h"
 #include "WheelController.h"
 #include "omni_robot.h"
-#include "vl53l5cx_api.h"
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "MAIN";
@@ -50,6 +54,12 @@ static constexpr uint32_t MOTOR_PWM_FREQ_HZ = 20000;
 
 // Debugging teleplot output rate
 static constexpr uint32_t SERIAL_PRINT_RATE_HZ = 20;
+
+#ifdef CONFIG_SPI2_HOST
+static constexpr spi_host_device_t SPI_HOST_ID = SPI2_HOST;
+#else
+static constexpr spi_host_device_t SPI_HOST_ID = SPI3_HOST;
+#endif
 
 extern "C" void app_main(void)
 {
@@ -79,6 +89,22 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate sensors.");
     }
 
+    // The VL53L5CX shares the IMU I2C bus. ToF is an optional perception
+    // capability, so a missing sensor does not prevent safe wheel control.
+    static ToFPerceptionService tof_service;
+    if (tof_service.init(I2Cdev::get_bus_handle(), static_cast<gpio_num_t>(CONFIG_TOF_INT_GPIO)) ==
+        ESP_OK)
+    {
+        if (tof_service.start() != ESP_OK)
+            ESP_LOGW(TAG, "VL53L5CX ranging task failed to start.");
+        else
+            ESP_LOGI(TAG, "VL53L5CX perception service started.");
+    }
+    else
+    {
+        ESP_LOGW(TAG, "VL53L5CX unavailable. Continuing without ToF perception.");
+    }
+
     // 5: Wheel encoders (ADC)
     const std::array<adc_channel_t, 4> enc_channels = {
       static_cast<adc_channel_t>(CONFIG_MOTOR_FL_ENC_CHANNEL),
@@ -90,7 +116,30 @@ extern "C" void app_main(void)
     WheelStateEstimator & wse = WheelStateEstimator::get_instance();
     ESP_ERROR_CHECK(wse.init(enc_channels, ADC_ATTEN_DB_12));
 
-    // 6: Motor driver + WheelController
+    // 6: Radio initializes the shared SPI bus. The 74HC595 is then added to
+    // that bus as a device without chip select; its RCLK pin is the latch.
+    SPIdev::init(SPI_HOST_ID);
+    static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
+    const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;
+
+    static DigitalOutputExpander output_expander;
+    DigitalOutputExpander::Config output_config = {
+      .latch_gpio = static_cast<gpio_num_t>(CONFIG_SHIFT_REGISTER_LATCH_GPIO),
+      .device_key = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DEVICE_KEY),
+      .clock_hz = 1000000,
+    };
+    ESP_ERROR_CHECK(output_expander.init(output_config));
+
+    static EncoderMux encoder_mux;
+    EncoderMux::Config mux_config = {
+      .select_a_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_A_BIT),
+      .select_b_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_B_BIT),
+      .inhibit_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_INH_BIT),
+    };
+    ESP_ERROR_CHECK(encoder_mux.init(&output_expander, mux_config));
+    wse.set_encoder_mux(&encoder_mux);
+
+    // 7: Motor driver + WheelController
     config::driver::MotorDriverConfig motor_config;
     motor_config.timer = MOTOR_LEDC_TIMER;
     motor_config.speed_mode = MOTOR_LEDC_SPEED_MODE;
@@ -102,11 +151,12 @@ extern "C" void app_main(void)
       static_cast<gpio_num_t>(CONFIG_MOTOR_BR_PWM_GPIO),
       static_cast<gpio_num_t>(CONFIG_MOTOR_FR_PWM_GPIO),
     };
-    motor_config.motor_dir_pins = {
-      static_cast<gpio_num_t>(CONFIG_MOTOR_FL_DIR_GPIO),
-      static_cast<gpio_num_t>(CONFIG_MOTOR_BL_DIR_GPIO),
-      static_cast<gpio_num_t>(CONFIG_MOTOR_BR_DIR_GPIO),
-      static_cast<gpio_num_t>(CONFIG_MOTOR_FR_DIR_GPIO),
+    motor_config.direction_expander = &output_expander;
+    motor_config.direction_bits = {
+      static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR1_BIT),
+      static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR2_BIT),
+      static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR3_BIT),
+      static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR4_BIT),
     };
     motor_config.motor_channels = {
       LEDC_CHANNEL_0,
@@ -118,15 +168,13 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(BL48250::get_instance().configure(motor_config));
     ESP_ERROR_CHECK(WheelController::get_instance().init());
 
-    // 7: Radio + ProtocolHandler + Telemetry
-    static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
-
     // Kinematics model: wheel radius and robot centre-to-wheel distance from
     // the omni_robot config namespace.
     static OmnidirectionalRobot robot(config::kinematic::OMNI_WHEEL_RADIUS,
                                       config::kinematic::OMNI_WHEEL_DISTANCE);
 
-    if (radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK)
+    // 8: ProtocolHandler + Telemetry
+    if (radio_ready)
     {
         ProtocolHandler::get_instance().init(&radio, &WheelController::get_instance(), &robot);
         Telemetry::get_instance().init(&radio);
@@ -141,7 +189,7 @@ extern "C" void app_main(void)
         ESP_LOGE(TAG, "Radio initialization failed! Proceeding without radio link.");
     }
 
-    // 8: Calibration (blocking; loads NVS or runs interactive routine)
+    // 9: Calibration (blocking; loads NVS or runs interactive routine)
     ESP_LOGI(TAG, "Checking wheel encoder calibration...");
     if (wse.load_calibration() != ESP_OK)
     {
@@ -149,7 +197,7 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate encoders.");
     }
 
-    // 9: Start orientation task (100 Hz)
+    // 10: Start orientation task (100 Hz)
     OrientationHandler::get_instance().start_task();
 
     ESP_LOGI(TAG, "--- All subsystems up. Entering idle loop. ---");
