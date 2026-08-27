@@ -8,6 +8,7 @@
 #include "PowerMonitor.h"
 #include "RobotStateEstimator.h"
 #include "SafetySupervisor.h"
+#include "ToFPerceptionService.h"
 
 static RobotCommand make_command(int16_t x_mm, int16_t y_mm, uint8_t kick_velocity = 0)
 {
@@ -107,6 +108,25 @@ void test_power_monitor_converts_and_reports_limits()
     TEST_ASSERT_TRUE(observation.supply_undervoltage);
 }
 
+void test_tof_frame_projects_to_local_perception_state()
+{
+    ToFPerceptionFrame frame = {};
+    frame.valid = true;
+    frame.resolution = VL53L5CX_RESOLUTION_4X4;
+    frame.timestamp_us = 99;
+    frame.distance_mm[3] = 400;
+    frame.target_status[3] = 5;
+    frame.distance_mm[7] = 120;
+    frame.target_status[7] = 5;
+
+    const LocalPerceptionState state = ToFPerceptionService::project_frame(frame, 150);
+    TEST_ASSERT_TRUE(state.valid);
+    TEST_ASSERT_EQUAL_INT16(120, state.nearest_distance_mm);
+    TEST_ASSERT_EQUAL_UINT8(7, state.nearest_zone);
+    TEST_ASSERT_TRUE(state.obstacle_close);
+    TEST_ASSERT_TRUE(state.timestamp_us == 99);
+}
+
 void test_safety_supervisor_gates_commands_and_timeouts()
 {
     SafetySupervisor supervisor;
@@ -200,6 +220,7 @@ void setup()
     RUN_TEST(test_command_inbox_preserves_fifo_and_timestamps);
     RUN_TEST(test_health_monitor_separates_recoverable_and_critical_faults);
     RUN_TEST(test_power_monitor_converts_and_reports_limits);
+    RUN_TEST(test_tof_frame_projects_to_local_perception_state);
     RUN_TEST(test_safety_supervisor_gates_commands_and_timeouts);
     RUN_TEST(test_cascaded_controller_limits_wheels_and_kick);
     RUN_TEST(test_robot_state_estimator_integrates_odometry_and_accepts_vision_correction);

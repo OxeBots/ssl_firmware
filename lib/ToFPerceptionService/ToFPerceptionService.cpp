@@ -117,6 +117,55 @@ bool ToFPerceptionService::get_latest_frame(ToFPerceptionFrame * frame) const
     return frame->valid;
 }
 
+bool ToFPerceptionService::get_latest_state(LocalPerceptionState * state,
+                                            int16_t obstacle_stop_distance_mm) const
+{
+    if (state == nullptr)
+        return false;
+
+    ToFPerceptionFrame frame = {};
+    if (!get_latest_frame(&frame))
+        return false;
+
+    *state = project_frame(frame, obstacle_stop_distance_mm);
+    return state->valid;
+}
+
+/**
+ * @brief Project a validated range frame into the shared local perception state.
+ *
+ * This keeps sensor-specific storage out of the state and exposes only the
+ * nearest valid target and the conservative obstacle stop condition.
+ */
+LocalPerceptionState ToFPerceptionService::project_frame(const ToFPerceptionFrame & frame,
+                                                         int16_t obstacle_stop_distance_mm)
+{
+    LocalPerceptionState state = {};
+    state.resolution = frame.resolution;
+    state.timestamp_us = frame.timestamp_us;
+    state.valid = frame.valid;
+
+    int16_t nearest_distance_mm = -1;
+    for (size_t index = 0; index < ToFPerceptionFrame::MAX_TARGETS; ++index)
+    {
+        state.range_mm[index] = frame.distance_mm[index];
+        state.target_status[index] = frame.target_status[index];
+
+        const int16_t distance_mm = frame.distance_mm[index];
+        if (frame.target_status[index] != 0 && distance_mm > 0 &&
+            (nearest_distance_mm < 0 || distance_mm < nearest_distance_mm))
+        {
+            nearest_distance_mm = distance_mm;
+            state.nearest_zone = static_cast<uint8_t>(index);
+        }
+    }
+
+    state.nearest_distance_mm = nearest_distance_mm;
+    state.obstacle_close =
+      nearest_distance_mm >= 0 && nearest_distance_mm <= obstacle_stop_distance_mm;
+    return state;
+}
+
 bool ToFPerceptionService::is_available() const
 {
     return m_available;

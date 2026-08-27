@@ -12,6 +12,7 @@
 #include <array>
 #include <atomic>
 
+#include "RuntimeTypes.h"
 #include "VL53L5CX.h"
 
 struct ToFPerceptionFrame
@@ -40,6 +41,10 @@ class ToFPerceptionService
     void stop();
 
     bool get_latest_frame(ToFPerceptionFrame * frame) const;
+    bool get_latest_state(LocalPerceptionState * state,
+                          int16_t obstacle_stop_distance_mm = 150) const;
+    static LocalPerceptionState project_frame(const ToFPerceptionFrame & frame,
+                                              int16_t obstacle_stop_distance_mm = 150);
     bool is_available() const;
 
    private:
