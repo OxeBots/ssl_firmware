@@ -85,6 +85,13 @@ pio test -e test_hardware
 
 # Calibration tests (interactive)
 pio test -e test_calibration
+
+# Run a specific test (with -f matching the path under test/)
+pio test -vv -f kinematics/test_omnidirectional_robot
+
+# Other examples
+pio test -vv -e test_hardware -f ADXL345/test_ADXL345
+pio test -vv -e test_hardware -f control/test_WheelController
 ```
 
 ## Configuration
