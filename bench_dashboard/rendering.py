@@ -35,6 +35,17 @@ def panel(surface, rect, title, fonts):
         surface.blit(fonts["title"].render(title, True, config.TEXT_DIM), (rect.x + 12, rect.y + 7))
 
 
+def fit_text(text, font, max_w):
+    """Truncate text with an ellipsis so it never renders wider than max_w."""
+    if font.size(text)[0] <= max_w:
+        return text
+    approx_char_w = max(1, font.size("n")[0])
+    text = text[: max(0, int(max_w / approx_char_w))]
+    while text and font.size(text + "...")[0] > max_w:
+        text = text[:-1]
+    return text + "..." if text else ""
+
+
 def blit_text(surface, text, font, color, center=None, topleft=None, topright=None):
     surf = font.render(text, True, color)
     if center is not None:

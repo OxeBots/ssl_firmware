@@ -9,16 +9,24 @@ STATUS_ORDER = {"firmware": 0, "probing": 1, "empty": 2, "busy": 3}
 STATUS_TEXT = {
     "firmware": ("firmware found", config.OK_COLOR),
     "probing": ("scanning...", config.TEXT_DIM),
-    "empty": ("no response", config.TEXT_DIM),
+    "empty": ("no response (other monitor on port?)", config.TEXT_DIM),
     "busy": ("in use", config.BAD_COLOR),
 }
 
 
 def select_click_target(pos, row_rects, buttons, scan_results, scan_lock):
-    """Resolve a picker click: a port name, "__quit__", or None."""
+    """Resolve a picker click: a port name, "__quit__", or None.
+
+    Rows are only clickable when the probe flagged the firmware; a port with
+    no response cannot open a working dashboard session.
+    """
     for rect, device in row_rects:
         if rect.collidepoint(pos):
-            return device
+            with scan_lock:
+                info = scan_results.get(device)
+            if info is not None and info["status"] == "firmware":
+                return device
+            return None
     if buttons.get("rescan") is not None and buttons["rescan"].collidepoint(pos):
         with scan_lock:
             scan_results.clear()
@@ -56,13 +64,12 @@ def draw_port_select(surface, scan_results, scan_lock, fonts, row_rects, buttons
         pygame.draw.rect(surface, config.OK_COLOR if found else config.PANEL_BORDER, row, 1, border_radius=6)
         blit_text(surface, device, fonts["label"], config.TEXT, topleft=(row.x + 14, row.y + 8))
         blit_text(surface, info["desc"], fonts["tiny"], config.TEXT_DIM, topleft=(row.x + 14, row.y + 36))
-        text, color = STATUS_TEXT.get(info["status"], ("...", config.TEXT_DIM))
-        blit_text(surface, text, fonts["small"], color, topright=(row.right - 122, row.y + 12))
-        chip = pygame.Rect(row.right - 106, row.y + 14, 92, 34)
-        pygame.draw.rect(surface, (52, 96, 66) if found else (52, 58, 72), chip, border_radius=6)
-        blit_text(
-            surface, "Connect", fonts["small"], config.TEXT if found else config.TEXT_DIM, center=chip.center
-        )
+        status_text, status_color = STATUS_TEXT.get(info["status"], ("...", config.TEXT_DIM))
+        blit_text(surface, status_text, fonts["small"], status_color, topright=(row.right - 122, row.y + 12))
+        if found:
+            chip = pygame.Rect(row.right - 106, row.y + 14, 92, 34)
+            pygame.draw.rect(surface, (52, 96, 66), chip, border_radius=6)
+            blit_text(surface, "Connect", fonts["small"], config.TEXT, center=chip.center)
         row_rects.append((row, device))
     if not entries:
         blit_text(

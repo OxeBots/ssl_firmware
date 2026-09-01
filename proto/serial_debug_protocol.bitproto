@@ -1,0 +1,164 @@
+// serial_debug_protocol.bitproto
+// Binary protocol for the serial debug dashboard (bench_dashboard package).
+// Robot streams DebugState / DebugImu / DebugTof / DebugHealth / DebugText
+// frames over UART0; the dashboard answers with DebugControl frames.
+//
+// Wire framing (outside bitproto): each frame is
+//   COBS_encode( msg_type (1 byte) | bitproto message | crc8 ) followed by 0x00.
+// COBS keeps the payload delimiter-free, crc8 (poly 0x07) guards integrity.
+
+proto serial_debug_protocol;
+
+// ---------------------------------------------------------------------------
+// Scalar type aliases
+// ---------------------------------------------------------------------------
+
+// Milliseconds since boot
+type DebugTimestamp = uint32;
+
+// Scaled angle: 0.01 degree per unit (range +/-327.67 degrees)
+type DebugAngle = int16;
+
+// Scaled wheel speed: 0.1 RPM per unit (range +/-3276.7 RPM)
+type DebugRpm = int16;
+
+// Signed PWM duty cycle: -1023..1023
+type DebugDuty = int16;
+
+// ---------------------------------------------------------------------------
+// Message type constants (first byte of every frame payload)
+// ---------------------------------------------------------------------------
+
+// Wheel targets, PWM and speeds (robot -> dashboard)
+const DBG_MSG_STATE = 1;
+
+// Raw accelerometer / gyroscope / magnetometer (robot -> dashboard)
+const DBG_MSG_IMU = 2;
+
+// VL53L5CX 8x8 range frame (robot -> dashboard)
+const DBG_MSG_TOF = 3;
+
+// Health, safety and system status (robot -> dashboard)
+const DBG_MSG_HEALTH = 4;
+
+// One ASCII log line, no newline (robot -> dashboard)
+const DBG_MSG_TEXT = 5;
+
+// Commands from the dashboard to the robot
+const DBG_MSG_CONTROL = 6;
+
+// ---------------------------------------------------------------------------
+// Control op constants (op field of DebugControl)
+// ---------------------------------------------------------------------------
+
+// Stop streaming (dashboard closing)
+const DBG_CONTROL_STOP_STREAM = 0;
+
+// Start streaming; keepalives must follow or the robot stops after ~1.5 s
+const DBG_CONTROL_START_STREAM = 1;
+
+// Keep the stream alive; send at ~1 Hz
+const DBG_CONTROL_KEEPALIVE = 2;
+
+// Set the four wheel targets (0.1 RPM units)
+const DBG_CONTROL_SET_TARGETS = 3;
+
+// Zero every wheel target immediately
+const DBG_CONTROL_STOP_MOTORS = 4;
+
+// ---------------------------------------------------------------------------
+// DebugWheel - per-wheel control data
+// ---------------------------------------------------------------------------
+
+message DebugWheel {
+    DebugDuty pwm      = 1;  // Signed PID output duty (-1023..1023)
+    DebugRpm velocity  = 2;  // Measured speed (0.1 RPM)
+    DebugRpm target    = 3;  // Setpoint speed (0.1 RPM)
+}
+// DebugWheel size: 3 x 2 = 6 bytes
+
+// ---------------------------------------------------------------------------
+// DebugState - motor/control stream at ~25 Hz
+// ---------------------------------------------------------------------------
+
+message DebugState {
+    DebugTimestamp uptime_ms   = 1;  // Milliseconds since boot
+    DebugWheel[4] wheels       = 2;  // FL, BL, BR, FR
+    DebugAngle yaw             = 3;  // 0.01 degree
+    DebugAngle pitch           = 4;  // 0.01 degree
+    DebugAngle roll            = 5;  // 0.01 degree
+    uint8 encoder_valid_mask   = 6;  // Bit i: encoder channel i calibrated
+    uint32 sequence            = 7;  // Frame counter
+}
+// DebugState size: 4 + 4x6 + 3x2 + 1 + 4 = 39 bytes
+
+// ---------------------------------------------------------------------------
+// DebugImu - raw sensor stream at ~10 Hz
+// ---------------------------------------------------------------------------
+
+message DebugImu {
+    int16 accel_x   = 1;   // 0.001 g per unit
+    int16 accel_y   = 2;   // 0.001 g per unit
+    int16 accel_z   = 3;   // 0.001 g per unit
+    int16 gyro_x    = 4;   // 0.1 deg/s per unit
+    int16 gyro_y    = 5;   // 0.1 deg/s per unit
+    int16 gyro_z    = 6;   // 0.1 deg/s per unit
+    int16 mag_x     = 7;   // 1 mG per unit
+    int16 mag_y     = 8;   // 1 mG per unit
+    int16 mag_z     = 9;   // 1 mG per unit
+    uint32 sequence = 10;
+}
+// DebugImu size: 9 x 2 + 4 = 22 bytes
+
+// ---------------------------------------------------------------------------
+// DebugTof - one VL53L5CX range frame per new measurement (~15 Hz)
+// ---------------------------------------------------------------------------
+
+message DebugTof {
+    uint32 sequence       = 1;  // Frame counter
+    int16[64] distance_mm = 2;  // Row-major 8x8; 0 = zone has no valid target
+}
+// DebugTof size: 4 + 64 x 2 = 132 bytes
+
+// ---------------------------------------------------------------------------
+// DebugHealth - health / system status at ~2 Hz
+// ---------------------------------------------------------------------------
+
+message DebugHealth {
+    uint8 robot_id         = 1;   // NVS-stored robot ID
+    uint16 error_flags     = 2;   // ERROR_* bitmask from the radio protocol
+    uint8 lifecycle        = 3;   // SafetySupervisor LifecycleState
+    uint16 active_faults   = 4;   // HealthMonitor active fault bitmask
+    uint16 latched_faults  = 5;   // HealthMonitor latched fault bitmask
+    uint8 motion_inhibited = 6;   // 0/1
+    uint8 kick_inhibited   = 7;   // 0/1
+    uint8 imu_cal_flags    = 8;   // Bit0 accel, bit1 gyro, bit2 mag calibrated
+    uint8 tof_available    = 9;   // 0/1
+    uint16 supply_voltage  = 10;  // VMON supply in 0.01 V units
+    uint8 supply_flags     = 11;  // Bit0 valid, bit1 undervoltage, bit2 overvoltage
+    uint32 free_heap       = 12;  // Free heap bytes
+    uint32 min_free_heap   = 13;  // Historic minimum free heap bytes
+    uint32 sequence        = 14;  // Frame counter
+}
+// DebugHealth size: ~26 bytes
+
+// ---------------------------------------------------------------------------
+// DebugText - one console/log line (ESP_LOG redirected while streaming)
+// ---------------------------------------------------------------------------
+
+message DebugText {
+    uint8 length   = 1;  // Number of valid bytes in text
+    uint8[96] text = 2;  // ASCII bytes, no trailing newline
+}
+// DebugText size: 1 + 96 = 97 bytes
+
+// ---------------------------------------------------------------------------
+// DebugControl - dashboard -> robot commands
+// ---------------------------------------------------------------------------
+
+message DebugControl {
+    uint8 op                  = 1;  // DBG_CONTROL_* constant
+    uint32 sequence           = 2;  // Keepalive/command counter
+    DebugRpm[4] wheel_targets = 3;  // Used when op == DBG_CONTROL_SET_TARGETS (0.1 RPM)
+}
+// DebugControl size: 1 + 4 + 4x2 = 13 bytes

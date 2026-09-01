@@ -362,4 +362,46 @@ menu "Oxebots Robot Configuration"
 
     endmenu
 
+    menu "Serial Debug Dashboard"
+
+        config SERIAL_DEBUG
+            bool "Enable serial debug dashboard"
+            default n
+            help
+                Compile in the SerialDebug service. When a dashboard client
+                opens the serial port and sends a START_STREAM control frame,
+                the firmware streams binary debug frames over UART0. Streaming
+                stops automatically when keepalives stop arriving, so a closed
+                port means no debug traffic.
+
+        config VMON_SUPPLY_RATIO_MILLI
+            int "VMON pin-to-supply ratio (milli)"
+            range 1 100000
+            default 1000
+            depends on SERIAL_DEBUG
+            help
+                Supply voltage = VMON pin voltage x ratio / 1000. Set to the
+                voltage divider ratio of the VMON sense net (e.g. 11090 for
+                11.09x).
+
+        config VMON_UNDERVOLTAGE_MV
+            int "VMON undervoltage threshold (mV)"
+            range 0 60000
+            default 6600
+            depends on SERIAL_DEBUG
+            help
+                Supply voltage below this value flags undervoltage in the
+                serial debug health stream.
+
+        config VMON_OVERVOLTAGE_MV
+            int "VMON overvoltage threshold (mV)"
+            range 0 60000
+            default 16800
+            depends on SERIAL_DEBUG
+            help
+                Supply voltage above this value flags overvoltage in the
+                serial debug health stream.
+
+    endmenu
+
 endmenu

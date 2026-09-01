@@ -7,21 +7,22 @@ top to bottom direction
 !include implementation_priorities.iuml
 !include health_types.iuml
 
-package "Command and Cascaded Motion" #EFF6FF {
+package "Command and Motion Control" #EFF6FF {
     component "ProtocolHandler\nPRIORITY_DONE" as Protocol <<implemented>>
     queue "CommandInbox\nRobotCommand FIFO + receive time\nPRIORITY_P0" as CommandInbox <<implemented>>
     component "SafetySupervisor\ntimeout + health gates + collision guard\nPRIORITY_P0" as SafetySupervisor <<implemented>>
 
-    package "CascadedMotionController" #F8FAFC {
-        component "PoseController\nposition + heading\nPRIORITY_P1" as PoseController <<implemented>>
-        component "VelocityController\nvx + vy + angular velocity\nPRIORITY_P1" as VelocityController <<implemented>>
+    package "Motion Control" #F8FAFC {
+        component "RobotPositionController\npose + heading error to body velocity\nPRIORITY_P1" as PositionController <<implemented>>
+        component "RobotVelocityController\nbody velocity limits + inverse kinematics\nPRIORITY_P1" as VelocityController <<implemented>>
         component "OmnidirectionalInvKinematics\nPRIORITY_DONE" as Kinematics <<implemented>>
 
-        PoseController -down-> VelocityController : <back:#FFFFFF>body-velocity setpoint</back>
-        VelocityController -down-> Kinematics : <back:#FFFFFF>corrected body velocity</back>
+        PositionController -down-> VelocityController : <back:#FFFFFF>body-velocity setpoint</back>
+        VelocityController -down-> Kinematics : <back:#FFFFFF>limited body velocity</back>
     }
 
     component "WheelController\n100 Hz PID x4 + feed-forward\nPRIORITY_DONE" as WheelController <<implemented>>
+    component "SerialDebug\nUART0 debug dashboard stream\nPRIORITY_P3" as SerialDebug <<implemented>>
     component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorDriver <<implemented>>
     component "74HC595\n8-bit output shift register\nPRIORITY_P0" as HC595Driver <<implemented>>
     node "ESP32 LEDC x4" as PWMHardware
@@ -39,6 +40,9 @@ package "Command and Cascaded Motion" #EFF6FF {
     PWMHardware -down-> Motors
     HC595Device -down-> Motors
 }
+
+SerialDebug -down-> WheelController : <back:#FFFFFF>manual wheel targets (debug)</back>
+WheelController -up-> SerialDebug : <back:#FFFFFF>wheel duties + speeds + targets</back>
 
 package "Typed Feedback" #FFF7ED {
     database "LocalPerceptionState\nnearest range + obstacle validity\nPRIORITY_P2" as ToFState <<partial>>

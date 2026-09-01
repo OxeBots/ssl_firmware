@@ -1,14 +1,22 @@
-"""Shared constants: protocol framing, timing windows, fonts and color palette."""
+"""Shared constants: window sizing, timing windows, fonts and color palette."""
 
-# S,<ms>,<yaw>,<pitch>,<roll>,<pwm>,<vel>,<tgt>,<enc>,<enc_ok>,<tof_seq>
-STATE_FIELD_COUNT = 11
-# T,<seq>,<d0>..<d63>
-TOF_FIELD_COUNT = 66
-TOF_SIDE = 8
-TOF_MAX_MM = 4000.0
+# Window size limits: resizable between MIN_WINDOW and the full screen
+MIN_WINDOW = (1024, 640)
+DEFAULT_WINDOW = (1280, 800)
+
+# Dashboard tabs, in display order
+TAB_MOTORS = 0
+TAB_HEALTH = 1
+TAB_SENSING = 2
+TAB_TITLES = ("Motors & Control", "Health & State", "Sensing")
 
 # Speed strip chart time span
 CHART_WINDOW_S = 12.0
+# Wheel target square sweep amplitude (dashboard-driven)
+SWEEP_RPM = 1000.0
+
+TOF_SIDE = 8
+TOF_MAX_MM = 4000.0
 
 FONT_NAMES = "consolas,dejavusansmono,menlo,monospace"
 
@@ -25,3 +33,4 @@ PWM_COLOR = (255, 176, 64)
 OK_COLOR = (110, 220, 130)
 BAD_COLOR = (235, 90, 80)
 DEMO_COLOR = (255, 200, 80)
+TAB_ACTIVE = (52, 58, 72)

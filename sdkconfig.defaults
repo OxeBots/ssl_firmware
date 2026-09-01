@@ -85,6 +85,13 @@ CONFIG_GY85_MDRDY_GPIO=16
 CONFIG_TOF_INT_GPIO=1
 
 #
+# Serial debug dashboard
+#
+# Streams binary debug frames over UART0 while a dashboard client keeps the
+# connection alive (see proto/serial_debug_protocol.bitproto).
+CONFIG_SERIAL_DEBUG=y
+
+#
 # nRF24L01 configuration
 #
 CONFIG_GPIO_RANGE_MAX=39

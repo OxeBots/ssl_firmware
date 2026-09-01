@@ -4,7 +4,7 @@
  * Responsibilities of this file:
  *   1. Initialize each subsystem in dependency order.
  *   2. Launch FreeRTOS tasks via each subsystem's start method.
- *   3. Enter the idle/debugging teleplot output loop.
+ *   3. Enter the idle loop.
  *
  * This file contains NO global variables and NO free-standing runtime
  * functions. All runtime logic lives in the appropriate component under lib/.
@@ -19,7 +19,7 @@
  *   7.: Radio + ProtocolHandler + Telemetry
  *   8.: Calibration (blocking; loads NVS or runs interactive routine)
  *   9.: Start orientation task (OrientationHandler @ 100 Hz)
- *   Idle: debugging teleplot serial output
+ *   Idle: idle loop.
  */
 
 #include <driver/gpio.h>
@@ -42,7 +42,12 @@
 #include "ToFPerceptionService.h"
 #include "WheelController.h"
 #include "omni_robot.h"
+#include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
+
+// Unconditional so the PlatformIO library finder picks up lib/SerialDebug;
+// the service only starts (and only emits code) when CONFIG_SERIAL_DEBUG is set.
+#include "SerialDebug.h"
 
 static const char * TAG = "MAIN";
 
@@ -51,9 +56,6 @@ static constexpr ledc_timer_t MOTOR_LEDC_TIMER = LEDC_TIMER_0;
 static constexpr ledc_mode_t MOTOR_LEDC_SPEED_MODE = LEDC_LOW_SPEED_MODE;
 static constexpr ledc_timer_bit_t MOTOR_DUTY_RESOLUTION = LEDC_TIMER_10_BIT;
 static constexpr uint32_t MOTOR_PWM_FREQ_HZ = 20000;
-
-// Debugging teleplot output rate
-static constexpr uint32_t SERIAL_PRINT_RATE_HZ = 20;
 
 #ifdef CONFIG_SPI2_HOST
 static constexpr spi_host_device_t SPI_HOST_ID = SPI2_HOST;
@@ -226,46 +228,28 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate encoders.");
     }
 
-    // 10: Start orientation task (100 Hz)
-    OrientationHandler::get_instance().start_task();
+    // 10: Start orientation task (100 Hz); skipped when the IMU is absent —
+    // the task would only poll a dead driver.
+    if (imu_ready)
+        OrientationHandler::get_instance().start_task();
+
+#if CONFIG_SERIAL_DEBUG
+    // 11: Serial debug dashboard. Streams over UART0 only while a dashboard
+    // client keeps the connection alive.
+    if (SerialDebug::get_instance().init(&tof_service) == ESP_OK)
+        SerialDebug::get_instance().start_task();
+    else
+        ESP_LOGW(TAG, "Serial debug service unavailable.");
+#endif
 
     ESP_LOGI(TAG, "--- All subsystems up. Entering idle loop. ---");
 
-    // Idle loop — debugging teleplot serial output
-    // Uncomment the blocks you need; nothing else lives here.
+    // Idle loop — services the radio protocol handler.
     while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(1000 / SERIAL_PRINT_RATE_HZ));
+        vTaskDelay(pdMS_TO_TICKS(50));
 
         if (radio_ready)
             ProtocolHandler::get_instance().update(static_cast<uint64_t>(esp_timer_get_time()));
-
-        // --Wheel velocity telemetry(Teleplot)-- -- -- -- -- -- -- -- -- -- -- -
-        // {
-        //     const auto current = WheelController::get_instance().get_current_velocities();
-        //     const auto target = WheelController::get_instance().get_target_velocities();
-        //     static const char * labels[4] = {"FL", "BL", "BR", "FR"};
-        //     for (int i = 0; i < 4; ++i)
-        //     {
-        //         printf(">wheel_%s_target:%.2f\n", labels[i], target[i]);
-        //         printf(">wheel_%s_current:%.2f\n", labels[i], current[i]);
-        //     }
-        // }
-
-        // -- Wheel encoder RPM (Teleplot) --------------------------------
-        // const auto rpms = wse.get_filtered_rpm();
-        // for (int i = 0; i < 4; ++i) printf(">w_%d_rpm:%f\n", i + 1, rpms[i]);
-
-        // -- IMU telemetry (Teleplot) ------------------------------------
-        // printf(">pose.yaw:%.2f\n",   OrientationHandler::get_instance().get_yaw());
-        // printf(">pose.pitch:%.2f\n", OrientationHandler::get_instance().get_pitch());
-        // printf(">pose.roll:%.2f\n",  OrientationHandler::get_instance().get_roll());
-
-        // -- 3D orientation (Teleplot 3D view) ---------------------------
-        // double yaw   = OrientationHandler::get_instance().get_yaw()   * M_PI / 180.0;
-        // double pitch = OrientationHandler::get_instance().get_pitch() * M_PI / 180.0;
-        // double roll  = OrientationHandler::get_instance().get_roll()  * M_PI / 180.0;
-        // printf(">3D|IMU:R:%.4f:%.4f:%.4f:S:cube:W:3:H:1.5:D:4:C:grey|g\n",
-        //        roll, pitch, yaw);
     }
 }
