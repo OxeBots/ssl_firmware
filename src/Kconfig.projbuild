@@ -1,5 +1,28 @@
 menu "Oxebots Robot Configuration"
 
+    choice BOARD_REVISION
+        prompt "Board revision"
+        default BOARD_REV_B
+        help
+            Wiring revision of the robot main board. Selects the GPIO
+            defaults below and whether the motor direction signals are
+            driven through the 74HC595 shift register or direct GPIO pins.
+
+        config BOARD_REV_A
+            bool "Rev A (older: motor direction on direct GPIOs)"
+            help
+                Older main board. Motor direction signals are wired to
+                dedicated GPIO pins; no 74HC595 shift register.
+
+        config BOARD_REV_B
+            bool "Rev B (current: motor direction through 74HC595)"
+            help
+                Current main board. Motor direction signals are routed
+                through the 74HC595 shift register, which also drives the
+                CD4052B multiplexer select lines.
+
+    endchoice
+
     config GPIO_MAX_INDEX
         int "Maximum GPIO number for the target board"
         default 39 if IDF_TARGET_ESP32
@@ -56,6 +79,8 @@ menu "Oxebots Robot Configuration"
     endmenu
 
     menu "74HC595 Shift Register"
+
+        depends on BOARD_REV_B
 
         config SHIFT_REGISTER_LATCH_GPIO
             int "74HC595 RCKSR latch GPIO"
@@ -115,9 +140,19 @@ menu "Oxebots Robot Configuration"
 
         menu "Front Left (M1)"
 
+            config MOTOR_FL_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_A
+                default 33
+                help
+                    Direction output for motor M1 on the Rev A wiring.
+                    ESP32 pin: GPIO33.
+
             config MOTOR_FL_FB_GPIO
                 int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_B
                 default 25 if IDF_TARGET_ESP32
                 help
                     Digital feedback input from motor M1.
@@ -146,9 +181,19 @@ menu "Oxebots Robot Configuration"
 
         menu "Back Left (M2)"
 
+            config MOTOR_BL_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_A
+                default 25
+                help
+                    Direction output for motor M2 on the Rev A wiring.
+                    ESP32 pin: GPIO25.
+
             config MOTOR_BL_FB_GPIO
                 int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_B
                 default 27 if IDF_TARGET_ESP32
                 help
                     Digital feedback input from motor M2.
@@ -177,9 +222,19 @@ menu "Oxebots Robot Configuration"
 
         menu "Back Right (M3)"
 
+            config MOTOR_BR_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_A
+                default 27
+                help
+                    Direction output for motor M3 on the Rev A wiring.
+                    ESP32 pin: GPIO27.
+
             config MOTOR_BR_FB_GPIO
                 int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_B
                 default 13 if IDF_TARGET_ESP32
                 help
                     Digital feedback input from motor M3.
@@ -208,9 +263,19 @@ menu "Oxebots Robot Configuration"
 
         menu "Front Right (M4)"
 
+            config MOTOR_FR_DIR_GPIO
+                int "Direction GPIO"
+                range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_A
+                default 17
+                help
+                    Direction output for motor M4 on the Rev A wiring.
+                    ESP32 pin: GPIO17.
+
             config MOTOR_FR_FB_GPIO
                 int "Feedback GPIO"
                 range 0 GPIO_MAX_INDEX
+                depends on BOARD_REV_B
                 default 3 if IDF_TARGET_ESP32
                 help
                     Digital feedback input from motor M4.
@@ -220,6 +285,7 @@ menu "Oxebots Robot Configuration"
             config MOTOR_FR_PWM_GPIO
                 int "PWM GPIO"
                 range 0 GPIO_MAX_INDEX
+                default 16 if BOARD_REV_A
                 default 12 if IDF_TARGET_ESP32
                 help
                     PWM output for motor M4.

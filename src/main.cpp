@@ -117,12 +117,14 @@ extern "C" void app_main(void)
     WheelStateEstimator & wse = WheelStateEstimator::get_instance();
     ESP_ERROR_CHECK(wse.init(enc_channels, ADC_ATTEN_DB_12));
 
-    // 6: Radio initializes the shared SPI bus. The 74HC595 is then added to
-    // that bus as a device without chip select; its RCKSR pin is the latch.
+    // 6: Radio initializes the shared SPI bus. On Rev B the 74HC595 is then
+    // added to that bus as a device without chip select; its RCKSR pin is
+    // the latch. Rev A has no 74HC595 and no CD4052B.
     SPIdev::init(SPI_HOST_ID);
     static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
     const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;
 
+#if CONFIG_BOARD_REV_B
     static HC595 shift_register;
     HC595::Config output_config = {
       .latch_gpio = static_cast<gpio_num_t>(CONFIG_SHIFT_REGISTER_LATCH_GPIO),
@@ -139,6 +141,7 @@ extern "C" void app_main(void)
     };
     ESP_ERROR_CHECK(cd4052b.init(&shift_register, mux_config));
     wse.set_cd4052b(&cd4052b);
+#endif
 
     // 7: Motor driver + WheelController
     config::driver::MotorDriverConfig motor_config;
@@ -152,6 +155,15 @@ extern "C" void app_main(void)
       static_cast<gpio_num_t>(CONFIG_MOTOR_BR_PWM_GPIO),
       static_cast<gpio_num_t>(CONFIG_MOTOR_FR_PWM_GPIO),
     };
+#if CONFIG_BOARD_REV_A
+    // Rev A wiring: each motor direction input is a dedicated GPIO pin.
+    motor_config.motor_dir_pins = {
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FL_DIR_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BL_DIR_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BR_DIR_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FR_DIR_GPIO),
+    };
+#else
     motor_config.direction_shift_register = &shift_register;
     motor_config.direction_bits = {
       static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR1_BIT),
@@ -159,6 +171,7 @@ extern "C" void app_main(void)
       static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR3_BIT),
       static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR4_BIT),
     };
+#endif
     motor_config.motor_channels = {
       LEDC_CHANNEL_0,
       LEDC_CHANNEL_1,
