@@ -77,13 +77,23 @@ extern "C" void app_main(void)
     // Must be installed before NRF24L01 init and any GPIO interrupt handlers.
     gpio_install_isr_service(0);
 
-    // 4: IMU hardware driver init (IMUGY85)
-    ESP_ERROR_CHECK(OrientationHandler::get_instance().init());
+    // 4: IMU hardware driver init (IMUGY85). Mandatory hardware: on failure
+    // the system latches SAFE_STOP and keeps running (radio + telemetry up,
+    // actuation inhibited) instead of restarting forever.
+    const bool imu_ready = OrientationHandler::get_instance().init() == ESP_OK;
+    if (imu_ready)
+        ESP_LOGI(TAG, "IMU hardware initialized.");
+    else
+    {
+        ESP_LOGE(TAG, "IMU hardware unavailable. Entering SAFE_STOP.");
+        RobotState::get_instance().set_error(ERROR_IMU_FAIL);
+        ProtocolHandler::get_instance().force_safe_stop();
+    }
 
     // 4: IMU calibration load from NVS (must precede ADC task init) NVS flash
     // operations disable the cache; the ADC task would preempt the NVS writer
     // and crash on flash code.
-    if (OrientationHandler::get_instance().load_calibration() != ESP_OK)
+    if (imu_ready && OrientationHandler::get_instance().load_calibration() != ESP_OK)
     {
         ESP_LOGW(TAG, "Some IMU calibrations missing. Robot will operate in fallback mode.");
         ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate sensors.");
@@ -205,6 +215,7 @@ extern "C" void app_main(void)
     else
     {
         ESP_LOGE(TAG, "Radio initialization failed! Proceeding without radio link.");
+        RobotState::get_instance().set_error(ERROR_COMM_LOSS);
     }
 
     // 9: Calibration (blocking; loads NVS or runs interactive routine)
