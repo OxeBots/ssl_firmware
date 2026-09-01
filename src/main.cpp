@@ -32,7 +32,6 @@
 #include "74HC595.h"
 #include "BL48250.h"
 #include "CD4052B.h"
-#include "I2Cdev.h"
 #include "NRF24L01.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
@@ -93,17 +92,22 @@ extern "C" void app_main(void)
     // The VL53L5CX shares the IMU I2C bus. ToF is an optional perception
     // capability, so a missing sensor does not prevent safe wheel control.
     static ToFPerceptionService tof_service;
-    if (tof_service.init(I2Cdev::get_bus_handle(), static_cast<gpio_num_t>(CONFIG_TOF_INT_GPIO)) ==
-        ESP_OK)
+    if (tof_service.init(static_cast<gpio_num_t>(CONFIG_TOF_INT_GPIO)) == ESP_OK)
     {
         if (tof_service.start() != ESP_OK)
+        {
             ESP_LOGW(TAG, "VL53L5CX ranging task failed to start.");
+            RobotState::get_instance().set_error(ERROR_TOF_FAIL);
+        }
         else
+        {
             ESP_LOGI(TAG, "VL53L5CX perception service started.");
+        }
     }
     else
     {
         ESP_LOGW(TAG, "VL53L5CX unavailable. Continuing without ToF perception.");
+        RobotState::get_instance().set_error(ERROR_TOF_FAIL);
     }
 
     // 5: Wheel encoders (ADC)

@@ -18,16 +18,14 @@ ToFPerceptionService::~ToFPerceptionService()
         vSemaphoreDelete(m_mutex);
 }
 
-esp_err_t ToFPerceptionService::init(i2c_master_bus_handle_t bus_handle,
-                                     gpio_num_t interrupt_gpio,
-                                     uint8_t frequency_hz)
+esp_err_t ToFPerceptionService::init(gpio_num_t interrupt_gpio, uint8_t frequency_hz)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
-    if (bus_handle == nullptr || frequency_hz == 0 || frequency_hz > 60)
+    if (frequency_hz == 0 || frequency_hz > 60)
         return ESP_ERR_INVALID_ARG;
 
-    esp_err_t err = m_sensor.init(bus_handle);
+    esp_err_t err = m_sensor.init();
     if (err != ESP_OK)
         return err;
     if (!m_sensor.test_connection())
@@ -168,7 +166,13 @@ LocalPerceptionState ToFPerceptionService::project_frame(const ToFPerceptionFram
 
 bool ToFPerceptionService::is_available() const
 {
-    return m_available;
+    // Availability means producing fresh frames: a sensor that never delivered
+    // a frame (spurious init on a floating bus) or stopped ranging must not
+    // read as online.
+    constexpr uint64_t FRAME_FRESH_WINDOW_US = 500000;
+    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+    return m_available.load() &&
+           now_us - m_last_frame_us.load() < FRAME_FRESH_WINDOW_US;
 }
 
 void ToFPerceptionService::task_wrapper(void * arg)
@@ -223,5 +227,6 @@ void ToFPerceptionService::publish_result(const VL53L5CX_ResultsData & results)
     m_frame.timestamp_us = esp_timer_get_time();
     m_frame.valid = true;
     m_available = true;
+    m_last_frame_us.store(static_cast<uint64_t>(esp_timer_get_time()));
     xSemaphoreGive(m_mutex);
 }

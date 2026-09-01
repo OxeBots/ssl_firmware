@@ -2,7 +2,6 @@
 #define TOF_PERCEPTION_SERVICE_H
 
 #include <driver/gpio.h>
-#include <driver/i2c_master.h>
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -34,9 +33,7 @@ class ToFPerceptionService
     ToFPerceptionService() = default;
     ~ToFPerceptionService();
 
-    esp_err_t init(i2c_master_bus_handle_t bus_handle,
-                   gpio_num_t interrupt_gpio,
-                   uint8_t frequency_hz = 15);
+    esp_err_t init(gpio_num_t interrupt_gpio, uint8_t frequency_hz = 15);
     esp_err_t start();
     void stop();
 
@@ -60,6 +57,9 @@ class ToFPerceptionService
     uint8_t m_frequency_hz = 15;
     bool m_initialized = false;
     std::atomic_bool m_available = false;
+    // Timestamp of the last published valid frame (us); availability means
+    // frames are still arriving, not merely that init once passed.
+    std::atomic<uint64_t> m_last_frame_us = 0;
 };
 
 #endif  // TOF_PERCEPTION_SERVICE_H
