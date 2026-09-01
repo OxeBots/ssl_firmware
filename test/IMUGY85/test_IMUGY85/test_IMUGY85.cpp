@@ -7,6 +7,7 @@
 #include <sdkconfig.h>
 #include <unity.h>
 
+#include "../shared_test_bus.h"
 #include "IMUGY85.h"
 
 // IMU Instance
@@ -125,6 +126,9 @@ extern "C" void app_main(void)
     UNITY_BEGIN();
 
     RUN_TEST(test_initialization);
+    // The IMUGY85 driver creates the shared I2C bus inside init(); hand it to
+    // the suites that follow in the merged test binary.
+    shared_test_i2c_adopt(imu.get_i2c_bus());
     RUN_TEST(test_raw_acceleration);
     RUN_TEST(test_raw_gyro);
     RUN_TEST(test_raw_magnetometer);

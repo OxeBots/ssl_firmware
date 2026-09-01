@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <unity.h>
 
+#include "../shared_test_bus.h"
 #include "I2Cdev.h"
 #include "VL53L5CX.h"
 
@@ -20,21 +21,10 @@ void tearDown(void)
 {
 }
 
-// Creates the I2C bus and initialises I2Cdev + VL53L5CX.
+// Initialises I2Cdev + VL53L5CX on the shared I2C bus.
 void setup_i2c()
 {
-    i2c_master_bus_config_t i2c_mst_config = {
-        .i2c_port = CONFIG_I2C_PORT_NUM,
-        .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
-        .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .intr_priority = 0,
-        .trans_queue_depth = 0,
-        .flags = {.enable_internal_pullup = true, .allow_pd = false},
-    };
-
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &bus_handle));
+    bus_handle = shared_test_i2c_bus();
     I2Cdev::init(bus_handle);
 }
 
@@ -42,8 +32,7 @@ void setup_i2c()
 void test_connection(void)
 {
     ESP_LOGI(TAG, "Testing connection...");
-    TEST_ASSERT_TRUE_MESSAGE(sensor.test_connection(),
-                             "VL53L5CX not detected (check wiring)");
+    TEST_ASSERT_TRUE_MESSAGE(sensor.test_connection(), "VL53L5CX not detected (check wiring)");
 }
 
 // Starts ranging, waits for one measurement, prints all 4x4 zones.
@@ -62,10 +51,10 @@ void test_single_range_sample(void)
     while (retries > 0)
     {
         status = sensor.check_data_ready(&is_ready);
-        TEST_ASSERT_EQUAL_MESSAGE(VL53L5CX_STATUS_OK, status,
-                                  "check_data_ready failed");
+        TEST_ASSERT_EQUAL_MESSAGE(VL53L5CX_STATUS_OK, status, "check_data_ready failed");
 
-        if (is_ready) break;
+        if (is_ready)
+            break;
         vTaskDelay(10 / portTICK_PERIOD_MS);
         retries--;
     }
@@ -73,8 +62,7 @@ void test_single_range_sample(void)
     TEST_ASSERT_TRUE_MESSAGE(is_ready, "Timed out waiting for ranging data");
 
     status = sensor.get_ranging_data(&results);
-    TEST_ASSERT_EQUAL_MESSAGE(VL53L5CX_STATUS_OK, status,
-                              "get_ranging_data failed");
+    TEST_ASSERT_EQUAL_MESSAGE(VL53L5CX_STATUS_OK, status, "get_ranging_data failed");
 
     // Print zone distances for visual inspection
     for (int i = 0; i < 16; i++)
@@ -105,11 +93,9 @@ void test_multi_range_cycle(void)
         if (status == VL53L5CX_STATUS_OK && is_ready)
         {
             status = sensor.get_ranging_data(&results);
-            TEST_ASSERT_EQUAL_MESSAGE(VL53L5CX_STATUS_OK, status,
-                                      "get_ranging_data failed");
+            TEST_ASSERT_EQUAL_MESSAGE(VL53L5CX_STATUS_OK, status, "get_ranging_data failed");
 
-            ESP_LOGI(TAG, "Sample %d: zone 0 = %d mm",
-                     sample_count, results.distance_mm[0]);
+            ESP_LOGI(TAG, "Sample %d: zone 0 = %d mm", sample_count, results.distance_mm[0]);
             sample_count++;
         }
 
@@ -124,7 +110,7 @@ extern "C" void app_main(void)
 {
     setup_i2c();
 
-    esp_err_t ret = sensor.init(bus_handle);
+    esp_err_t ret = sensor.init();
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Sensor init failed: %s", esp_err_to_name(ret));

@@ -76,9 +76,15 @@ def append_test_entries(workspace):
 
     cmd = template["command"]
 
-    # Collect every lib/ subdirectory (relative paths match existing -I flags).
+    # Collect every lib/ subdirectory plus the embedded-drivers submodule
+    # (relative paths match existing -I flags).
     lib_dirs = sorted(
-        os.path.relpath(d.rstrip("/"), workspace) for d in glob(os.path.join(workspace, "lib/*/")) if os.path.isdir(d)
+        {
+            os.path.relpath(d.rstrip("/"), workspace)
+            for pattern in ("lib/*/", "components/embedded-drivers/*/")
+            for d in glob(os.path.join(workspace, pattern))
+            if os.path.isdir(d)
+        }
     )
 
     # Build extra -I flags for missing lib dirs.
