@@ -14,6 +14,7 @@
 
 #include "AS5600.h"
 #include "CD4052B.h"
+#include "wheel_ekf.h"
 
 static constexpr adc_unit_t ADC_UNIT = ADC_UNIT_1;
 static constexpr uint8_t NUM_ENC_CHANNELS = 4;
@@ -79,6 +80,7 @@ class WheelStateEstimator
     {
         std::unique_ptr<AS5600> encoder;
         adc_cali_handle_t cali_handle;
+        WheelKalmanFilter filter;
     };
 
     WheelStateEstimator();
@@ -105,7 +107,7 @@ class WheelStateEstimator
     TaskHandle_t m_task_handle;
 
     std::array<EncoderChannel, NUM_ENC_CHANNELS> m_enc_channels;
-    std::array<const EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
+    std::array<EncoderChannel *, SOC_ADC_CHANNEL_NUM(ADC_UNIT)> m_channel_lookup;
     SemaphoreHandle_t m_data_mutex;
     CD4052B * m_cd4052b = nullptr;
 };

@@ -1,5 +1,11 @@
 #include "wheel_state_estimator.h"
 
+#include <cmath>
+
+#include "constants.h"
+
+static constexpr float RAD_TO_DEG = 180.0f / static_cast<float>(M_PI);
+
 static const char * TAG = "WheelStateEstimator";
 
 WheelStateEstimator & WheelStateEstimator::get_instance()
@@ -77,7 +83,8 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
 
         auto encoder =
           std::make_unique<AS5600>(ch, handle, is_adc_calibrated, ADC_UNIT, ADC_BITWIDTH);
-        m_enc_channels[i] = EncoderChannel{std::move(encoder), handle};
+        m_enc_channels[i].encoder = std::move(encoder);
+        m_enc_channels[i].cali_handle = handle;
         m_channel_lookup[ch] = &m_enc_channels[i];
         ESP_LOGI(TAG, "Created AS5600 for channel %d", ch);
     }
@@ -317,7 +324,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
-            angles[i] = m_enc_channels[i].encoder->get_angle_rad();
+            angles[i] = static_cast<float>(m_enc_channels[i].filter.get_angle_rad());
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -336,7 +343,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_deg(
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
-            angles[i] = m_enc_channels[i].encoder->get_angle_deg();
+            angles[i] = static_cast<float>(m_enc_channels[i].filter.get_angle_rad()) * RAD_TO_DEG;
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -354,7 +361,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_velocity_r
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
-            velocities[i] = m_enc_channels[i].encoder->get_velocity_rad_s();
+            velocities[i] = static_cast<float>(m_enc_channels[i].filter.get_velocity_rad_s());
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -372,7 +379,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_rpm()
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
-            rpms[i] = m_enc_channels[i].encoder->get_rpm();
+            rpms[i] =
+              static_cast<float>(m_enc_channels[i].filter.get_velocity_rad_s()) * RAD_S_TO_RPM;
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -391,7 +399,8 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_accelerati
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t i = 0; i < NUM_ENC_CHANNELS; ++i)
-            accels[i] = m_enc_channels[i].encoder->get_acceleration_rps2();
+            accels[i] = static_cast<float>(m_enc_channels[i].filter.get_acceleration_rad_s2()) *
+                        RAD_S2_TO_RPS2;
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -461,7 +470,12 @@ void WheelStateEstimator::adc_task()
                     uint16_t data = p->type1.data;
 
                     if (chan_num < SOC_ADC_CHANNEL_NUM(ADC_UNIT) && m_channel_lookup[chan_num])
-                        m_channel_lookup[chan_num]->encoder->process_new_reading(data);
+                    {
+                        float measured_angle_rad = 0.0f;
+                        EncoderChannel * channel = m_channel_lookup[chan_num];
+                        if (channel->encoder->process_new_reading(data, &measured_angle_rad))
+                            channel->filter.update(measured_angle_rad);
+                    }
                 }
                 xSemaphoreGive(m_data_mutex);
             }
