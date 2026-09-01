@@ -1,0 +1,136 @@
+{
+  "suites": [
+    {
+      "slug": "as5600_test_as5600_logic",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_as5600_test_as5600_logic.o"
+    },
+    {
+      "slug": "kinematics_test_omnidirectional_robot",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_kinematics_test_omnidirectional_robot.o"
+    },
+    {
+      "slug": "commandinbox_test_commandinbox",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_commandinbox_test_commandinbox.o"
+    },
+    {
+      "slug": "healthmonitor_test_healthmonitor",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_healthmonitor_test_healthmonitor.o"
+    },
+    {
+      "slug": "powermonitor_test_powermonitor",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_powermonitor_test_powermonitor.o"
+    },
+    {
+      "slug": "robotstateestimator_test_robotstateestimator",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_robotstateestimator_test_robotstateestimator.o"
+    },
+    {
+      "slug": "safetysupervisor_test_safetysupervisor",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_safetysupervisor_test_safetysupervisor.o"
+    },
+    {
+      "slug": "tofperceptionservice_test_tofperceptionservice_logic",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_tofperceptionservice_test_tofperceptionservice_logic.o"
+    },
+    {
+      "slug": "control_test_robotpositioncontroller",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_control_test_robotpositioncontroller.o"
+    },
+    {
+      "slug": "control_test_robotvelocitycontroller",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_control_test_robotvelocitycontroller.o"
+    },
+    {
+      "slug": "nrf24l01_test_nrf24l01",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_nrf24l01_test_nrf24l01.o"
+    },
+    {
+      "slug": "imugy85_test_imugy85",
+      "hooks": [
+        "tearDown",
+        "setUp"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_imugy85_test_imugy85.o"
+    },
+    {
+      "slug": "adxl345_test_adxl345",
+      "hooks": [
+        "tearDown",
+        "setUp"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_adxl345_test_adxl345.o"
+    },
+    {
+      "slug": "as5600_test_as5600",
+      "hooks": [
+        "setUp"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_as5600_test_as5600.o"
+    },
+    {
+      "slug": "bl48250_test_bl48250",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_bl48250_test_bl48250.o"
+    },
+    {
+      "slug": "74hc595_test_74hc595",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_74hc595_test_74hc595.o"
+    },
+    {
+      "slug": "cd4052b_test_cd4052b",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_cd4052b_test_cd4052b.o"
+    },
+    {
+      "slug": "itg3200_test_itg3200",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_itg3200_test_itg3200.o"
+    },
+    {
+      "slug": "qmc5883l_test_qmc5883l",
+      "hooks": [
+        "tearDown",
+        "setUp"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_qmc5883l_test_qmc5883l.o"
+    },
+    {
+      "slug": "spidev_test_spidev",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_spidev_test_spidev.o"
+    },
+    {
+      "slug": "tofperceptionservice_test_tofperceptionservice",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_tofperceptionservice_test_tofperceptionservice.o"
+    },
+    {
+      "slug": "vl53l5cx_test_vl53l5cx",
+      "hooks": [
+        "setUp",
+        "tearDown"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_vl53l5cx_test_vl53l5cx.o"
+    },
+    {
+      "slug": "control_test_wheelcontroller",
+      "hooks": [
+        "setUp",
+        "tearDown"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_control_test_wheelcontroller.o"
+    }
+  ]
+}
