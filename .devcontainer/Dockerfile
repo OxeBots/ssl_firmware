@@ -141,7 +141,7 @@ RUN curl -fsSL -o /tmp/get-platformio.py \
       https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py \
  && python3 /tmp/get-platformio.py
 
-RUN $HOME/.platformio/penv/bin/pip install flawfinder lizard bitproto pyserial ruff
+RUN $HOME/.platformio/penv/bin/pip install bitproto pyserial pygame ruff
 
 # Pre-warm toolchain + IDF venv. Without this, PIO Home and first `pio run` race in
 # espidf.py's `_create_venv` (rm -rf + recreate); whichever finishes first gets undone.

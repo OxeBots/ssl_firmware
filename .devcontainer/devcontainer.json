@@ -26,7 +26,11 @@
     // Combined with udev rules in Dockerfile — replaces --privileged
     "--device-cgroup-rule=c 188:* rmw",
     "--device-cgroup-rule=c 166:* rmw",
-    "--group-add=dialout"
+    "--group-add=dialout",
+    // Share the host IPC namespace: SDL pushes frames to the X server through
+    // MIT-SHM, and X_ShmPutImage fails with BadValue when the container has
+    // its own IPC namespace (the server cannot attach the client's segment).
+    "--ipc=host"
   ],
   "customizations": {
     "vscode": {
@@ -34,7 +38,6 @@
         "platformio.platformio-ide",
         "jeff-hykin.better-cpp-syntax",
         "nordic-semiconductor.nrf-kconfig",
-        "alexnesnes.teleplot",
         "hit9.bitproto",
         "ms-python.python",
         "charliermarsh.ruff",
@@ -66,6 +69,12 @@
   "mounts": [
     // Hardware access for PlatformIO
     "source=/dev/,target=/dev/,type=bind,consistency=consistent",
+    // Host X11 socket so GUI apps (bench_dashboard package) open a window
+    // on the desktop. Pairs with the xhost grant in initialize-command.sh.
+    "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=consistent",
+    // Host udev database: serial tools query USB metadata (vendorId, productId,
+    // serialNumber) through `udevadm info`; without it device listings stay empty
+    "source=/run/udev,target=/run/udev,type=bind,readonly",
     // Persistent shell history (survives container rebuilds)
     "source=pio-bash-history-${devcontainerId},target=/home/${localEnv:USER}/.history,type=volume",
     // Persistent AI agent configs (bind mount from host so config/keys are inherited)
@@ -83,6 +92,7 @@
   ],
   "containerEnv": {
     "SSH_AUTH_SOCK": "/ssh-agent.sock",
+    "DISPLAY": "${localEnv:DISPLAY}",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/${localEnv:USER}/.claude",
     "GEMINI_CONFIG_DIR": "/home/${localEnv:USER}/.gemini",
