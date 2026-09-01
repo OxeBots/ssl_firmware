@@ -4,9 +4,10 @@
 #include <esp_log.h>
 #include <stdint.h>
 
-#include "CascadedMotionController.h"
 #include "CommandInbox.h"
 #include "NRF24L01.h"
+#include "RobotPositionController.h"
+#include "RobotVelocityController.h"
 #include "RuntimeTypes.h"
 #include "SafetySupervisor.h"
 #include "WheelController.h"
@@ -20,8 +21,19 @@ class ProtocolHandler
 
     void init(NRF24L01 * radio, WheelController * wheel_ctrl, OmnidirectionalRobot * kinematics);
 
+    /** Latch the safety supervisor in SAFE_STOP until reboot (mandatory
+     * hardware failure at boot).
+     */
+    void force_safe_stop();
+
     void on_packet(const uint8_t * payload, uint8_t len);
     void update(uint64_t now_us);
+
+    /** Current safety lifecycle for status consumers (serial debug). */
+    LifecycleState get_lifecycle() const;
+
+    /** Latest health snapshot for status consumers (serial debug). */
+    const HealthState & get_health_state() const;
 
    private:
     ProtocolHandler() = default;
@@ -39,7 +51,8 @@ class ProtocolHandler
     bool m_has_latest_command = false;
     HealthState m_health_state = {};
     SafetySupervisor m_safety_supervisor;
-    CascadedMotionController m_motion_controller;
+    RobotPositionController m_position_controller;
+    RobotVelocityController m_velocity_controller;
 };
 
 #endif  // PROTOCOL_HANDLER_H

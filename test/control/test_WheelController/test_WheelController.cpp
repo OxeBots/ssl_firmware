@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 
+#include "../shared_test_bus.h"
 #include "BL48250.h"
 #include "I2Cdev.h"
 #include "NVSManager.h"
@@ -57,16 +58,10 @@ void setUp(void)
 
     // NVS
     NVSManager::init();
+    NVSManager::start();
 
     // SPI for the 74HC595 direction and encoder selector outputs
-    spi_bus_config_t spi_config = {};
-    spi_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
-    spi_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
-    spi_config.sclk_io_num = (gpio_num_t)CONFIG_SCLK_GPIO;
-    spi_config.quadwp_io_num = -1;
-    spi_config.quadhd_io_num = -1;
-    TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &spi_config, SPI_DMA_CH_AUTO));
-    SPIdev::init(SPI2_HOST);
+    shared_test_spi_bus();
     HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
                                      .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
                                      .clock_hz = 1000000};
@@ -77,16 +72,7 @@ void setUp(void)
     TEST_ASSERT_EQUAL(ESP_OK, cd4052b.init(&shift_register, mux_config));
 
     // I2C for AS5600
-    i2c_master_bus_config_t i2c_mst_config = {
-      .i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
-      .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
-      .scl_io_num = (gpio_num_t)CONFIG_SCL_GPIO,
-      .clk_source = I2C_CLK_SRC_DEFAULT,
-      .glitch_ignore_cnt = 7,
-      .intr_priority = 0,
-      .trans_queue_depth = 0,
-      .flags = {.enable_internal_pullup = true, .allow_pd = false}};
-    i2c_new_master_bus(&i2c_mst_config, &bus_handle);
+    bus_handle = shared_test_i2c_bus();
     I2Cdev::init(bus_handle);
 
     // ADC / Estimator

@@ -20,6 +20,12 @@ void SafetySupervisor::set_calibration_active(bool active)
     m_calibration_active = active;
 }
 
+void SafetySupervisor::enter_safe_stop()
+{
+    m_forced_safe_stop = true;
+    m_state = LifecycleState::SAFE_STOP;
+}
+
 void SafetySupervisor::clear_safe_stop()
 {
     if (m_state == LifecycleState::SAFE_STOP && m_self_test_complete)
@@ -36,6 +42,13 @@ SafetyDecision SafetySupervisor::update(uint64_t now_us,
 {
     SafetyDecision decision = {};
     decision.goal = make_safe_goal();
+
+    if (m_forced_safe_stop)
+    {
+        m_state = LifecycleState::SAFE_STOP;
+        decision.lifecycle = m_state;
+        return decision;
+    }
 
     if (!m_self_test_complete)
     {

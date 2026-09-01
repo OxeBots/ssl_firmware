@@ -1,6 +1,7 @@
 #include <74HC595.h>
 #include <CD4052B.h>
 #include <SPIdev.h>
+#include <driver/i2c_master.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
 #include <freertos/FreeRTOS.h>
@@ -10,8 +11,10 @@
 #include <unity.h>
 
 #include <array>
+#include <bitset>
 #include <cmath>
 
+#include "AS5600.h"
 #include "BL48250.h"
 #include "I2Cdev.h"
 #include "NVSManager.h"
@@ -54,12 +57,19 @@ const std::array<adc_channel_t, 4> WHEEL_ADC_CHANNELS = {
 static HC595 s_shift_register;
 static CD4052B s_cd4052b;
 
+// I2C-only handle used to probe the AS5600 encoders on demand (E command).
+// The ADC constructor parameters are unused; raw angles come over I2C through
+// the CD4052B mux, one wheel at a time. The ADC estimator task never touches
+// the mux, so both paths can run concurrently.
+static AS5600 s_stream_encoder(ADC_CHANNEL_0, nullptr, false);
+static i2c_master_bus_handle_t s_i2c_bus = nullptr;
+static bool s_manual_mode = false;  // true = control task paused, raw 595 writes allowed
+
 // Serial buffer
 static constexpr int SERIAL_BUFFER_SIZE = 64;
 static char serialBuffer[SERIAL_BUFFER_SIZE];
 static uint8_t serialIndex = 0;
 static bool newCommand = false;
-static std::array<float, 3> s_last_pid = {1.0f, 0.5f, 0.01f};
 
 // ============================================================================
 // UART / SERIAL HELPERS
@@ -160,7 +170,6 @@ static bool process_serial_command(WheelController & wc)
         std::array<float, 4> ki = {new_ki, new_ki, new_ki, new_ki};
         std::array<float, 4> kd = {new_kd, new_kd, new_kd, new_kd};
         wc.set_pid_tunings(kp, ki, kd);
-        s_last_pid = {new_kp, new_ki, new_kd};
         printf("ACK P: Kp=%.3f Ki=%.3f Kd=%.3f\n", new_kp, new_ki, new_kd);
         return true;
     }
@@ -188,7 +197,6 @@ static bool process_serial_command(WheelController & wc)
             std::array<float, 4> ki = {gains[1], gains[4], gains[7], gains[10]};
             std::array<float, 4> kd = {gains[2], gains[5], gains[8], gains[11]};
             wc.set_pid_tunings(kp, ki, kd);
-            s_last_pid = {kp[0], ki[0], kd[0]};
             printf("ACK S: per-wheel PID set\n");
         }
         return true;
@@ -210,46 +218,127 @@ static bool process_serial_command(WheelController & wc)
         return true;
     }
 
+    // E<channel> — probe the AS5600 on mux channel 0-3 (wheel order
+    //             FL/BL/BR/FR) over I2C and report whether it answers
+    // E-1 — release the mux (inhibit)
+    if (*pointer == 'E')
+    {
+        ++pointer;
+        char * endptr = nullptr;
+        float channel = strtof(pointer, &endptr);
+        if (endptr == pointer)
+            return false;
+
+        if (channel < 0)
+        {
+            esp_err_t err = s_cd4052b.disable();
+            printf("ACK E: mux released (disable %s)\n", esp_err_to_name(err));
+            return true;
+        }
+
+        if (channel > 3)
+        {
+            printf("ERR E: channel %.0f out of range 0-3\n", channel);
+            return true;
+        }
+
+        uint8_t ch = (uint8_t)channel;
+        if (s_cd4052b.select(ch) != ESP_OK)
+        {
+            printf("ERR E: mux select ch%u failed\n", ch);
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        if (!s_stream_encoder.is_i2c_initialized() && s_stream_encoder.init_i2c() != ESP_OK)
+        {
+            printf("ERR E: no AS5600 answered on mux ch%u\n", ch);
+            return true;
+        }
+
+        uint16_t raw = 0;
+        if (s_stream_encoder.get_i2c_raw_angle(&raw) == ESP_OK)
+            printf("ACK E: AS5600 on mux ch%u, raw angle %u (%.1f deg)\n",
+                   ch,
+                   (unsigned)raw,
+                   raw * (360.0f / 4096.0f));
+        else
+            printf("ERR E: AS5600 I2C read failed on mux ch%u\n", ch);
+        return true;
+    }
+
+    // I — probe every valid I2C address; the AS5600 answers at 0x36 when its
+    // mux channel is selected (E<channel>)
+    if (*pointer == 'I')
+    {
+        printf("I2C scan:");
+        int found = 0;
+        for (uint8_t addr = 0x08; addr <= 0x77; ++addr)
+        {
+            if (i2c_master_probe(s_i2c_bus, addr, 20) == ESP_OK)
+            {
+                printf(" 0x%02X%s", addr, (addr == AS5600::AS5600_ADDR) ? "(AS5600)" : "");
+                ++found;
+            }
+        }
+        if (found == 0)
+            printf(" none");
+        printf("\n");
+        return true;
+    }
+
+    // M — toggle manual mode: pause/resume the motor control task so raw
+    // 74HC595 patterns written with the G command are not overwritten every
+    // control cycle. Motors are stopped before pausing.
+    if (*pointer == 'M')
+    {
+        if (!s_manual_mode)
+        {
+            wc.set_target_velocities({0.0f, 0.0f, 0.0f, 0.0f});
+            vTaskDelay(pdMS_TO_TICKS(100));  // let the control task settle at zero duty
+            wc.deinit();
+            s_manual_mode = true;
+            printf("ACK M: manual mode ON - control task paused, motors stopped\n");
+        }
+        else
+        {
+            wc.init();
+            s_manual_mode = false;
+            printf("ACK M: manual mode OFF - control task running\n");
+        }
+        return true;
+    }
+
+    // G<hex> — write a raw byte to the 74HC595 for probing the outputs with a
+    // meter (manual mode only). Bit map: 0..3 = DIR FL/BL/BR/FR, 4/5 = mux A/B,
+    // 6 = mux inhibit, 7 = spare. 74HC595 pins: bit n -> Qn (Q0 = pin 15 ...).
+    if (*pointer == 'G')
+    {
+        ++pointer;
+        if (!s_manual_mode)
+        {
+            printf("ERR G: send M first to pause the control task\n");
+            return true;
+        }
+        char * endptr = nullptr;
+        long value = strtol(pointer, &endptr, 16);
+        if (endptr == pointer || value < 0 || value > 0xFF)
+        {
+            printf("ERR G: expected hex byte 00-FF\n");
+            return true;
+        }
+        esp_err_t err = s_shift_register.write(static_cast<uint8_t>(value));
+        printf("ACK G: 595 = 0x%02X (0b%s) mux=ch%lu%s err=%s\n",
+               (unsigned)value,
+               std::bitset<8>(static_cast<uint8_t>(value)).to_string().c_str(),
+               (unsigned long)((value >> 4) & 0x3),
+               (value & 0x40) ? " inhibited" : " enabled",
+               esp_err_to_name(err));
+        return true;
+    }
+
     printf("ERR: unknown command '%s'\n", serialBuffer);
     return false;
-}
-
-// ============================================================================
-// TELEMETRY (Teleplot format)
-// ============================================================================
-
-static void serial_print_telemetry(uint32_t now_ms)
-{
-    auto & wc = WheelController::get_instance();
-    auto targets = wc.get_target_velocities();
-    auto current = wc.get_current_velocities();
-    auto outputs = wc.get_pid_outputs();
-
-    // --- Essential traces only (reduced from 24 to 12 lines) ---
-    // Command RPM targets (convert rad/s → rpm for display)
-    printf(">FL_cmd_rpm:%.1f\n", targets[0] * RAD_S_TO_RPM);
-    printf(">BL_cmd_rpm:%.1f\n", targets[1] * RAD_S_TO_RPM);
-    printf(">BR_cmd_rpm:%.1f\n", targets[2] * RAD_S_TO_RPM);
-    printf(">FR_cmd_rpm:%.1f\n", targets[3] * RAD_S_TO_RPM);
-
-    // PID gains
-    printf(">Kp:%.3f\n", s_last_pid[0]);
-    printf(">Ki:%.3f\n", s_last_pid[1]);
-    printf(">Kd:%.3f\n", s_last_pid[2]);
-
-    // PWM outputs (signed)
-    printf(">FL_pwm:%.0f\n", outputs[0]);
-    printf(">BL_pwm:%.0f\n", outputs[1]);
-    printf(">BR_pwm:%.0f\n", outputs[2]);
-    printf(">FR_pwm:%.0f\n", outputs[3]);
-
-    // Actual RPM (convert rad/s → rpm for display)
-    printf(">FL_rpm:%.1f\n", current[0] * RAD_S_TO_RPM);
-    printf(">BL_rpm:%.1f\n", current[1] * RAD_S_TO_RPM);
-    printf(">BR_rpm:%.1f\n", current[2] * RAD_S_TO_RPM);
-    printf(">FR_rpm:%.1f\n", current[3] * RAD_S_TO_RPM);
-
-    (void)now_ms;
 }
 
 // ============================================================================
@@ -263,6 +352,7 @@ void test_wheel_controller_interactive()
     {
         // NVS
         NVSManager::init();
+        NVSManager::start();
 
         // SPI for the 74HC595 direction and encoder selector outputs
         spi_bus_config_t spi_config = {};
@@ -283,7 +373,6 @@ void test_wheel_controller_interactive()
         TEST_ASSERT_EQUAL(ESP_OK, s_cd4052b.init(&s_shift_register, mux_config));
 
         // I2C for AS5600
-        static i2c_master_bus_handle_t bus_handle;
         i2c_master_bus_config_t i2c_mst_config = {
           .i2c_port = (i2c_port_t)CONFIG_I2C_PORT_NUM,
           .sda_io_num = (gpio_num_t)CONFIG_SDA_GPIO,
@@ -293,8 +382,8 @@ void test_wheel_controller_interactive()
           .intr_priority = 0,
           .trans_queue_depth = 0,
           .flags = {.enable_internal_pullup = true, .allow_pd = false}};
-        i2c_new_master_bus(&i2c_mst_config, &bus_handle);
-        I2Cdev::init(bus_handle);
+        i2c_new_master_bus(&i2c_mst_config, &s_i2c_bus);
+        I2Cdev::init(s_i2c_bus);
 
         // ADC / Estimator
         WheelStateEstimator::get_instance().init(
@@ -334,29 +423,18 @@ void test_wheel_controller_interactive()
     printf("  S<kp_fl>,<ki_fl>,<kd_fl>,... - Per-wheel PID\n");
     printf("  0                   - Stop all wheels\n");
     printf("  D                   - Save PID gains to NVS\n");
+    printf("  E<channel>          - Probe the AS5600 on mux channel 0-3 (FL/BL/BR/FR)\n");
+    printf("  E-1                 - Release the mux\n");
+    printf("  I                   - Scan I2C bus for devices (AS5600 = 0x36)\n");
+    printf("  M                   - Toggle manual mode (pause control task)\n");
+    printf("  G<hex>              - Write raw 74HC595 byte (manual mode)\n");
     printf("=======================================================\n");
-    printf("Telemetry at 20 Hz — use with Teleplot VS Code extension\n");
-    printf("  >FL_cmd_rpm, >FL_target, >FL_current, >FL_pwm, >FL_rpm\n");
-    printf("  >Kp, >Ki, >Kd\n");
-    printf("=======================================================\n");
-
-    uint32_t last_telem_ms = 0;
-    constexpr uint32_t TELEMETRY_INTERVAL_MS = 50;  // 20 Hz
 
     while (true)
     {
-        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-
         // Service serial commands
         read_serial_data();
         process_serial_command(wc);
-
-        // Telemetry at 20 Hz
-        if (now_ms - last_telem_ms >= TELEMETRY_INTERVAL_MS)
-        {
-            serial_print_telemetry(now_ms);
-            last_telem_ms = now_ms;
-        }
 
         vTaskDelay(pdMS_TO_TICKS(10));  // 1 tick at 100 Hz → guarantees IDLE runs
     }

@@ -1,5 +1,5 @@
 @startuml oxebots_control_architecture
-title OxeBots Firmware Architecture - Cascaded Control and Actuation Migration
+title OxeBots Firmware Architecture - Motion Control and Actuation
 
 top to bottom direction
 
@@ -30,7 +30,7 @@ package "Command and Cascaded Motion" #EFF6FF {
 
     Protocol -down-> CommandInbox : <back:#FFFFFF>decoded command</back>
     CommandInbox -down-> SafetySupervisor : <back:#FFFFFF>requested goal + age</back>
-    SafetySupervisor -down-> PoseController : <back:#FFFFFF>safe, ball-aligned goal pose</back>
+    SafetySupervisor -down-> PositionController : <back:#FFFFFF>safe, ball-aligned goal pose</back>
     Kinematics -down-> WheelController : <back:#FFFFFF>wheel-speed setpoints</back>
     WheelController -down-> MotorDriver : <back:#FFFFFF>signed duties</back>
     MotorDriver -down-> PWMHardware : <back:#FFFFFF>PWM duties</back>
@@ -60,13 +60,13 @@ package "Kicker Client" #FAF5FF {
 }
 
 SafetySupervisor -[hidden]right-> ToFState
-PoseController -[hidden]right-> RobotState
+PositionController -[hidden]right-> RobotState
 WheelController -[hidden]right-> WheelState
 SafetySupervisor -[hidden]right-> HealthState
 
 ToFState -left-> SafetySupervisor
 RobotState -left-> SafetySupervisor
-RobotState -left-> PoseController
+RobotState -left-> PositionController
 RobotState -left-> VelocityController
 WheelState -left-> WheelController
 HealthState -left-> SafetySupervisor : <back:#FFFFFF>severity + inhibit reasons</back>

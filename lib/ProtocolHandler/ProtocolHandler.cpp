@@ -42,7 +42,7 @@ void ProtocolHandler::init(NRF24L01 * radio,
     m_radio = radio;
     m_wheel_ctrl = wheel_ctrl;
     configASSERT(m_command_inbox.init());
-    m_motion_controller.init(*kinematics);
+    m_velocity_controller.init(*kinematics);
     m_safety_supervisor.mark_self_test_complete(true);
     m_health_state = {};
     m_health_state.severity = HealthSeverity::HEALTHY;
@@ -50,6 +50,22 @@ void ProtocolHandler::init(NRF24L01 * radio,
     m_wheel_ctrl->set_tuning_done_callback(on_tuning_done);
 
     ESP_LOGI(TAG, "ProtocolHandler initialized.");
+}
+
+void ProtocolHandler::force_safe_stop()
+{
+    m_safety_supervisor.enter_safe_stop();
+    ESP_LOGE(TAG, "SAFE_STOP latched until reboot.");
+}
+
+LifecycleState ProtocolHandler::get_lifecycle() const
+{
+    return m_safety_supervisor.get_state();
+}
+
+const HealthState & ProtocolHandler::get_health_state() const
+{
+    return m_health_state;
 }
 
 /**
@@ -187,8 +203,16 @@ void ProtocolHandler::update(uint64_t now_us)
     const SafetyDecision decision = m_safety_supervisor.update(now_us, command, m_health_state, {});
     RobotStateEstimate state = {};
     state.health = m_health_state;
-    const ActuationSetpoint setpoint = m_motion_controller.compute(decision.goal, state);
-    m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
+    const BodyVelocity body_target = m_position_controller.compute(state, decision.goal);
+    const ActuationSetpoint setpoint =
+      m_velocity_controller.compute(body_target, decision.goal, state.health);
+    // Until the first radio command arrives the wheel targets belong to the
+    // bench dashboard (SerialDebug); publishing the zero setpoint here would
+    // overwrite the dashboard targets every cycle. Once the radio path has
+    // delivered a command, this loop owns the targets, including the zero
+    // setpoint after a command timeout.
+    if (m_has_latest_command)
+        m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
 }
 
 /**

@@ -36,6 +36,12 @@ class SafetySupervisor
 
     void mark_self_test_complete(bool complete);
     void set_calibration_active(bool active);
+
+    /** Latch SAFE_STOP until reboot. For mandatory hardware failures: only a
+     * restart clears it, so later mark_self_test_complete() calls cannot
+     * release actuation while the fault persists.
+     */
+    void enter_safe_stop();
     void clear_safe_stop();
 
     SafetyDecision update(uint64_t now_us,
@@ -53,6 +59,7 @@ class SafetySupervisor
     LifecycleState m_state = LifecycleState::BOOT;
     bool m_self_test_complete = false;
     bool m_calibration_active = false;
+    bool m_forced_safe_stop = false;
 };
 
 using LifecycleSupervisor = SafetySupervisor;

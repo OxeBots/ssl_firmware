@@ -279,11 +279,14 @@ void WheelController::control_task()
             continue;
         }
 
-        // Skip PID control while tuning is active.
+        // Skip PID control while tuning is active. The 0-timeout take can fail
+        // when another task holds the mutex; only give what was actually taken.
         bool tuning = false;
-        xSemaphoreTake(m_mutex, 0);
-        tuning = m_tuning_mode;
-        xSemaphoreGive(m_mutex);
+        if (xSemaphoreTake(m_mutex, 0) == pdTRUE)
+        {
+            tuning = m_tuning_mode;
+            xSemaphoreGive(m_mutex);
+        }
         if (tuning)
             continue;
 
