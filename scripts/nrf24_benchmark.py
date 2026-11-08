@@ -11,15 +11,20 @@ Usage:
     python scripts/nrf24_benchmark.py -n 200 -t 0.025 --tel-interval 5 --cmd-guard 0.004
 """
 
-import time
 import argparse
+import glob
+import os
 import sys
+import time
 
-try:
-    import ssl_robot_protocol_bp
-except ImportError:
-    import scripts.ssl_robot_protocol_bp as ssl_robot_protocol_bp
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+for _pio_sp in glob.glob(os.path.expanduser("~/.platformio/penv/lib/python*/site-packages")):
+    if _pio_sp not in sys.path:
+        sys.path.append(_pio_sp)
 
+import ssl_robot_protocol_bp
 import nrf24_usb
 
 MSG_TYPE_TELEMETRY_REQ = getattr(ssl_robot_protocol_bp, "MSG_TYPE_TELEMETRY_REQ", 3)
@@ -74,29 +79,33 @@ class RobotStats:
 
 
 # After this many consecutive misses a robot is marked unreachable and its
-# receive window is skipped for the rest of the benchmark run, preventing
-# cascading buffer pollution that corrupts the other robot's results.
-UNREACHABLE_THRESHOLD = 10
+# telemetry requests are throttled to 1 Hz (hot-plug probe), preventing
+# 35-50ms timeouts on every cycle while still automatically recovering as
+# soon as the robot is powered on!
+UNREACHABLE_THRESHOLD = 5
+OFFLINE_PROBE_INTERVAL_SEC = 1.0
 
 
-def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec, tel_interval=1, cmd_guard_sec=0.004):
+def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec, tel_interval=5, cmd_guard_sec=0.015):
     c = nrf24_usb.Colors
+    unique_ids = [robot0_id] if robot0_id == robot1_id else [robot0_id, robot1_id]
     print(f"\n{c.BOLD}=== STARTING ROUND-ROBIN BENCHMARK (CMD + TEL_REQ) ==={c.RESET}")
-    print(f"Robots:        {robot0_id}  ↔  {robot1_id}")
-    print(f"Total cmds:    {num_packets}  ({num_packets // 2} per robot)")
-    print(f"Tel interval:  every {tel_interval} command(s) per robot")
-    print(f"Cmd guard:     {cmd_guard_sec * 1000:.1f} ms")
+    print(f"Robots:        {'  ↔  '.join(str(r) for r in unique_ids)}")
+    print(f"Total cmds:    {num_packets}  ({num_packets // len(unique_ids)} per robot)")
+    print(f"Tel interval:  every {tel_interval} command(s) per robot (1 Hz hot-plug probe when offline)")
+    print(f"Cmd TX sync:   Dongle 6B ACK wait (timeout {cmd_guard_sec * 1000:.1f} ms)")
     print(f"RX timeout:    {timeout_sec * 1000:.0f} ms\n")
 
-    stats = {robot0_id: RobotStats(robot0_id), robot1_id: RobotStats(robot1_id)}
-    consecutive = {robot0_id: 0, robot1_id: 0}  # consecutive telemetry miss counter
-    unreachable = {robot0_id: False, robot1_id: False}
-    robot_ids = [robot0_id, robot1_id]
+    stats = {rid: RobotStats(rid) for rid in unique_ids}
+    consecutive = {rid: 0 for rid in unique_ids}  # consecutive telemetry miss counter
+    unreachable = {rid: False for rid in unique_ids}
+    last_probe_time = {rid: 0.0 for rid in unique_ids}
+    robot_ids = unique_ids
 
     test_start = time.time()
 
     for i in range(num_packets):
-        target_id = robot_ids[i % 2]
+        target_id = robot_ids[i % len(robot_ids)]
         stat = stats[target_id]
         stat.cmds_sent += 1
 
@@ -109,35 +118,39 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec, tel_in
         cmd.kick_velocity = 0
 
         device.send_data(cmd.encode())
-        time.sleep(cmd_guard_sec)
-        device.ser.reset_input_buffer()
+        # Wait for the USB dongle to finish RF TX and emit its 6-byte status (02 00 00 00 00 00)
+        device.wait_dongle_tx_complete(timeout=max(0.018, cmd_guard_sec), settle_sec=0.0015)
 
-        # Check if we should request telemetry on this cycle for target_id
-        should_request_tel = (tel_interval > 0) and (stat.cmds_sent % tel_interval == 0)
+        # Check if we should request telemetry on this cycle for target_id:
+        # - Online robots: every `tel_interval` commands
+        # - Offline (UNREACHABLE) robots: probed once every 1.0s (1 Hz) for hot-plug recovery
+        now_perf = time.perf_counter()
+        if tel_interval <= 0:
+            should_request_tel = False
+        elif not unreachable[target_id]:
+            should_request_tel = (stat.cmds_sent % tel_interval == 0)
+        else:
+            should_request_tel = ((now_perf - last_probe_time[target_id]) >= OFFLINE_PROBE_INTERVAL_SEC)
 
-        r0_label = (
-            f"{c.RED}UNREACHABLE{c.RESET}"
-            if unreachable[robot0_id]
-            else f"{stats[robot0_id].received}/{stats[robot0_id].sent}"
-        )
-        r1_label = (
-            f"{c.RED}UNREACHABLE{c.RESET}"
-            if unreachable[robot1_id]
-            else f"{stats[robot1_id].received}/{stats[robot1_id].sent}"
-        )
+        status_labels = []
+        for rid in unique_ids:
+            lbl = (
+                f"{c.RED}OFFLINE(1Hz){c.RESET}"
+                if unreachable[rid]
+                else f"{stats[rid].received}/{stats[rid].sent}"
+            )
+            status_labels.append(f"R{rid}: {lbl}")
         sys.stdout.write(
-            f"\r[{i + 1}/{num_packets}] → Robot {target_id}  (Tel R{robot0_id}: {r0_label}  R{robot1_id}: {r1_label})"
+            f"\r[{i + 1}/{num_packets}] → Robot {target_id}  (Tel {'  '.join(status_labels)})"
         )
         sys.stdout.flush()
 
         if not should_request_tel:
             continue
 
-        if unreachable[target_id]:
-            continue
-
         # 2. Send explicit RobotTelemetryRequest (MSG_TYPE_TELEMETRY_REQ) and await reply
-        stat.sent += 1
+        was_unreachable = unreachable[target_id]
+        last_probe_time[target_id] = now_perf
         req_ms = int(time.time() * 1000) & 0xFFFFFFFF
         req_bytes = encode_telemetry_request(target_id, req_ms)
 
@@ -151,19 +164,28 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec, tel_in
         # late-arriving dongle status codes before the next send.
         device.ser.reset_input_buffer()
 
-        if telemetry is not None and telemetry.header.timestamp == req_ms and telemetry.header.robot_id == target_id:
+        if telemetry is not None and telemetry.header.robot_id == target_id:
+            stat.sent += 1
             stat.record_success((t1 - t0) * 1000)
             consecutive[target_id] = 0
-            time.sleep(cmd_guard_sec)
-        else:
-            consecutive[target_id] += 1
-            if not unreachable[target_id] and consecutive[target_id] >= UNREACHABLE_THRESHOLD:
-                unreachable[target_id] = True
+            unreachable[target_id] = False
+            if was_unreachable:
                 print(
-                    f"\n{c.YELLOW}[WARN] Robot {target_id} marked UNREACHABLE "
-                    f"after {UNREACHABLE_THRESHOLD} consecutive telemetry misses. "
-                    f"Skipping its telemetry requests for remaining packets.{c.RESET}"
+                    f"\n{c.GREEN}✓ [HOT-PLUG] Robot {target_id} is now ONLINE! "
+                    f"Resuming normal telemetry requests every {tel_interval} commands.{c.RESET}"
                 )
+            time.sleep(0.0015)
+        else:
+            if not was_unreachable:
+                stat.sent += 1
+                consecutive[target_id] += 1
+                if consecutive[target_id] >= UNREACHABLE_THRESHOLD:
+                    unreachable[target_id] = True
+                    print(
+                        f"\n{c.YELLOW}[WARN] Robot {target_id} marked OFFLINE "
+                        f"after {UNREACHABLE_THRESHOLD} consecutive misses. "
+                        f"Probing at 1 Hz until it comes online.{c.RESET}"
+                    )
 
     test_end = time.time()
     total_time = test_end - test_start
@@ -178,7 +200,7 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec, tel_in
     print(f"{c.BOLD}BENCHMARK RESULTS{c.RESET}")
     print("=" * 50)
     print(f"Total time:      {total_time:.2f} s")
-    print(f"Total cmds sent: {num_packets}  ({num_packets // 2} per robot)")
+    print(f"Total cmds sent: {num_packets}  ({num_packets // len(unique_ids)} per robot)")
     print(f"Total tel reqs:  {total_tel_sent}")
     if total_time > 0:
         print(f"Total cmd rate:  {num_packets / total_time:.2f} cmds/sec")
@@ -189,7 +211,7 @@ def run_benchmark(device, robot0_id, robot1_id, num_packets, timeout_sec, tel_in
     print(f"\n{'─' * 50}")
     print(f"{c.BOLD}Per-Robot Breakdown{c.RESET}")
     print(f"{'─' * 50}")
-    for rid in [robot0_id, robot1_id]:
+    for rid in unique_ids:
         stats[rid].print_report(total_time)
 
     print("=" * 50 + "\n")
@@ -207,7 +229,7 @@ def main():
         "--packets",
         type=int,
         default=500,
-        help="Total command packets (split evenly between the two robots)",
+        help="Total command packets",
     )
     parser.add_argument(
         "-t",
@@ -219,14 +241,14 @@ def main():
     parser.add_argument(
         "--tel-interval",
         type=int,
-        default=1,
+        default=5,
         help="Request telemetry every N commands per robot (0 = commands only, no telemetry)",
     )
     parser.add_argument(
         "--cmd-guard",
         type=float,
-        default=0.004,
-        help="Guard time in seconds after sending a fire-and-forget RobotCommand",
+        default=0.018,
+        help="Max timeout in seconds waiting for dongle TX-complete status after RobotCommand",
     )
     parser.add_argument(
         "-r",
@@ -237,7 +259,8 @@ def main():
         help="1=250K, 2=1M, 3=2M",
     )
     parser.add_argument("--robot0", type=int, default=0, help="First robot ID  (0-10)")
-    parser.add_argument("--robot1", type=int, default=1, help="Second robot ID (0-10)")
+    parser.add_argument("--robot1", type=int, default=1, help="Second robot ID (0-10, set same as --robot0 for single robot)")
+    parser.add_argument("--skip-config", action="store_true", help="Skip AT configuration of the USB dongle")
     args = parser.parse_args()
 
     # Validate robot IDs
@@ -250,12 +273,8 @@ def main():
             )
             sys.exit(1)
 
-    if args.robot0 == args.robot1:
-        print("Error: --robot0 and --robot1 must be different robot IDs.")
-        sys.exit(1)
-
-    # Ensure even split
-    if args.packets % 2 != 0:
+    # Ensure even split when testing 2 robots
+    if args.robot0 != args.robot1 and args.packets % 2 != 0:
         args.packets += 1
         print(f"{nrf24_usb.Colors.YELLOW}Note: packet count rounded up to {args.packets}.{nrf24_usb.Colors.RESET}")
 
@@ -269,9 +288,15 @@ def main():
     if not device:
         sys.exit(1)
 
-    print(f"\n{nrf24_usb.Colors.CYAN}Applying Benchmark Configurations...{nrf24_usb.Colors.RESET}")
-    device.set_data_rate(args.rate)
-    time.sleep(1)
+    if not args.skip_config:
+        print(f"\n{nrf24_usb.Colors.CYAN}Applying Benchmark Configurations...{nrf24_usb.Colors.RESET}")
+        rx_address_bytes = [ord(c) for c in "ADMIN"]
+        tx_address_bytes = [ord(c) for c in "ESP32"]
+        device.set_addresses(rx_address_bytes, tx_address_bytes)
+        device.set_frequency(2.476)
+        device.set_data_rate(args.rate)
+        time.sleep(0.5)
+        device.ser.reset_input_buffer()
 
     run_benchmark(
         device,

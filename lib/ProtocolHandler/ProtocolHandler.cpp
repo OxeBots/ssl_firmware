@@ -123,18 +123,22 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             break;
 
         case MSG_TYPE_TELEMETRY_REQ:
-        {    
-            if(len < BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST){
-                ESP_LOGW(TAG, "MSG_TYPE_TELREQ: too short (%d / %d bytes).",
-                    len,
-                    BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST);
+        {
+            if (len < BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST)
+            {
+                ESP_LOGW(TAG,
+                         "MSG_TYPE_TELREQ: too short (%d / %d bytes).",
+                         len,
+                         BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST);
                 return;
             }
-            
+
             const uint8_t my_id = RobotState::get_instance().get_id();
 
-            if(hdr.robot_id != my_id && hdr.robot_id != ROBOT_ID_BROADCAST){
-                ESP_LOGD(TAG, "Telemetry request ignored — for robot %d, we are %d.", hdr.robot_id, my_id);
+            if (hdr.robot_id != my_id && hdr.robot_id != ROBOT_ID_BROADCAST)
+            {
+                ESP_LOGD(
+                  TAG, "Telemetry request ignored — for robot %d, we are %d.", hdr.robot_id, my_id);
                 return;
             }
 
@@ -157,8 +161,8 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
  *
  * Extracts target velocities from command, converts mm/s and 0.01 rad/s units
  * to m/s and rad/s, computes wheel velocities via inverse kinematics, and
- * sets wheel controller targets. For non-broadcast commands, sends telemetry
- * reply with echo timestamp.
+ * sets wheel controller targets. RobotCommand is strictly fire-and-forget;
+ * telemetry replies are only sent when a RobotTelemetryRequest is received.
  *
  * @param cmd Decoded RobotCommand message
  */
@@ -188,12 +192,20 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
       static_cast<float>(wheel_vels(3)),
     };
     m_wheel_ctrl->set_target_velocities(wheel_arr);
-
 }
 
-void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest& telreq){
+/**
+ * @brief Handle RobotTelemetryRequest — transmit RobotTelemetry back to the base station.
+ *
+ * Echoes the request's timestamp in the RobotTelemetry header so the base station
+ * can compute Round-Trip Time (RTT).
+ *
+ * @param telreq Decoded RobotTelemetryRequest message
+ */
+void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest & telreq)
+{
     ESP_LOGI(TAG, "Sending telemetry request, robot: %d", telreq.header.robot_id);
-    
+
     Telemetry::get_instance().send(telreq.header.timestamp);
 }
 

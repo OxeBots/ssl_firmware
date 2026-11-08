@@ -202,8 +202,11 @@ void NRF24L01::receiver_task()
                 // Flush queued TX frames (only triggered when RobotTelemetry is enqueued)
                 while (xQueueReceive(m_tx_queue, &tx_buffer, 0))
                 {
+                    // Wait 5ms for the USB dongle to finish its PTX cycle / UART status output
+                    // and switch back to PRX mode ("ADMIN") before transmitting telemetry.
+                    vTaskDelay(pdMS_TO_TICKS(5));
                     Nrf24_send(&m_dev, tx_buffer);
-                    if (!Nrf24_isSend(&m_dev, 20))
+                    if (!Nrf24_isSend(&m_dev, 25))
                     {
                         ESP_LOGW(TAG, "TX sent (no Auto-ACK from USB adapter)");
                     }
