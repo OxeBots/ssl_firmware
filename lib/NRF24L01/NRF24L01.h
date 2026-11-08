@@ -1,5 +1,5 @@
-#ifndef NRF24L01_H
-#define NRF24L01_H
+#ifndef _NRF24L01_H_
+#define _NRF24L01_H_
 
 #include <driver/gpio.h>
 #include <esp_log.h>
@@ -27,6 +27,8 @@ class NRF24L01
     esp_err_t send_raw(const uint8_t * data, uint8_t len);
 
    private:
+    static constexpr uint32_t TX_NOTIFY_EVENT = 0xFFFFFFFF;
+
     static void IRAM_ATTR isr_handler(void * dev);
     static void task_wrapper(void * dev);
     void receiver_task();
@@ -40,4 +42,4 @@ class NRF24L01
     uint8_t m_payload_size;
 };
 
-#endif  // NRF24L01_H
+#endif  // _NRF24L01_H_

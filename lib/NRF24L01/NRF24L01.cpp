@@ -7,12 +7,12 @@ static const char * TAG = "NRF24L01";
  * @param irq The GPIO pin number connected to the NRF24L01's IRQ pin.
  */
 NRF24L01::NRF24L01(gpio_num_t irq)
-: m_irq_pin(irq),
-  m_task_handle(NULL),
-  m_interrupt_queue(NULL),
-  m_tx_queue(NULL),
-  m_on_data_received(nullptr),
-  m_payload_size(32)
+    : m_irq_pin(irq),
+      m_task_handle(NULL),
+      m_interrupt_queue(NULL),
+      m_tx_queue(NULL),
+      m_on_data_received(nullptr),
+      m_payload_size(32)
 {
     memset(&m_dev, 0, sizeof(NRF24_t));
 }
@@ -23,11 +23,17 @@ NRF24L01::NRF24L01(gpio_num_t irq)
 NRF24L01::~NRF24L01()
 {
     if (m_task_handle)
+    {
         vTaskDelete(m_task_handle);
+    }
     if (m_interrupt_queue)
+    {
         vQueueDelete(m_interrupt_queue);
+    }
     if (m_tx_queue)
+    {
         vQueueDelete(m_tx_queue);
+    }
 
     gpio_isr_handler_remove(m_irq_pin);
     Nrf24_deinit(&m_dev);
@@ -67,7 +73,7 @@ esp_err_t NRF24L01::init(uint8_t channel,
     if (ret != ESP_OK)
     {
         ESP_LOGE(
-          TAG, "nrf24l01 not installed / failed to set RADDR (Check Wiring & add 10uF Capacitor!)");
+            TAG, "nrf24l01 not installed / failed to set RADDR (Check Wiring & add 10uF Capacitor!)");
         return ret;
     }
 
@@ -87,10 +93,12 @@ esp_err_t NRF24L01::init(uint8_t channel,
     ESP_LOGI(TAG, "NRF24L01 Receiver Initialized:");
     Nrf24_printDetails(&m_dev);
 
-    m_interrupt_queue = xQueueCreate(10, sizeof(uint32_t));
+    m_interrupt_queue = xQueueCreate(20, sizeof(uint32_t));
     m_tx_queue = xQueueCreate(10, m_payload_size * sizeof(uint8_t));
     if (m_interrupt_queue == NULL || m_tx_queue == NULL)
+    {
         return ESP_FAIL;
+    }
 
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
@@ -101,12 +109,16 @@ esp_err_t NRF24L01::init(uint8_t channel,
 
     ret = gpio_config(&io_conf);
     if (ret != ESP_OK)
+    {
         return ret;
+    }
 
     // gpio_install_isr_service() must be called in main.cpp before this.
     ret = gpio_isr_handler_add(m_irq_pin, NRF24L01::isr_handler, (void *)this);
     if (ret != ESP_OK)
+    {
         return ret;
+    }
 
     return ESP_OK;
 }
@@ -119,11 +131,13 @@ esp_err_t NRF24L01::init(uint8_t channel,
 bool NRF24L01::start(data_received_callback_t callback)
 {
     if (!callback)
+    {
         return false;
+    }
     m_on_data_received = callback;
 
     BaseType_t task_created =
-      xTaskCreate(&NRF24L01::task_wrapper, "nrf24_receiver_task", 4096, this, 5, &m_task_handle);
+        xTaskCreate(&NRF24L01::task_wrapper, "nrf24_receiver_task", 4096, this, 5, &m_task_handle);
     return task_created == pdPASS;
 }
 
@@ -156,15 +170,15 @@ void NRF24L01::task_wrapper(void * dev)
 void NRF24L01::receiver_task()
 {
     ESP_LOGI(TAG, "Receiver task started. Listening for data...");
-    uint32_t io_num;
+    uint32_t event_id;
     uint8_t buffer[32];
     uint8_t tx_buffer[32];
 
     while (true)
     {
-        if (xQueueReceive(m_interrupt_queue, &io_num, portMAX_DELAY))
+        if (xQueueReceive(m_interrupt_queue, &event_id, portMAX_DELAY))
         {
-            if (io_num == static_cast<uint32_t>(m_irq_pin))
+            if (event_id == static_cast<uint32_t>(m_irq_pin) || event_id == TX_NOTIFY_EVENT)
             {
                 // Drain all pending RX packets
                 while (Nrf24_dataReady(&m_dev))
@@ -185,14 +199,18 @@ void NRF24L01::receiver_task()
                     }
                 }
 
-                // Flush queued TX frames
+                // Flush queued TX frames (only triggered when RobotTelemetry is enqueued)
                 while (xQueueReceive(m_tx_queue, &tx_buffer, 0))
                 {
                     Nrf24_send(&m_dev, tx_buffer);
-                    if (!Nrf24_isSend(&m_dev, 100))
+                    if (!Nrf24_isSend(&m_dev, 20))
+                    {
                         ESP_LOGW(TAG, "TX sent (no Auto-ACK from USB adapter)");
+                    }
                     else
-                        ESP_LOGI(TAG, "TX sent and ACKed by USB adapter");
+                    {
+                        ESP_LOGD(TAG, "TX sent and ACKed by USB adapter");
+                    }
                 }
             }
         }
@@ -202,13 +220,8 @@ void NRF24L01::receiver_task()
 /**
  * @brief Enqueue raw bytes for over-the-air transmission.
  *
- * Builds a 32-byte RF frame by placing the payload length in byte 0 (dongle
- * convention) and copying the caller's data into bytes 1..len.  The rest of
- * the frame is zero-padded.  The caller must NOT include the length byte or
- * any padding — just the meaningful protocol payload.
- *
  * @param data  Pointer to payload bytes.
- * @param len   Payload length (must be ≤ 31).
+ * @param len   Payload length (must be <= 31).
  * @return ESP_OK on success.
  */
 esp_err_t NRF24L01::send_raw(const uint8_t * data, uint8_t len)
@@ -223,11 +236,14 @@ esp_err_t NRF24L01::send_raw(const uint8_t * data, uint8_t len)
     frame[0] = len;                // dongle length prefix
     memcpy(&frame[1], data, len);  // protocol payload
 
-    if (xQueueSend(m_tx_queue, frame, pdMS_TO_TICKS(100)) != pdPASS)
+    if (xQueueSend(m_tx_queue, frame, pdMS_TO_TICKS(20)) != pdPASS)
     {
         ESP_LOGE(TAG, "send_raw: TX queue full");
         return ESP_FAIL;
     }
+
+    uint32_t notify = TX_NOTIFY_EVENT;
+    xQueueSend(m_interrupt_queue, &notify, 0);
 
     return ESP_OK;
 }

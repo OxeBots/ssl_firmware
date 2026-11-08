@@ -122,6 +122,30 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             ESP_LOGD(TAG, "Received telemetry from robot %d — ignoring.", hdr.robot_id);
             break;
 
+        case MSG_TYPE_TELEMETRY_REQ:
+        {    
+            if(len < BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST){
+                ESP_LOGW(TAG, "MSG_TYPE_TELREQ: too short (%d / %d bytes).",
+                    len,
+                    BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST);
+                return;
+            }
+            
+            const uint8_t my_id = RobotState::get_instance().get_id();
+
+            if(hdr.robot_id != my_id && hdr.robot_id != ROBOT_ID_BROADCAST){
+                ESP_LOGD(TAG, "Telemetry request ignored — for robot %d, we are %d.", hdr.robot_id, my_id);
+                return;
+            }
+
+            ESP_LOGD(TAG, "Received telemetry request, robot: %d", hdr.robot_id);
+            RobotTelemetryRequest telreq;
+            memset(&telreq, 0, sizeof(RobotTelemetryRequest));
+            DecodeRobotTelemetryRequest(&telreq, const_cast<uint8_t *>(payload));
+            handle_telemetry_req(telreq);
+            break;
+        }
+
         default:
             ESP_LOGW(TAG, "Unknown msg_type=0x%02X — discarding.", hdr.msg_type);
             break;
@@ -151,9 +175,9 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
 
     // Convert body-frame velocities to wheel velocities via omni kinematics.
     vt::numeric_vector<3> body_vel;
-    body_vel(0) = static_cast<float>(cmd.target_pose.x_v) / 1000.0f;         // mm/s  → m/s
-    body_vel(1) = static_cast<float>(cmd.target_pose.y_v) / 1000.0f;         // mm/s  → m/s
-    body_vel(2) = static_cast<float>(cmd.target_pose.angular_vel) / 100.0f;  // 0.01 rad/s → rad/s
+    body_vel(1) = static_cast<float>(cmd.target_pose.x_v) / 1000.0f;         // mm/s  → m/s
+    body_vel(2) = static_cast<float>(cmd.target_pose.y_v) / 1000.0f;         // mm/s  → m/s
+    body_vel(0) = static_cast<float>(cmd.target_pose.angular_vel) / 100.0f;  // 0.01 rad/s → rad/s
 
     vt::numeric_vector<4> wheel_vels = m_kinematics->compute_wheel_velocities(body_vel);
 
@@ -165,11 +189,12 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
     };
     m_wheel_ctrl->set_target_velocities(wheel_arr);
 
-    // Broadcast commands: execute without reply.
-    if (cmd.header.robot_id == ROBOT_ID_BROADCAST)
-        return;
+}
 
-    Telemetry::get_instance().send(cmd.header.timestamp);
+void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest& telreq){
+    ESP_LOGI(TAG, "Sending telemetry request, robot: %d", telreq.header.robot_id);
+    
+    Telemetry::get_instance().send(telreq.header.timestamp);
 }
 
 /**

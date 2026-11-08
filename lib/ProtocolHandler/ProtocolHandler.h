@@ -25,6 +25,7 @@ class ProtocolHandler
     ProtocolHandler & operator=(const ProtocolHandler &) = delete;
 
     void handle_command(const RobotCommand & cmd);
+    void handle_telemetry_req(const RobotTelemetryRequest& telreq);
     void handle_config(const RobotConfig & cfg);
 
     NRF24L01 * m_radio = nullptr;

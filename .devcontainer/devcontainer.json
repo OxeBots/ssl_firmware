@@ -26,7 +26,8 @@
     // Combined with udev rules in Dockerfile — replaces --privileged
     "--device-cgroup-rule=c 188:* rmw",
     "--device-cgroup-rule=c 166:* rmw",
-    "--group-add=dialout"
+    "--group-add=dialout",
+    "--group-add=14" // gp uucp (tem permisão sobre usb no arch)
   ],
   "customizations": {
     "vscode": {
@@ -73,12 +74,9 @@
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.config/opencode,target=/home/${localEnv:USER}/.config/opencode,type=bind",
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.local/share/opencode,target=/home/${localEnv:USER}/.local/share/opencode,type=bind",
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.local/state/opencode,target=/home/${localEnv:USER}/.local/state/opencode,type=bind",
-    // Host SSH agent (for git push/pull inside the container)
-    "source=${env:SSH_AUTH_SOCK},target=/ssh-agent.sock,type=bind",
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/${localEnv:USER}/.ssh,type=bind"
   ],
   "containerEnv": {
-    "SSH_AUTH_SOCK": "/ssh-agent.sock",
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/${localEnv:USER}/.claude",
     "GEMINI_CONFIG_DIR": "/home/${localEnv:USER}/.gemini",

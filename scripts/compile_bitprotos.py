@@ -82,8 +82,8 @@ def compile_bitprotos(env):
     files_to_generate = []
     for pf in proto_files:
         base = splitext(basename(pf))[0]
-        out_h = join(output_dir, base + ".h")
-        out_c = join(output_dir, base + ".c")
+        out_h = join(output_dir, base + "_bp.h")
+        out_c = join(output_dir, base + "_bp.c")
         if (
             (not exists(out_h))
             or (not exists(out_c))
