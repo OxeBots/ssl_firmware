@@ -1,6 +1,3 @@
-#include <74HC595.h>
-#include <CD4052B.h>
-#include <SPIdev.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
@@ -14,10 +11,13 @@
 #include <bitset>
 #include <cmath>
 
+#include "74HC595.h"
 #include "AS5600.h"
 #include "BL48250.h"
+#include "CD4052B.h"
 #include "I2Cdev.h"
 #include "NVSManager.h"
+#include "SPIdev.h"
 #include "WheelController.h"
 #include "constants.h"
 #include "wheel_state_estimator.h"
@@ -57,6 +57,23 @@ const std::array<adc_channel_t, 4> WHEEL_ADC_CHANNELS = {
 static HC595 s_shift_register;
 static CD4052B s_cd4052b;
 
+// Applies new PID gains to all wheels, keeping their feedforward terms.
+static void set_all_gains(WheelController & controller,
+                          const std::array<float, 4> & kp,
+                          const std::array<float, 4> & ki,
+                          const std::array<float, 4> & kd)
+{
+    const auto current = controller.get_parameters();
+    for (int wheel = 0; wheel < 4; ++wheel)
+    {
+        WheelController::Parameters parameters = current[wheel];
+        parameters.kp = kp[wheel];
+        parameters.ki = ki[wheel];
+        parameters.kd = kd[wheel];
+        controller.apply_parameters(wheel, parameters);
+    }
+}
+
 // I2C-only handle used to probe the AS5600 encoders on demand (E command).
 // The ADC constructor parameters are unused; raw angles come over I2C through
 // the CD4052B mux, one wheel at a time. The ADC estimator task never touches
@@ -67,9 +84,9 @@ static bool s_manual_mode = false;  // true = control task paused, raw 595 write
 
 // Serial buffer
 static constexpr int SERIAL_BUFFER_SIZE = 64;
-static char serialBuffer[SERIAL_BUFFER_SIZE];
-static uint8_t serialIndex = 0;
-static bool newCommand = false;
+static char serial_buffer[SERIAL_BUFFER_SIZE];
+static uint8_t serial_index = 0;
+static bool new_command = false;
 
 // ============================================================================
 // UART / SERIAL HELPERS
@@ -91,28 +108,28 @@ static void read_serial_data()
     {
         if (c == '\n' || c == '\r')
         {
-            if (serialIndex > 0)
+            if (serial_index > 0)
             {
-                serialBuffer[serialIndex] = '\0';
-                newCommand = true;
-                serialIndex = 0;
+                serial_buffer[serial_index] = '\0';
+                new_command = true;
+                serial_index = 0;
                 return;
             }
         }
-        else if (serialIndex < (SERIAL_BUFFER_SIZE - 1))
-            serialBuffer[serialIndex++] = (char)c;
+        else if (serial_index < (SERIAL_BUFFER_SIZE - 1))
+            serial_buffer[serial_index++] = (char)c;
         else
-            serialIndex = 0;
+            serial_index = 0;
     }
 }
 
 static bool process_serial_command(WheelController & wc)
 {
-    if (!newCommand)
+    if (!new_command)
         return false;
 
-    newCommand = false;
-    char * pointer = serialBuffer;
+    new_command = false;
+    char * pointer = serial_buffer;
 
     // Trim leading whitespace
     while (*pointer == ' ' || *pointer == '\t') ++pointer;
@@ -169,7 +186,7 @@ static bool process_serial_command(WheelController & wc)
         std::array<float, 4> kp = {new_kp, new_kp, new_kp, new_kp};
         std::array<float, 4> ki = {new_ki, new_ki, new_ki, new_ki};
         std::array<float, 4> kd = {new_kd, new_kd, new_kd, new_kd};
-        wc.set_pid_tunings(kp, ki, kd);
+        set_all_gains(wc, kp, ki, kd);
         printf("ACK P: Kp=%.3f Ki=%.3f Kd=%.3f\n", new_kp, new_ki, new_kd);
         return true;
     }
@@ -196,7 +213,7 @@ static bool process_serial_command(WheelController & wc)
             std::array<float, 4> kp = {gains[0], gains[3], gains[6], gains[9]};
             std::array<float, 4> ki = {gains[1], gains[4], gains[7], gains[10]};
             std::array<float, 4> kd = {gains[2], gains[5], gains[8], gains[11]};
-            wc.set_pid_tunings(kp, ki, kd);
+            set_all_gains(wc, kp, ki, kd);
             printf("ACK S: per-wheel PID set\n");
         }
         return true;
@@ -213,8 +230,8 @@ static bool process_serial_command(WheelController & wc)
     // D — save current PID gains to NVS
     if (*pointer == 'D')
     {
-        wc.save_all_pid_to_nvs();
-        printf("ACK D: PID gains saved to NVS\n");
+        wc.save_all_parameters();
+        printf("ACK D: control parameters saved to NVS\n");
         return true;
     }
 
@@ -311,7 +328,8 @@ static bool process_serial_command(WheelController & wc)
 
     // G<hex> — write a raw byte to the 74HC595 for probing the outputs with a
     // meter (manual mode only). Bit map: 0..3 = DIR FL/BL/BR/FR, 4/5 = mux A/B,
-    // 6 = mux inhibit, 7 = spare. 74HC595 pins: bit n -> Qn (Q0 = pin 15 ...).
+    // 6 = mux inhibit, 7 = nRF24 CE (CERF24). 74HC595 pins: bit n -> Qn
+    // (Q0 = pin 15 ...).
     if (*pointer == 'G')
     {
         ++pointer;
@@ -337,7 +355,7 @@ static bool process_serial_command(WheelController & wc)
         return true;
     }
 
-    printf("ERR: unknown command '%s'\n", serialBuffer);
+    printf("ERR: unknown command '%s'\n", serial_buffer);
     return false;
 }
 
@@ -355,14 +373,7 @@ void test_wheel_controller_interactive()
         NVSManager::start();
 
         // SPI for the 74HC595 direction and encoder selector outputs
-        spi_bus_config_t spi_config = {};
-        spi_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
-        spi_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
-        spi_config.sclk_io_num = (gpio_num_t)CONFIG_SCLK_GPIO;
-        spi_config.quadwp_io_num = -1;
-        spi_config.quadhd_io_num = -1;
-        spi_bus_initialize(SPI2_HOST, &spi_config, SPI_DMA_CH_AUTO);
-        SPIdev::init(SPI2_HOST);
+        SPIdev::init();
         HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
                                          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
                                          .clock_hz = 1000000};

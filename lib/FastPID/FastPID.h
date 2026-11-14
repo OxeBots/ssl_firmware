@@ -1,5 +1,5 @@
-#ifndef FAST_PID_H_
-#define FAST_PID_H_
+#ifndef _FAST_PID_H_
+#define _FAST_PID_H_
 
 #include <stdint.h>
 
@@ -26,11 +26,11 @@ class FastPID
 
     ~FastPID() = default;
 
-    bool setCoefficients(float kp, float ki, float kd, float hz);
+    bool set_coefficients(float kp, float ki, float kd, float hz);
 
-    bool setOutputConfig(int bits, bool sign);
+    bool set_output_config(int bits, bool sign);
 
-    bool setOutputRange(int16_t min, int16_t max);
+    bool set_output_range(int16_t min, int16_t max);
 
     void clear();
 
@@ -57,4 +57,4 @@ class FastPID
     int32_t m_last_err = 0;
 };
 
-#endif  // FAST_PID_H_
+#endif  // _FAST_PID_H_
