@@ -8,7 +8,7 @@ top to bottom direction
 !include health_types.iuml
 
 package "Runtime Producers" as ProducerLane #EFF6FF {
-    component "AdcAcquisitionService::task\nAS5600 + VMON\nPRIORITY_P0" as ADCTask <<partial>>
+    component "AdcStream::task\nAS5600 + VMON\nPRIORITY_P0" as ADCTask <<partial>>
     component "BL48250_FeedbackService::task\nFB wheel-velocity pulses\nPRIORITY_P0" as FBTask <<target>>
     component "OrientationHandler::task_loop\ninterrupt-paced IMU\nPRIORITY_P1" as OrientationTask <<partial>>
     component "ToFPerceptionService::task\nvalidated range-frame publication\nPRIORITY_P2" as ToFTask <<partial>>
@@ -56,7 +56,7 @@ package "Control and Publication" as ControlLane #F0FDF4 {
     database "ActuationSetpoint\nwheel targets + kick + inhibit\nPRIORITY_P0" as ActuationSetpoint <<implemented>>
     component "WheelController::control_task\n100 Hz PID x4\nPRIORITY_DONE" as WheelTask <<implemented>>
     component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<implemented>>
-    component "74HC595\noutput byte + RCKSR latch\nPRIORITY_P0" as HC595Driver <<implemented>>
+    component "74HC595\noutput byte (DIR, MUX, RF24 CE) + RCKSR latch\nPRIORITY_P0" as HC595Driver <<implemented>>
     component "Telemetry\nRobotTelemetry encoder\nPRIORITY_P1" as Telemetry <<partial>>
 
     SafetySupervisor -down-> GoalPose

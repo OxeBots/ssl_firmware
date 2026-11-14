@@ -30,7 +30,7 @@ package "Robot - ESP32 Firmware" #F0FDF4 {
     component "HealthMonitor\nHealthObservationFrame -> HealthState\nPRIORITY_P0" as Health <<implemented>>
     component "CascadedMotionController\npose + velocity + kinematics\nPRIORITY_P1" as Control <<implemented>>
     component "BL48250\nLEDC PWM + direction sequencing\nPRIORITY_P0" as MotorOutput <<implemented>>
-    component "74HC595\noutput byte + RCKSR latch\nPRIORITY_P0" as HC595Driver <<implemented>>
+    component "74HC595\noutput byte (DIR, MUX, RF24 CE) + RCKSR latch\nPRIORITY_P0" as HC595Driver <<implemented>>
     component "RobotStateEstimator\npose + velocity + perception fusion\nPRIORITY_P1" as State <<implemented>>
     component "NVSManager\nserialized persistence\nPRIORITY_DONE" as Persistence <<implemented>>
 
@@ -63,7 +63,7 @@ package "Robot Electronics" #FAF5FF {
 BaseGateway <-down-> RadioLink : <back:#FFFFFF>commands down / telemetry up</back>
 RadioLink <-down-> Transport : <back:#FFFFFF>RF frames</back>
 MotorOutput -down-> MainBoard : <back:#FFFFFF>LEDC PWM</back>
-HC595Driver -down-> MainBoard : <back:#FFFFFF>latched direction outputs</back>
+HC595Driver -down-> MainBoard : <back:#FFFFFF>latched direction + mux + radio CE outputs</back>
 MainBoard -up-> State : <back:#FFFFFF>sensor measurements</back>
 MainBoard -up-> Health : <back:#FFFFFF>device observations</back>
 
