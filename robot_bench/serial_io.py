@@ -50,16 +50,17 @@ class BenchReader(threading.Thread):
                     # The port is gone for good (cable pulled, board back on
                     # another port): rescan via the port picker.
                     self.state.connected = None
-                    self.state.add_console("port unavailable - returning to port selection")
+                    self.state.add_console("porta indisponível - voltando para a seleção de portas")
                     self.state.picker_requested = True
                     return
                 time.sleep(1.0)
                 continue
             first_open_fail = None
             self.ser = ser
+            self.state.clear_freshness()
             self.state.connected = ser.port
             self.decoder = proto.FrameDecoder()
-            self.state.add_console(f"connected to {ser.port} @ {self.baud}")
+            self.state.add_console(f"conectado a {ser.port} · {self.baud} baud")
             self._session_start = time.monotonic()
             self._read_loop(ser)
             self._close()
@@ -111,7 +112,7 @@ class BenchReader(threading.Thread):
                 # producing) state frames and resubscribing did not help:
                 # reopen the port. Its DTR/RTS edge hardware-resets the board
                 # for a clean session.
-                self.state.add_console("no frames - reopening port to recover the link")
+                self.state.add_console("sem quadros - reabrindo a porta para recuperar o link")
                 return
             if now - last_send >= SEND_PERIOD_S:
                 last_send = now
@@ -127,7 +128,7 @@ class BenchReader(threading.Thread):
             try:
                 chunk = ser.read(256)
             except (serial.SerialException, OSError):
-                self.state.add_console("serial link lost, reconnecting...")
+                self.state.add_console("conexão serial perdida, reconectando...")
                 return
             if not chunk:
                 continue
@@ -136,10 +137,10 @@ class BenchReader(threading.Thread):
             if any(sig in chunk for sig in _BOOT_SIGNATURES):
                 if not reboot_hint_shown:
                     reboot_hint_shown = True
-                    self.state.add_console("firmware rebooted mid-session - resubscribing")
+                    self.state.add_console("firmware reiniciou no meio da sessão - reativando a transmissão")
                 # The rebooted firmware dropped its stream state: fall back to
                 # START_STREAM until frames arrive again.
-                self.state.streaming = False
+                self.state.clear_freshness()
             for msg_type, message in self.decoder.feed(chunk):
                 data = proto.parse_frame(msg_type, message)
                 if data is None:
@@ -156,7 +157,7 @@ class BenchReader(threading.Thread):
             ):
                 contention_hint_shown = True
                 self.state.add_console(
-                    "data is arriving but no frames decode - close other monitors on this port"
+                    "dados estão chegando, mas nenhum quadro é decodificado - feche outros monitores nesta porta"
                 )
 
     def _dispatch(self, msg_type, data):
@@ -171,6 +172,12 @@ class BenchReader(threading.Thread):
             self.state.update_health(data)
         elif msg_type == proto.MSG_TEXT:
             self.state.add_console(data)
+        elif msg_type == proto.MSG_CALIBRATION:
+            self.state.update_calibration(data)
+        elif msg_type == proto.MSG_TUNING:
+            self.state.update_tuning(data)
+        elif msg_type == proto.MSG_POSITION:
+            self.state.update_position(data)
 
     def _close(self):
         self._stop_stream()
@@ -182,7 +189,7 @@ class BenchReader(threading.Thread):
                     pass
             self.ser = None
         self.state.connected = None
-        self.state.streaming = False
+        self.state.clear_freshness()
 
     def _stop_stream(self):
         self.send_frame(proto.MSG_CONTROL, proto.encode_control(proto.OP_STOP_STREAM))

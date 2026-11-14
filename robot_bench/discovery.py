@@ -25,7 +25,7 @@ def list_candidate_ports():
         device = port.device
         if re.search(r"ttyUSB\d+|ttyACM\d+|usbserial|usbmodem", device) or re.match(r"COM\d+$", device):
             if "Bluetooth" not in (port.description or ""):
-                candidates.append((device, port.description or "USB serial device"))
+                candidates.append((device, port.description or "Dispositivo serial USB"))
     return sorted(candidates)
 
 
