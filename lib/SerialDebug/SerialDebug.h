@@ -1,8 +1,6 @@
-#ifndef SERIAL_DEBUG_H
-#define SERIAL_DEBUG_H
+#ifndef _SERIAL_DEBUG_H_
+#define _SERIAL_DEBUG_H_
 
-#include <esp_adc/adc_cali.h>
-#include <esp_adc/adc_oneshot.h>
 #include <esp_err.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -12,27 +10,22 @@
 #include <atomic>
 #include <cstdint>
 
-#include "PowerMonitor.h"
 #include "SerialDebugCodec.h"
 #include "ToFPerceptionService.h"
 
-/** Streams binary debug frames over UART0 for the bench_dashboard GUI.
- * Compiled in only when CONFIG_SERIAL_DEBUG is set. The service stays
- * silent until the dashboard sends a START_STREAM control frame and keeps
- * streaming only while keepalives arrive, so a closed serial port means no
- * debug traffic at all.
- */
+// Streams binary debug frames over UART0 for the robot_bench GUI. Compiled in
+// only when CONFIG_SERIAL_DEBUG is set. The service stays silent until the
+// dashboard sends a START_STREAM control frame and keeps streaming only while
+// keepalives arrive, so a closed serial port means no debug traffic at all.
 class SerialDebug
 {
    public:
     static SerialDebug & get_instance();
 
-    /** Install the UART driver, the VMON ADC and the log capture hook.
-     * @param tof_service Perception service to sample ToF frames from.
-     */
+    // Install the UART driver and the log capture hook.
     esp_err_t init(ToFPerceptionService * tof_service);
 
-    /** Create the streaming task. */
+    // Create the streaming task.
     void start_task();
 
    private:
@@ -44,34 +37,39 @@ class SerialDebug
     void task_loop();
 
     void handle_control_frame();
+    void handle_position_frame();
+    // Drop the bench override and stop the wheels it was driving.
+    void clear_motion_override();
     void send_state(uint32_t now_ms);
     void send_imu();
     void send_tof();
     void send_health();
+    void send_calibration();
+    void send_tuning();
+    void send_position();
 
-    /** Serialize, frame and transmit one message; takes the TX mutex. */
+    // Serialize, frame and transmit one message; takes the TX mutex.
     bool send_frame(uint8_t msg_type, const void * message, size_t message_len);
 
-    /** Queue one ASCII log line as a DebugText frame; takes the TX mutex. */
+    // Queue one ASCII log line as a DebugText frame; takes the TX mutex.
     bool send_text_line(const char * line, size_t length);
 
-    /** Read the VMON ADC channel and update the power monitor. */
-    bool read_supply_voltage(uint64_t now_us);
-
-    /** vprintf hook: forwards ESP_LOG lines to DebugText frames while
-     * streaming, to the original console output otherwise.
-     */
+    // Log capture is active only while the dashboard keeps its session alive.
     static int log_hook(const char * format, va_list args);
+    bool session_active() const;
 
     // Max chars per DebugText frame (protocol limit)
     static constexpr size_t TEXT_MAX = 96;
     // Line assembly buffer: TEXT_MAX plus ANSI/level prefix headroom
     static constexpr size_t LOG_LINE_CAP = 128;
-    static constexpr uint32_t STATE_PERIOD_MS = 40;    // 25 Hz
-    static constexpr uint32_t IMU_PERIOD_MS = 100;     // 10 Hz
-    static constexpr uint32_t HEALTH_PERIOD_MS = 500;  // 2 Hz
+    static constexpr uint32_t STATE_PERIOD_MS = 40;         // 25 Hz
+    static constexpr uint32_t IMU_PERIOD_MS = 100;          // 10 Hz
+    static constexpr uint32_t HEALTH_PERIOD_MS = 500;       // 2 Hz
+    static constexpr uint32_t CALIBRATION_PERIOD_MS = 200;  // 5 Hz
+    static constexpr uint32_t TUNING_PERIOD_MS = 200;       // 5 Hz
+    static constexpr uint32_t POSITION_PERIOD_MS = 100;     // 10 Hz
     static constexpr uint64_t KEEPALIVE_TIMEOUT_US = 1500000;
-    // RX diagnostic cadence while not streaming
+    // Received-byte report cadence while connected.
     static constexpr uint64_t RX_REPORT_INTERVAL_US = 10000000;
 
     TaskHandle_t m_task_handle = nullptr;
@@ -80,15 +78,24 @@ class SerialDebug
 
     ToFPerceptionService * m_tof_service = nullptr;
     std::atomic_bool m_streaming{false};
-    uint64_t m_last_keepalive_us = 0;
+    std::atomic<uint64_t> m_last_keepalive_us{0};
+    // Bench override: accept dashboard wheel targets while the health monitor
+    // inhibits motion. Cleared when the streaming session ends.
+    bool m_motion_override = false;
 
     // Stream period bookkeeping
     uint32_t m_last_state_ms = 0;
     uint32_t m_last_imu_ms = 0;
     uint32_t m_last_health_ms = 0;
+    uint32_t m_last_calibration_ms = 0;
+    uint32_t m_last_tuning_ms = 0;
+    uint32_t m_last_position_ms = 0;
     uint32_t m_state_sequence = 0;
     uint32_t m_imu_sequence = 0;
     uint32_t m_health_sequence = 0;
+    uint32_t m_calibration_sequence = 0;
+    uint32_t m_tuning_sequence = 0;
+    uint32_t m_position_sequence = 0;
     uint32_t m_last_tof_sequence = 0;
     bool m_tof_frame_sent = false;
 
@@ -96,11 +103,6 @@ class SerialDebug
     char m_log_line[LOG_LINE_CAP] = {};
     size_t m_log_line_len = 0;
     size_t m_log_escape_left = 0;
-
-    PowerMonitor m_power_monitor;
-    adc_oneshot_unit_handle_t m_adc_handle = nullptr;
-    adc_cali_handle_t m_adc_cali = nullptr;
-    bool m_adc_ready = false;
 };
 
-#endif  // SERIAL_DEBUG_H
+#endif  // _SERIAL_DEBUG_H_

@@ -8,21 +8,23 @@
 #include "BL48250.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
+#include "PowerMonitor.h"
 #include "RobotState.h"
 #include "Telemetry.h"
+#include "WheelTuning.h"
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "ProtocolHandler";
-
-static void on_tuning_done(bool success)
-{
-    ESP_LOGI(TAG, "Relay tuning finished, all_success=%d", (int)success);
-}
 
 ProtocolHandler & ProtocolHandler::get_instance()
 {
     static ProtocolHandler instance;
     return instance;
+}
+
+ProtocolHandler::ProtocolHandler() : m_mutex(xSemaphoreCreateMutex())
+{
+    configASSERT(m_mutex != nullptr);
 }
 
 /**
@@ -47,25 +49,61 @@ void ProtocolHandler::init(NRF24L01 * radio,
     m_health_state = {};
     m_health_state.severity = HealthSeverity::HEALTHY;
     m_health_state.kick_inhibited = true;
-    m_wheel_ctrl->set_tuning_done_callback(on_tuning_done);
 
     ESP_LOGI(TAG, "ProtocolHandler initialized.");
 }
 
 void ProtocolHandler::force_safe_stop()
 {
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
     m_safety_supervisor.enter_safe_stop();
+    xSemaphoreGive(m_mutex);
     ESP_LOGE(TAG, "SAFE_STOP latched until reboot.");
 }
 
 LifecycleState ProtocolHandler::get_lifecycle() const
 {
-    return m_safety_supervisor.get_state();
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    const LifecycleState state = m_safety_supervisor.get_state();
+    xSemaphoreGive(m_mutex);
+    return state;
 }
 
-const HealthState & ProtocolHandler::get_health_state() const
+HealthState ProtocolHandler::get_health_state() const
 {
-    return m_health_state;
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    const HealthState state = m_health_state;
+    xSemaphoreGive(m_mutex);
+    return state;
+}
+
+/**
+ * @brief Report whether the NRF24L01 module is connected and healthy.
+ *
+ * init() only receives a radio whose SPI register read-back succeeded, so a
+ * non-null radio pointer means the module answered on the bus at init.
+ *
+ * @return true when the radio module is initialized.
+ */
+bool ProtocolHandler::is_radio_ready() const
+{
+    return m_radio != nullptr;
+}
+
+/**
+ * @brief Report whether the base station link is currently up.
+ *
+ * The link counts as up while a COMMAND or CONFIG packet arrived within the
+ * link timeout window; a null radio or a silent base station reports false.
+ *
+ * @return true while base station packets are fresh.
+ */
+bool ProtocolHandler::is_base_station_connected() const
+{
+    const uint64_t last_rx_us = m_last_base_station_rx_us.load(std::memory_order_relaxed);
+    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+    return m_radio != nullptr && last_rx_us != 0 &&
+           (now_us - last_rx_us) <= BASE_STATION_LINK_TIMEOUT_US;
 }
 
 /**
@@ -91,6 +129,19 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
     Header hdr;
     memset(&hdr, 0, sizeof(Header));
     DecodeHeader(&hdr, const_cast<uint8_t *>(payload));
+
+    // COMMAND and CONFIG messages only originate from the base station, so a
+    // decoded header of either type proves the base station is transmitting,
+    // even when the packet targets another robot. Clearing ERROR_COMM_LOSS
+    // here (not just in update()) means the telemetry reply built by
+    // handle_command() reports the live link instead of the stale
+    // pre-packet state; update() re-arms the flag when the link goes quiet.
+    if (hdr.msg_type == MSG_TYPE_COMMAND || hdr.msg_type == MSG_TYPE_CONFIG)
+    {
+        m_last_base_station_rx_us.store(static_cast<uint64_t>(esp_timer_get_time()),
+                                        std::memory_order_relaxed);
+        RobotState::get_instance().clear_error(ERROR_COMM_LOSS);
+    }
 
     switch (hdr.msg_type)
     {
@@ -162,7 +213,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
  */
 void ProtocolHandler::handle_command(const RobotCommand & cmd)
 {
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "CMD robot=%d ts=%lu vx=%d vy=%d w=%d kick=%d",
              cmd.header.robot_id,
              (unsigned long)cmd.header.timestamp,
@@ -192,6 +243,47 @@ void ProtocolHandler::update(uint64_t now_us)
     if (m_wheel_ctrl == nullptr)
         return;
 
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+
+    // Classify the live observations into the health state the supervisor
+    // and the status consumers act on. The supply status comes from the
+    // continuously sampled VMON channel; its electrical faults are critical
+    // and therefore latch SAFE_STOP below.
+    HealthObservationFrame observation = {};
+    PowerMonitor::get_instance().fill_observation(&observation);
+    const uint16_t error_flags = RobotState::get_instance().get_error_flags();
+    observation.imu_available = (error_flags & ERROR_IMU_FAIL) == 0U;
+    observation.tof_available = (error_flags & ERROR_TOF_FAIL) == 0U;
+    // Kicker sensing does not exist on this robot yet: treat the kicker as
+    // ready so only real observations inhibit.
+    observation.kicker_ready = true;
+    auto & estimator = WheelStateEstimator::get_instance();
+    for (size_t wheel = 0; wheel < ROBOT_WHEEL_COUNT; ++wheel)
+    {
+        if (estimator.is_channel_calibrated(wheel))
+            observation.wheel_valid_mask |= static_cast<uint8_t>(1U << wheel);
+    }
+    m_health_state = m_health_monitor.update(observation);
+
+    // Mirror the battery faults into the robot error flags so the telemetry
+    // frame and the dashboard error list report them.
+    RobotState & robot_state = RobotState::get_instance();
+    if ((m_health_state.active_faults & ERROR_BATT_UNDERVOLT) != 0U)
+        robot_state.set_error(ERROR_BATT_UNDERVOLT);
+    else
+        robot_state.clear_error(ERROR_BATT_UNDERVOLT);
+    if ((m_health_state.active_faults & ERROR_BATT_OVERVOLT) != 0U)
+        robot_state.set_error(ERROR_BATT_OVERVOLT);
+    else
+        robot_state.clear_error(ERROR_BATT_OVERVOLT);
+
+    // Keep ERROR_COMM_LOSS in step with the live link so telemetry carries
+    // the protocol meaning of bit 0: communication loss with the base station.
+    if (is_base_station_connected())
+        RobotState::get_instance().clear_error(ERROR_COMM_LOSS);
+    else
+        RobotState::get_instance().set_error(ERROR_COMM_LOSS);
+
     CommandEnvelope envelope = {};
     while (m_command_inbox.pop(&envelope))
     {
@@ -213,6 +305,8 @@ void ProtocolHandler::update(uint64_t now_us)
     // setpoint after a command timeout.
     if (m_has_latest_command)
         m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
+
+    xSemaphoreGive(m_mutex);
 }
 
 /**
@@ -261,15 +355,17 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
     // RUN calibration routines
     if (cfg.config_flags & CONFIG_FLAG_RUN_CALIBRATION)
     {
-        ESP_LOGI(TAG, "CONFIG_FLAG_RUN_CALIBRATION: triggering sensor + wheel PID calibration.");
+        ESP_LOGI(TAG,
+                 "CONFIG_FLAG_RUN_CALIBRATION: triggering sensor + wheel control calibration.");
 
-        if (!m_wheel_ctrl->is_tuning_active())
+        WheelTuning & tuning = WheelTuning::get_instance();
+        if (tuning.is_running())
         {
-            m_wheel_ctrl->start_relay_tuning();
+            ESP_LOGW(TAG, "Wheel control calibration already active — ignoring request.");
         }
-        else
+        else if (tuning.start() != ESP_OK)
         {
-            ESP_LOGW(TAG, "Tuning already active — ignoring request.");
+            ESP_LOGE(TAG, "Failed to start the wheel control calibration.");
         }
     }
 

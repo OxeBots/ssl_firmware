@@ -1,4 +1,4 @@
-"""PlatformIO extra script: compiles .bitproto files and generates C code."""
+"""PlatformIO extra script: generates C and Python code from .bitproto files."""
 
 import glob
 import os
@@ -56,7 +56,8 @@ def compile_bitprotos(env):
     Compile all .bitproto files using the 'bitproto' tool.
     Generated files are placed in the build directory, headers are added to CPPPATH,
     and generated C sources (including the runtime bitproto.c) are built into a
-    static library that is linked automatically.
+    static library that is linked automatically. Python modules are refreshed in
+    scripts/ on every build for the host testing scripts.
     """
     # Configuration
     proto_dir = env.GetProjectOption("proto_dir", "proto")
@@ -104,6 +105,14 @@ def compile_bitprotos(env):
                 print(f"X Failed to compile {pf}")
                 env.Exit(1)
         print("Bitproto compilation finished.")
+
+    python_output_dir = join(env.subst("$PROJECT_DIR"), "scripts")
+    for pf in proto_files:
+        cmd = bitproto_cmd.format(lang="py", out_dir=python_output_dir, input=pf)
+        print(f"   Running: {cmd}")
+        if env.Execute(cmd) != 0:
+            print(f"X Failed to generate Python module for {pf}")
+            env.Exit(1)
 
     # Ensure bitproto runtime (header and implementation) is present
     ensure_bitproto_runtime(env, output_dir)

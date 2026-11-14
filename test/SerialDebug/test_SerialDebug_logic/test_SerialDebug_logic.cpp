@@ -3,6 +3,36 @@
 
 #include "SerialDebugCodec.h"
 
+void test_codec_preserves_full_raw_tof_frame(void)
+{
+    DebugTof original = {};
+    original.sequence = 0xFFFF00FF;
+    const uint8_t statuses[] = {5, 6, 9, 10, 3, 12, 0, 255};
+    for (size_t i = 0; i < 64; ++i)
+    {
+        original.distance_mm[i] = static_cast<int16_t>((i % 3 == 0) ? -12 : i * 80);
+        original.target_status[i] = statuses[i % sizeof(statuses)];
+    }
+    uint8_t message[BYTES_LENGTH_DEBUG_TOF];
+    EncodeDebugTof(&original, message);
+    uint8_t frame[serial_debug::MAX_FRAME_BYTES];
+    const size_t frame_len =
+      serial_debug::encode_frame(DBG_MSG_TOF, message, sizeof(message), frame, sizeof(frame));
+    TEST_ASSERT_GREATER_THAN(0, frame_len);
+    serial_debug::Decoder decoder;
+    for (size_t i = 0; i + 1 < frame_len; ++i) decoder.feed(frame[i]);
+    TEST_ASSERT_FALSE(decoder.has_frame());
+    decoder.feed(frame[frame_len - 1]);
+    TEST_ASSERT_TRUE(decoder.has_frame());
+    TEST_ASSERT_EQUAL_UINT8(DBG_MSG_TOF, decoder.message_type());
+    TEST_ASSERT_EQUAL_size_t(BYTES_LENGTH_DEBUG_TOF, decoder.message_length());
+    DebugTof decoded = {};
+    DecodeDebugTof(&decoded, const_cast<uint8_t *>(decoder.message()));
+    TEST_ASSERT_EQUAL_UINT32(original.sequence, decoded.sequence);
+    TEST_ASSERT_EQUAL_INT16_ARRAY(original.distance_mm, decoded.distance_mm, 64);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(original.target_status, decoded.target_status, 64);
+}
+
 // Codec round-trip: a payload with embedded zero bytes must survive
 // encode -> feed -> decode with type and content intact.
 void test_codec_roundtrip_with_zero_bytes(void)
@@ -97,6 +127,7 @@ void test_encode_frame_rejects_small_output(void)
 void setup()
 {
     UNITY_BEGIN();
+    RUN_TEST(test_codec_preserves_full_raw_tof_frame);
     RUN_TEST(test_codec_roundtrip_with_zero_bytes);
     RUN_TEST(test_codec_rejects_corrupted_frame);
     RUN_TEST(test_codec_resyncs_after_garbage);

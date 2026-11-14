@@ -12,6 +12,7 @@ test/test_all/suite_*.cpp
 test/test_all/merged_suites.h
 test/test_all/merged_suites.cpp
 ssl_robot_protocol_bp.py
+scripts/*_bp.py
 .cache
 compile_commands.json
 
@@ -27,3 +28,4 @@ compile_commands.json
 *.rej
 *~
 *.bkp
+tmp/

@@ -1,10 +1,15 @@
-#ifndef PROTOCOL_HANDLER_H
-#define PROTOCOL_HANDLER_H
+#ifndef _PROTOCOL_HANDLER_H_
+#define _PROTOCOL_HANDLER_H_
 
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <stdint.h>
 
+#include <atomic>
+
 #include "CommandInbox.h"
+#include "HealthMonitor.h"
 #include "NRF24L01.h"
 #include "RobotPositionController.h"
 #include "RobotVelocityController.h"
@@ -21,22 +26,27 @@ class ProtocolHandler
 
     void init(NRF24L01 * radio, WheelController * wheel_ctrl, OmnidirectionalRobot * kinematics);
 
-    /** Latch the safety supervisor in SAFE_STOP until reboot (mandatory
-     * hardware failure at boot).
-     */
+    // Latch the safety supervisor in SAFE_STOP until reboot (mandatory
+    // hardware failure at boot).
     void force_safe_stop();
 
     void on_packet(const uint8_t * payload, uint8_t len);
     void update(uint64_t now_us);
 
-    /** Current safety lifecycle for status consumers (serial debug). */
+    // Current safety lifecycle for status consumers (serial debug).
     LifecycleState get_lifecycle() const;
 
-    /** Latest health snapshot for status consumers (serial debug). */
-    const HealthState & get_health_state() const;
+    // Copy of the latest health snapshot for status consumers (serial debug).
+    HealthState get_health_state() const;
+
+    // True when the NRF24L01 module answered SPI during init.
+    bool is_radio_ready() const;
+
+    // True while a base station packet arrived within the link window.
+    bool is_base_station_connected() const;
 
    private:
-    ProtocolHandler() = default;
+    ProtocolHandler();
     ~ProtocolHandler() = default;
     ProtocolHandler(const ProtocolHandler &) = delete;
     ProtocolHandler & operator=(const ProtocolHandler &) = delete;
@@ -44,15 +54,26 @@ class ProtocolHandler
     void handle_command(const RobotCommand & cmd);
     void handle_config(const RobotConfig & cfg);
 
+    // Serializes update(), force_safe_stop() and the status getters: update()
+    // runs from the radio task and the idle loop, the getters from the debug
+    // task.
+    SemaphoreHandle_t m_mutex = nullptr;
+
     NRF24L01 * m_radio = nullptr;
     WheelController * m_wheel_ctrl = nullptr;
+    // Base station link: receive time of the latest COMMAND/CONFIG packet.
+    // Atomic because on_packet runs in the radio receiver task while the
+    // control loop and status consumers read it from other tasks.
+    static constexpr uint64_t BASE_STATION_LINK_TIMEOUT_US = 2000000;
+    std::atomic<uint64_t> m_last_base_station_rx_us = 0;
     CommandInbox m_command_inbox;
     CommandEnvelope m_latest_command = {};
     bool m_has_latest_command = false;
     HealthState m_health_state = {};
+    HealthMonitor m_health_monitor;
     SafetySupervisor m_safety_supervisor;
     RobotPositionController m_position_controller;
     RobotVelocityController m_velocity_controller;
 };
 
-#endif  // PROTOCOL_HANDLER_H
+#endif  // _PROTOCOL_HANDLER_H_

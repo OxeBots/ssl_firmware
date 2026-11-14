@@ -1,5 +1,5 @@
 // serial_debug_protocol.bitproto
-// Binary protocol for the serial debug dashboard (bench_dashboard package).
+// Binary protocol for the serial debug dashboard (robot_bench package).
 // Robot streams DebugState / DebugImu / DebugTof / DebugHealth / DebugText
 // frames over UART0; the dashboard answers with DebugControl frames.
 //
@@ -19,17 +19,23 @@ type DebugTimestamp = uint32;
 // Scaled angle: 0.01 degree per unit (range +/-327.67 degrees)
 type DebugAngle = int16;
 
-// Scaled wheel speed: 0.1 RPM per unit (range +/-3276.7 RPM)
+// Scaled wheel speed at the wheel shaft: 0.1 RPM per unit. The int16 range
+// (+/-3276.7 RPM) far exceeds the drivetrain: the 4000 RPM motor through the
+// 3:1 reduction caps the wheel at ~1333 RPM.
 type DebugRpm = int16;
 
 // Signed PWM duty cycle: -1023..1023
 type DebugDuty = int16;
 
+// Wheel encoder angle: 0.01 degree per unit, wrapped to one encoder-shaft
+// turn (0 to 359.99 degrees). The AS5600 magnet turns with the motor shaft.
+type DebugWheelAngle = uint16;
+
 // ---------------------------------------------------------------------------
 // Message type constants (first byte of every frame payload)
 // ---------------------------------------------------------------------------
 
-// Wheel targets, PWM and speeds (robot -> dashboard)
+// Wheel targets, PWM, speeds and angles (robot -> dashboard)
 const DBG_MSG_STATE = 1;
 
 // Raw accelerometer / gyroscope / magnetometer (robot -> dashboard)
@@ -46,6 +52,9 @@ const DBG_MSG_TEXT = 5;
 
 // Commands from the dashboard to the robot
 const DBG_MSG_CONTROL = 6;
+
+// Motor/encoder wiring calibration status (robot -> dashboard)
+const DBG_MSG_CALIBRATION = 7;
 
 // ---------------------------------------------------------------------------
 // Control op constants (op field of DebugControl)
@@ -66,16 +75,49 @@ const DBG_CONTROL_SET_TARGETS = 3;
 // Zero every wheel target immediately
 const DBG_CONTROL_STOP_MOTORS = 4;
 
+// Allow dashboard wheel targets while the health monitor inhibits motion, for
+// bring-up on a bare bench (no supply sense or encoder calibration). Cleared
+// when the streaming session ends.
+const DBG_CONTROL_ENABLE_MOTION_OVERRIDE = 5;
+
+// Stop ignoring the safety inhibit and zero the wheel targets.
+const DBG_CONTROL_DISABLE_MOTION_OVERRIDE = 6;
+
+// Run the motor/encoder wiring calibration. The firmware spins one motor at a
+// time in open loop, watches every analog and I2C encoder input, and persists
+// the detected wheel -> encoder mapping in NVS. Stop all other wheel commands
+// before starting it.
+const DBG_CONTROL_START_CALIBRATION = 7;
+
+// Abort the wiring calibration and stop the motors.
+const DBG_CONTROL_STOP_CALIBRATION = 8;
+
+// Calibration routine states (DebugCalibration.state)
+const DBG_CALIBRATION_IDLE = 0;
+const DBG_CALIBRATION_RUNNING = 1;
+const DBG_CALIBRATION_DONE = 2;
+const DBG_CALIBRATION_FAILED = 3;
+
+// Calibration failure reasons (DebugCalibration.error_code)
+const DBG_CALIBRATION_ERROR_NONE = 0;
+const DBG_CALIBRATION_ERROR_NO_MOVEMENT = 1;
+const DBG_CALIBRATION_ERROR_AMBIGUOUS_ANALOG = 2;
+const DBG_CALIBRATION_ERROR_AMBIGUOUS_I2C = 3;
+const DBG_CALIBRATION_ERROR_BAD_MAPPING = 4;
+const DBG_CALIBRATION_ERROR_ABORTED = 5;
+const DBG_CALIBRATION_ERROR_I2C = 6;
+
 // ---------------------------------------------------------------------------
 // DebugWheel - per-wheel control data
 // ---------------------------------------------------------------------------
 
 message DebugWheel {
-    DebugDuty pwm      = 1;  // Signed PID output duty (-1023..1023)
-    DebugRpm velocity  = 2;  // Measured speed (0.1 RPM)
-    DebugRpm target    = 3;  // Setpoint speed (0.1 RPM)
+    DebugDuty pwm          = 1;  // Signed PID output duty (-1023..1023)
+    DebugRpm velocity      = 2;  // Measured speed (0.1 RPM)
+    DebugRpm target        = 3;  // Setpoint speed (0.1 RPM)
+    DebugWheelAngle angle  = 4;  // Encoder-shaft angle (0.01 degree, one turn)
 }
-// DebugWheel size: 3 x 2 = 6 bytes
+// DebugWheel size: 3 x 2 + 2 = 8 bytes
 
 // ---------------------------------------------------------------------------
 // DebugState - motor/control stream at ~25 Hz
@@ -90,7 +132,7 @@ message DebugState {
     uint8 encoder_valid_mask   = 6;  // Bit i: encoder channel i calibrated
     uint32 sequence            = 7;  // Frame counter
 }
-// DebugState size: 4 + 4x6 + 3x2 + 1 + 4 = 39 bytes
+// DebugState size: 4 + 4x8 + 3x2 + 1 + 4 = 47 bytes
 
 // ---------------------------------------------------------------------------
 // DebugImu - raw sensor stream at ~10 Hz
@@ -116,31 +158,34 @@ message DebugImu {
 
 message DebugTof {
     uint32 sequence       = 1;  // Frame counter
-    int16[64] distance_mm = 2;  // Row-major 8x8; 0 = zone has no valid target
+    int16[64] distance_mm = 2;  // Row-major 8x8; unfiltered sensor output
+    uint8[64] target_status = 3;  // Sensor validity code for each distance
 }
-// DebugTof size: 4 + 64 x 2 = 132 bytes
+// DebugTof size: 4 + 64 x 2 + 64 = 196 bytes
 
 // ---------------------------------------------------------------------------
 // DebugHealth - health / system status at ~2 Hz
 // ---------------------------------------------------------------------------
 
 message DebugHealth {
-    uint8 robot_id         = 1;   // NVS-stored robot ID
-    uint16 error_flags     = 2;   // ERROR_* bitmask from the radio protocol
-    uint8 lifecycle        = 3;   // SafetySupervisor LifecycleState
-    uint16 active_faults   = 4;   // HealthMonitor active fault bitmask
-    uint16 latched_faults  = 5;   // HealthMonitor latched fault bitmask
-    uint8 motion_inhibited = 6;   // 0/1
-    uint8 kick_inhibited   = 7;   // 0/1
-    uint8 imu_cal_flags    = 8;   // Bit0 accel, bit1 gyro, bit2 mag calibrated
-    uint8 tof_available    = 9;   // 0/1
-    uint16 supply_voltage  = 10;  // VMON supply in 0.01 V units
-    uint8 supply_flags     = 11;  // Bit0 valid, bit1 undervoltage, bit2 overvoltage
-    uint32 free_heap       = 12;  // Free heap bytes
-    uint32 min_free_heap   = 13;  // Historic minimum free heap bytes
-    uint32 sequence        = 14;  // Frame counter
+    uint8 robot_id            = 1;   // NVS-stored robot ID
+    uint16 error_flags        = 2;   // ERROR_* bitmask from the radio protocol
+    uint8 lifecycle           = 3;   // SafetySupervisor LifecycleState
+    uint16 active_faults      = 4;   // HealthMonitor active fault bitmask
+    uint16 latched_faults     = 5;   // HealthMonitor latched fault bitmask
+    uint8 motion_inhibited    = 6;   // 0/1
+    uint8 kick_inhibited      = 7;   // 0/1
+    uint8 imu_cal_flags       = 8;   // Bit0 accel, bit1 gyro, bit2 mag calibrated
+    uint8 tof_available       = 9;   // 0/1
+    uint8 radio_ready         = 10;  // 0/1: NRF24L01 present, SPI verified at init
+    uint8 base_station_connected = 11;  // 0/1: base station packets within the link window
+    uint16 supply_voltage     = 12;  // VMON supply in 0.01 V units
+    uint8 supply_flags        = 13;  // Bit0 valid, bit1 undervoltage, bit2 overvoltage
+    uint32 free_heap          = 14;  // Free heap bytes
+    uint32 min_free_heap      = 15;  // Historic minimum free heap bytes
+    uint32 sequence           = 16;  // Frame counter
 }
-// DebugHealth size: ~26 bytes
+// DebugHealth size: 29 bytes
 
 // ---------------------------------------------------------------------------
 // DebugText - one console/log line (ESP_LOG redirected while streaming)
@@ -159,6 +204,155 @@ message DebugText {
 message DebugControl {
     uint8 op                  = 1;  // DBG_CONTROL_* constant
     uint32 sequence           = 2;  // Keepalive/command counter
-    DebugRpm[4] wheel_targets = 3;  // Used when op == DBG_CONTROL_SET_TARGETS (0.1 RPM)
+    DebugRpm[4] wheel_targets = 3;  // Wheel-shaft targets (0.1 RPM); drivetrain max ~1333 RPM
 }
 // DebugControl size: 1 + 4 + 4x2 = 13 bytes
+// ---------------------------------------------------------------------------
+// DebugCalibration - motor/encoder wiring calibration status
+// ---------------------------------------------------------------------------
+
+// The schematics wire each encoder twice: an analog output (ENCM1..4, one ADC
+// input each) and an I2C port behind the CD4052B mux (one encoder pair per mux
+// channel). The motor and its encoder are one physical part, but the encoder
+// harness is not keyed, so a wheel motor can own any analog input and any mux
+// channel. The calibration spins one motor at a time in open loop and detects
+// which analog input and which mux channel move with it.
+message DebugCalibration {
+    uint8 state                = 1;  // DBG_CALIBRATION_* state
+    uint8 wheel                = 2;  // Wheel being calibrated (0..3), 4 when idle
+    uint8 progress             = 3;  // Progress of the whole routine (0..100)
+    uint8 result_mask          = 4;  // Bit i: wheel i matched on both paths
+    uint8 i2c_ready            = 5;  // Bit i: wheel i matched on the I2C path
+    uint8 mapping_valid        = 6;  // 1 when a calibrated mapping is stored in NVS
+    uint8[4] analog_map        = 7;  // Wheel -> analog input slot (0..3 = ENC1..4)
+    uint8[4] mux_map           = 8;  // Wheel -> mux channel (0..3 = encoder pair M1..M4)
+    int16[4] analog_level      = 9;  // Movement of each analog input during the current spin (ADC counts/sample)
+    int16[4] i2c_level         = 10; // Movement of each mux channel during the current spin (I2C counts/sample)
+    uint8 range_mask           = 11; // Bit i: mapped encoder of wheel i has a stored analog range
+    uint8 error_code           = 12; // DBG_CALIBRATION_ERROR_* failure reason
+    uint32 sequence            = 13; // Frame counter
+}
+// DebugCalibration size: 6 + 4 + 4 + 8 + 8 + 1 + 1 + 4 = 36 bytes
+
+// ---------------------------------------------------------------------------
+// Control calibration (per-wheel PID + feedforward auto-tuning)
+// ---------------------------------------------------------------------------
+
+// Wheel control calibration status (robot -> dashboard)
+const DBG_MSG_TUNING = 8;
+
+// Start the wheel control calibration. The routine spins one wheel at a time,
+// identifies its static friction / plant model, synthesizes per-wheel PID and
+// feedforward parameters, validates the closed-loop step response and persists
+// the result in NVS. Stop all other wheel commands before starting it.
+const DBG_CONTROL_START_TUNING = 9;
+
+// Abort the control calibration and stop the motors.
+const DBG_CONTROL_STOP_TUNING = 10;
+
+// Tuning routine states (DebugTuning.state)
+const DBG_TUNING_IDLE = 0;
+const DBG_TUNING_RUNNING = 1;
+const DBG_TUNING_DONE = 2;
+const DBG_TUNING_FAILED = 3;
+
+// Tuning phases (DebugTuning.phase), one per wheel plus the idle/done ends
+const DBG_TUNING_PHASE_IDLE = 0;
+const DBG_TUNING_PHASE_FRICTION = 1;  // measure breakaway duty (open loop)
+const DBG_TUNING_PHASE_IDENTIFY = 2;  // open-loop duty steps -> plant model
+const DBG_TUNING_PHASE_VALIDATE = 3;  // closed-loop step with candidate gains
+const DBG_TUNING_PHASE_REFINE = 4;    // retry with adjusted gains
+const DBG_TUNING_PHASE_STORE = 5;     // persist the wheel parameters in NVS
+const DBG_TUNING_PHASE_DONE = 6;
+
+// Tuning failure reasons (DebugTuning.error_code)
+const DBG_TUNING_ERROR_NONE = 0;
+const DBG_TUNING_ERROR_NO_MOVEMENT = 1;  // wheel never moved in open loop
+const DBG_TUNING_ERROR_UNSTABLE = 2;     // no candidate met the step criteria
+const DBG_TUNING_ERROR_TIMEOUT = 3;      // routine exceeded its runtime budget
+const DBG_TUNING_ERROR_ABORTED = 4;      // dashboard or safety stopped the run
+
+// DebugTuning - wheel control calibration status at ~5 Hz. The gain and
+// feedforward columns always carry the parameters currently in effect: the
+// stored ones while idle, the candidate/best ones during a run. A wheel counts
+// as successful when its result bit is set in result_mask; its rise time,
+// overshoot and steady-state error are the metrics of the validated step.
+//
+// Gain units match FastPID in WheelController: Kp duty per rad/s, Ki duty per
+// rad/s per second, Kd duty per rad/s per second squared. feedforward is the
+// static-friction duty of the wheel and velocity_ff the duty per rad/s of the
+// velocity feedforward term.
+message DebugTuning {
+    uint8 state              = 1;   // DBG_TUNING_* state
+    uint8 wheel              = 2;   // Wheel being tuned (0..3), 4 when idle
+    uint8 phase              = 3;   // DBG_TUNING_PHASE_* phase
+    uint8 progress           = 4;   // Progress of the whole routine (0..100)
+    uint8 result_mask        = 5;   // Bit i: wheel i validated and stored
+    uint8 error_code         = 6;   // DBG_TUNING_ERROR_* failure reason
+    int16[4] kp              = 7;   // Kp x 100
+    int16[4] ki              = 8;   // Ki x 100
+    int16[4] kd              = 9;   // Kd x 10000
+    int16[4] feedforward     = 10;  // Static friction feedforward duty (0..1023)
+    int16[4] velocity_ff     = 11;  // Velocity feedforward x 100 (duty per rad/s)
+    uint16[4] rise_ms        = 12;  // Validated 10-90 % rise time, milliseconds
+    uint8[4] overshoot_pct   = 13;  // Validated step overshoot, percent
+    uint8[4] ss_error_pct    = 14;  // Validated steady-state error, percent of target
+    uint32 sequence          = 15;  // Frame counter
+}
+// DebugTuning size: 6 + 5 x 4 x 2 + 4 x 2 + 4 + 4 + 4 = 66 bytes
+
+// ---------------------------------------------------------------------------
+// Wheel position control
+// ---------------------------------------------------------------------------
+
+// Wheel position-control status (robot -> dashboard)
+const DBG_MSG_POSITION = 9;
+
+// Wheel position move command (dashboard -> robot)
+const DBG_MSG_POSITION_CONTROL = 10;
+
+// Position command operations (DebugPositionControl.op)
+const DBG_POSITION_OP_MOVE = 0;  // start a move for every wheel in wheel_mask
+const DBG_POSITION_OP_STOP = 1;  // cancel the move and zero the wheels
+
+// Position command modes (DebugPositionControl.mode)
+const DBG_POSITION_MODE_RELATIVE = 0;  // angle_mdeg is a delta from the current angle
+const DBG_POSITION_MODE_ABSOLUTE = 1;  // angle_mdeg is the target absolute angle
+
+// Position failure reasons (DebugPosition.error_code)
+const DBG_POSITION_ERROR_NONE = 0;
+const DBG_POSITION_ERROR_TIMEOUT = 1;    // move did not reach the target in time
+const DBG_POSITION_ERROR_ABORTED = 2;    // stopped by the dashboard or a safety path
+const DBG_POSITION_ERROR_ENCODER = 3;    // requested wheel has no valid encoder
+
+// DebugPositionControl - dashboard command for wheel position moves. Angles are
+// measured at the wheel shaft and counted continuously across turns (the
+// encoder itself wraps once per motor-shaft turn). angle_mdeg is 0.001 degree
+// units; in RELATIVE mode it is the signed delta from the current angle, in
+// ABSOLUTE mode the target continuous angle. max_rpm caps the wheel-shaft speed
+// of the move (0 keeps the firmware default).
+message DebugPositionControl {
+    uint8 op             = 1;  // DBG_POSITION_OP_*
+    uint8 mode           = 2;  // DBG_POSITION_MODE_*
+    uint8 wheel_mask     = 3;  // Bit i: wheel i participates in the command
+    int32[4] angle_mdeg  = 4;  // 0.001 degree units; delta or absolute per mode
+    uint16 max_rpm       = 5;  // Wheel-shaft speed cap (RPM), 0 = default
+    uint32 sequence      = 6;  // Command counter
+}
+// DebugPositionControl size: 3 + 4 x 4 + 2 + 4 = 25 bytes
+
+// DebugPosition - wheel position-control status at ~10 Hz. The angles are
+// continuous wheel-shaft angles in 0.001 degree units, unwrapped across turns.
+// A wheel in position mode holds its target angle once done_mask marks it
+// reached; the error code refers to the most recent failed move.
+message DebugPosition {
+    uint8 active_mask    = 1;  // Bit i: wheel i is in position mode
+    uint8 done_mask      = 2;  // Bit i: wheel i reached its target angle
+    uint8 error_code     = 3;  // DBG_POSITION_ERROR_* reason of the last failure
+    int32[4] angle_mdeg  = 4;  // Measured continuous wheel angle
+    int32[4] target_mdeg = 5;  // Target continuous wheel angle
+    uint32 sequence      = 6;  // Frame counter
+}
+// DebugPosition size: 3 + 4 x 4 + 4 x 4 + 4 = 39 bytes
+
+
