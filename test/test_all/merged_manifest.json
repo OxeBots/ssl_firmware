@@ -11,6 +11,11 @@
       "object": ".pio/build/test_coverage/test/test_all/suite_kinematics_test_omnidirectional_robot.o"
     },
     {
+      "slug": "kinematics_test_wheel_ekf_fusion",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_kinematics_test_wheel_ekf_fusion.o"
+    },
+    {
       "slug": "commandinbox_test_commandinbox",
       "hooks": [],
       "object": ".pio/build/test_coverage/test/test_all/suite_commandinbox_test_commandinbox.o"
@@ -34,6 +39,11 @@
       "slug": "safetysupervisor_test_safetysupervisor",
       "hooks": [],
       "object": ".pio/build/test_coverage/test/test_all/suite_safetysupervisor_test_safetysupervisor.o"
+    },
+    {
+      "slug": "serialdebug_test_serialdebug_logic",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_serialdebug_test_serialdebug_logic.o"
     },
     {
       "slug": "tofperceptionservice_test_tofperceptionservice_logic",
@@ -82,6 +92,14 @@
       "slug": "bl48250_test_bl48250",
       "hooks": [],
       "object": ".pio/build/test_coverage/test/test_all/suite_bl48250_test_bl48250.o"
+    },
+    {
+      "slug": "bl48250_test_bl48250_feedback",
+      "hooks": [
+        "setUp",
+        "tearDown"
+      ],
+      "object": ".pio/build/test_coverage/test/test_all/suite_bl48250_test_bl48250_feedback.o"
     },
     {
       "slug": "74hc595_test_74hc595",

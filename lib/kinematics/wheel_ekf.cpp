@@ -1,134 +1,188 @@
 #include "wheel_ekf.h"
 
-#include <vt_kalman>
-#include <vt_linalg>
+#include <esp_timer.h>
 
+// Extended Kalman filter over the state [angle, velocity, acceleration].
+//
+// Every measurement is a single state row, so the update is written as
+// sequential scalar corrections instead of the generic vt_kalman templates.
+// The hand-written form avoids the temporary matrices that kept the ESP32
+// acquisition task at full CPU.
 static constexpr int STATE_DIM = 3;
-static constexpr int MEAS_DIM = 1;
-static constexpr int CONTROL_DIM = 1;
 
-using EKF = vt::extended_kalman_filter_t<STATE_DIM, MEAS_DIM, CONTROL_DIM>;
-using StateVector = vt::numeric_vector<STATE_DIM>;
-using MeasurementVector = vt::numeric_vector<MEAS_DIM>;
-using ControlVector = vt::numeric_vector<CONTROL_DIM>;
+// Measurement rows: 0 = angle, 1 = velocity.
+static constexpr int MEAS_ANGLE = 0;
+static constexpr int MEAS_VELOCITY = 1;
 
-// Noise Matrices
-// Process Noise: Uncertainty in the model (tune these values)
-// Diagonal: [angle_noise, velocity_noise, acceleration_noise]
-static vt::numeric_matrix<STATE_DIM, STATE_DIM> Q =
-  vt::numeric_matrix<STATE_DIM, STATE_DIM>::diagonals({0.001, 0.1, 10.0});
+// Nominal update rate: one reading per published ADC block.
+static constexpr double NOMINAL_UPDATE_HZ = 577.0;
 
-// Measurement Noise: Uncertainty in the sensor reading (tune this value)
-static vt::numeric_matrix<MEAS_DIM, MEAS_DIM> R =
-  vt::numeric_matrix<MEAS_DIM, MEAS_DIM>::diagonals(0.1);
+// Process-noise densities per second, diagonal [angle, velocity,
+// acceleration]. These are the former per-step variances (0.001, 0.1, 10) at
+// the nominal rate, so a different sample interval gives the same estimate.
+static constexpr double Q_PROCESS[STATE_DIM] = {0.577, 57.7, 5770.0};
 
-struct WheelKalmanFilter::KalmanState
+// Measurement noise variances. The velocity variance covers one count of
+// window quantization plus the edge noise the counter picks up.
+static constexpr double R_MEAS_ANGLE = 0.1;
+static constexpr double R_MEAS_VELOCITY = 0.4;
+
+/**
+ * @brief Initializes the covariance with the process noise of one nominal
+ *        step, which is a small first guess for every state.
+ */
+WheelKalmanFilter::KalmanState::KalmanState()
 {
-    StateVector state_vec;
-    EKF filter;
-    int64_t last_update_us = 0;
-    bool initialized = false;
+    for (int i = 0; i < STATE_DIM; ++i) covariance[i][i] = Q_PROCESS[i] / NOMINAL_UPDATE_HZ;
+}
 
-    // The state vector is owned by the filter object itself
-    KalmanState()
-    : state_vec(vt::make_numeric_vector({0.0, 0.0, 0.0})),
-      filter(f_func, Fj_func, h_func, Hj_func, Q, R, state_vec)
-    {
-    }
-
-    // EKF Model Functions (static members)
-
-    // State transition function f(x, u)
-    static StateVector f_func(const StateVector & x, const ControlVector & u)
-    {
-        double dt = u[0];
-        double hdts = 0.5f * dt * dt;
-        // x_new = x + v*dt + 0.5*a*dt^2
-        // v_new = v + a*dt
-        // a_new = a
-        return vt::make_numeric_vector({x[0] + dt * x[1] + hdts * x[2], x[1] + dt * x[2], x[2]});
-    }
-
-    // Jacobian of f, Fj(x, u)
-    static vt::numeric_matrix<3, 3> Fj_func(const StateVector &, const ControlVector & u)
-    {
-        double dt = u[0];
-        double hdts = 0.5f * dt * dt;
-        return vt::make_numeric_matrix<3, 3>({{1, dt, hdts}, {0, 1, dt}, {0, 0, 1}});
-    }
-
-    // Measurement function h(x)
-    static MeasurementVector h_func(const StateVector & x)
-    {
-        return vt::make_numeric_vector({x[0]});
-    }
-
-    // Jacobian of h, Hj(x)
-    static vt::numeric_matrix<1, 3> Hj_func(const StateVector &)
-    {
-        return vt::make_numeric_matrix<1, 3>({{1, 0, 0}});
-    }
-};
-
-WheelKalmanFilter::WheelKalmanFilter() : m_state(std::make_unique<KalmanState>())
+/**
+ * @brief Configures the wrap period of the sensed angle.
+ * @param angle_period One full turn of the sensed shaft in radians.
+ */
+WheelKalmanFilter::WheelKalmanFilter(double angle_period) : m_angle_period(angle_period)
 {
 }
 
-WheelKalmanFilter::~WheelKalmanFilter() = default;
+/**
+ * @brief Maps an angle difference into [-period/2, period/2).
+ * @param angle Angle difference in radians.
+ * @return Equivalent difference across the shorter way around the turn.
+ */
+double WheelKalmanFilter::wrap_angle(double angle) const
+{
+    return angle - m_angle_period * std::floor((angle + 0.5 * m_angle_period) / m_angle_period);
+}
 
 /**
- * @brief Updates the filter with a new angle measurement.
- * @param measured_angle The new angle in radians.
+ * @brief Advances the state by dt and grows the covariance.
+ *
+ * x = [x0 + dt*x1 + 0.5*dt^2*x2, x1 + dt*x2, x2] and P = F P F^T + Q with
+ * F = [[1, dt, 0.5*dt^2], [0, 1, dt], [0, 0, 1]]. F is upper triangular, so
+ * both products expand into short row/column sums.
  */
-void WheelKalmanFilter::update(double measured_angle_rad)
+void WheelKalmanFilter::predict(double dt)
 {
-    int64_t now = esp_timer_get_time();
+    const double hdts = 0.5 * dt * dt;
+    const double new_angle = m_state.state[0] + dt * m_state.state[1] + hdts * m_state.state[2];
+    const double new_velocity = m_state.state[1] + dt * m_state.state[2];
 
-    if (!m_state->initialized)
+    double fp[STATE_DIM][STATE_DIM];
+    for (int j = 0; j < STATE_DIM; ++j)
     {
-        m_state->state_vec = vt::make_numeric_vector({measured_angle_rad, 0.0, 0.0});
-        m_state->last_update_us = now;
-        m_state->initialized = true;
+        fp[0][j] = m_state.covariance[0][j] + dt * m_state.covariance[1][j] +
+                   hdts * m_state.covariance[2][j];
+        fp[1][j] = m_state.covariance[1][j] + dt * m_state.covariance[2][j];
+        fp[2][j] = m_state.covariance[2][j];
+    }
+
+    // (FP) * F^T: (FP*F^T)[i][j] = sum_k fp[i][k] * F[j][k], and the rows of
+    // F are [1,dt,hdts] / [0,1,dt] / [0,0,1]. The angle-velocity cross terms
+    // built here are what let the angle row correct the velocity state.
+    for (int i = 0; i < STATE_DIM; ++i)
+    {
+        m_state.covariance[i][0] = fp[i][0] + dt * fp[i][1] + hdts * fp[i][2];
+        m_state.covariance[i][1] = fp[i][1] + dt * fp[i][2];
+        m_state.covariance[i][2] = fp[i][2];
+        m_state.covariance[i][i] += Q_PROCESS[i] * dt;
+    }
+
+    m_state.state[0] = new_angle;
+    m_state.state[1] = new_velocity;
+}
+
+/**
+ * @brief Applies one scalar measurement row of the observation matrix.
+ *
+ * h(x) = state[row], so with H = e_row^T: S = P[row][row] + variance,
+ * K = P[:,row] / S, x += K y and P -= K (row of P).
+ */
+void WheelKalmanFilter::scalar_update(int row, double innovation, double variance)
+{
+    const double s = m_state.covariance[row][row] + variance;
+    const double k[STATE_DIM] = {m_state.covariance[0][row] / s,
+                                 m_state.covariance[1][row] / s,
+                                 m_state.covariance[2][row] / s};
+    // The old measurement row is kept apart: the loop below overwrites it
+    // while later iterations still need its original values.
+    const double measured_row[STATE_DIM] = {
+      m_state.covariance[row][0], m_state.covariance[row][1], m_state.covariance[row][2]};
+
+    for (int i = 0; i < STATE_DIM; ++i) m_state.state[i] += k[i] * innovation;
+
+    for (int i = 0; i < STATE_DIM; ++i)
+        for (int j = 0; j < STATE_DIM; ++j) m_state.covariance[i][j] -= k[i] * measured_row[j];
+}
+
+/**
+ * @brief Predicts to the current time and reports whether a previous estimate
+ *        was already available.
+ */
+bool WheelKalmanFilter::prepare_step()
+{
+    const int64_t now = esp_timer_get_time();
+
+    if (!m_state.initialized)
+    {
+        m_state.last_update_us = now;
+        m_state.initialized = true;
+        return false;
+    }
+
+    const double dt = static_cast<double>(now - m_state.last_update_us) / 1e6;
+    predict(dt);
+    m_state.last_update_us = now;
+    return true;
+}
+
+/**
+ * @brief Fuses one encoder angle.
+ */
+void WheelKalmanFilter::update(double measured_angle)
+{
+    if (!prepare_step())
+    {
+        m_state.state[MEAS_ANGLE] = measured_angle;
         return;
     }
 
-    // --- Predict Step ---
-    double dt = (now - m_state->last_update_us) / 1e6f;
-    m_state->filter.predict(vt::make_numeric_vector({dt}));
-    m_state->last_update_us = now;
-
-    // --- Update Step ---
-    // Handle angle wrapping (innovation)
-    const auto & predicted_state = m_state->filter.state_vector;
-    double predicted_angle = predicted_state[0];
-    double innovation = normalize_angle(measured_angle_rad - predicted_angle);
-    double corrected_measurement = predicted_angle + innovation;
-    m_state->filter.update(vt::make_numeric_vector({corrected_measurement}));
+    const double innovation = wrap_angle(measured_angle - m_state.state[MEAS_ANGLE]);
+    scalar_update(MEAS_ANGLE, innovation, R_MEAS_ANGLE);
 }
 
 /**
- * @brief Retrieves the filtered angle.
- * @return Angle in radians.
+ * @brief Fuses one encoder angle and one direct velocity in one cycle.
  */
+void WheelKalmanFilter::update(double measured_angle, double measured_velocity)
+{
+    if (!prepare_step())
+    {
+        m_state.state[MEAS_ANGLE] = measured_angle;
+        m_state.state[MEAS_VELOCITY] = measured_velocity;
+        return;
+    }
+
+    const double angle_innovation = wrap_angle(measured_angle - m_state.state[MEAS_ANGLE]);
+    scalar_update(MEAS_ANGLE, angle_innovation, R_MEAS_ANGLE);
+
+    const double velocity_innovation = measured_velocity - m_state.state[MEAS_VELOCITY];
+    scalar_update(MEAS_VELOCITY, velocity_innovation, R_MEAS_VELOCITY);
+}
+
+/**
+ * @brief Drops the current estimate and its timestamps.
+ */
+void WheelKalmanFilter::reset()
+{
+    m_state = KalmanState();
+}
+
 double WheelKalmanFilter::get_angle_rad() const
 {
-    return m_state->filter.state_vector[0];
+    return m_state.state[MEAS_ANGLE];
 }
 
-/**
- * @brief Retrieves the filtered angular velocity.
- * @return Velocity in rad/s.
- */
 double WheelKalmanFilter::get_velocity_rad_s() const
 {
-    return m_state->filter.state_vector[1];
-}
-
-/**
- * @brief Retrieves the filtered angular acceleration.
- * @return Acceleration in rad/s^2.
- */
-double WheelKalmanFilter::get_acceleration_rad_s2() const
-{
-    return m_state->filter.state_vector[2];
+    return m_state.state[MEAS_VELOCITY];
 }

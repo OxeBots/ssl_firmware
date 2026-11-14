@@ -1,10 +1,26 @@
 #include "PowerMonitor.h"
 
+#include <sdkconfig.h>
+
 #include <cmath>
 
 static bool is_voltage_valid(float voltage_v)
 {
     return std::isfinite(voltage_v) && voltage_v >= 0.0f;
+}
+
+/**
+ * @brief Process-wide monitor configured from the VMON Kconfig values.
+ * @return Singleton instance using the sdkconfig divider ratio and limits.
+ */
+PowerMonitor & PowerMonitor::get_instance()
+{
+    static PowerMonitor instance(PowerMonitorConfig{
+      .adc_to_supply_ratio = static_cast<float>(CONFIG_VMON_SUPPLY_RATIO_MILLI) / 1000.0f,
+      .undervoltage_v = static_cast<float>(CONFIG_VMON_UNDERVOLTAGE_MV) / 1000.0f,
+      .overvoltage_v = static_cast<float>(CONFIG_VMON_OVERVOLTAGE_MV) / 1000.0f,
+    });
+    return instance;
 }
 
 PowerMonitor::PowerMonitor(const PowerMonitorConfig & config) : m_config(config)

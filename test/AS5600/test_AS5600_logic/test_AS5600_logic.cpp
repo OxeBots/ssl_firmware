@@ -36,38 +36,21 @@ static adc_cali_handle_t make_voltage_calibration()
     return handle;
 }
 
-// Feeds one raw value through a complete oversampling window.
-static bool process_window(AS5600 & encoder, uint16_t raw_value, float * measured_angle_rad)
-{
-    bool produced = false;
-    for (size_t i = 0; i < 16; ++i)
-        produced = encoder.process_new_reading(raw_value, measured_angle_rad);
-    return produced;
-}
-
-void test_measurement_only_after_full_oversampling_window()
-{
-    AS5600 encoder(ADC_CHANNEL_0, nullptr, false);
-    float angle = -1.0f;
-
-    for (int i = 0; i < 15; ++i) TEST_ASSERT_FALSE(encoder.process_new_reading(2048, &angle));
-
-    TEST_ASSERT_TRUE(encoder.process_new_reading(2048, &angle));
-}
-
+// The ADC stream owns the oversampling, so every process_new_reading
+// call converts exactly one published raw block mean.
 void test_uncalibrated_raw_value_maps_full_turn()
 {
     AS5600 encoder(ADC_CHANNEL_0, nullptr, false);
     float angle = -1.0f;
 
-    TEST_ASSERT_TRUE(process_window(encoder, 0, &angle));
+    encoder.process_new_reading(0, &angle);
     TEST_ASSERT_FLOAT_WITHIN(as5600_test::EPSILON, 0.0f, angle);
 
-    TEST_ASSERT_TRUE(process_window(encoder, 2048, &angle));
+    encoder.process_new_reading(2048, &angle);
     TEST_ASSERT_FLOAT_WITHIN(
       as5600_test::EPSILON, (2048.0f / 4095.0f) * as5600_test::TWO_PI, angle);
 
-    TEST_ASSERT_TRUE(process_window(encoder, 4095, &angle));
+    encoder.process_new_reading(4095, &angle);
     TEST_ASSERT_FLOAT_WITHIN(as5600_test::EPSILON, as5600_test::TWO_PI, angle);
 }
 
@@ -94,10 +77,10 @@ void test_calibrated_voltage_clamps_to_calibration_range()
 
     // Outside the calibrated range on both ends: the ratio must clamp to the
     // exact interval limits instead of wrapping around.
-    TEST_ASSERT_TRUE(process_window(encoder, 0, &angle));
+    encoder.process_new_reading(0, &angle);
     TEST_ASSERT_FLOAT_WITHIN(as5600_test::EPSILON, 0.0f, angle);
 
-    TEST_ASSERT_TRUE(process_window(encoder, 4095, &angle));
+    encoder.process_new_reading(4095, &angle);
     TEST_ASSERT_FLOAT_WITHIN(as5600_test::EPSILON, as5600_test::TWO_PI, angle);
 }
 
@@ -112,8 +95,8 @@ void test_calibration_mode_tracks_voltage_extremes()
     TEST_ASSERT_EQUAL(0, encoder.get_calib_max());
 
     encoder.start_calibration_mode();
-    TEST_ASSERT_TRUE(process_window(encoder, 4095, &angle));
-    TEST_ASSERT_TRUE(process_window(encoder, 0, &angle));
+    encoder.process_new_reading(4095, &angle);
+    encoder.process_new_reading(0, &angle);
     encoder.stop_calibration_mode();
 
     int swing_mv = encoder.get_calib_max() - encoder.get_calib_min();
@@ -172,7 +155,6 @@ extern "C" void app_main(void)
 {
     UNITY_BEGIN();
 
-    RUN_TEST(test_measurement_only_after_full_oversampling_window);
     RUN_TEST(test_uncalibrated_raw_value_maps_full_turn);
     RUN_TEST(test_calibration_range_validation);
     RUN_TEST(test_calibrated_voltage_clamps_to_calibration_range);

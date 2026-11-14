@@ -1,5 +1,5 @@
-#ifndef POWER_MONITOR_H
-#define POWER_MONITOR_H
+#ifndef _POWER_MONITOR_H_
+#define _POWER_MONITOR_H_
 
 #include <stdint.h>
 
@@ -15,6 +15,9 @@ struct PowerMonitorConfig
 class PowerMonitor
 {
    public:
+    // Process-wide monitor configured from the VMON sdkconfig values.
+    static PowerMonitor & get_instance();
+
     explicit PowerMonitor(const PowerMonitorConfig & config = PowerMonitorConfig());
 
     bool update_adc_voltage(float adc_voltage_v, uint64_t timestamp_us);
@@ -33,4 +36,4 @@ class PowerMonitor
     bool m_valid = false;
 };
 
-#endif  // POWER_MONITOR_H
+#endif  // _POWER_MONITOR_H_

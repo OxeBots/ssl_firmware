@@ -25,10 +25,21 @@ void test_power_monitor_converts_and_reports_limits()
     TEST_ASSERT_TRUE(observation.supply_undervoltage);
 }
 
+// The singleton is wired to the VMON Kconfig divider: a 24 V battery across
+// the 56k/2k2 divider gives about 0.907 V at the pin, and the conversion
+// must report that pin voltage back as about 24 V.
+void test_power_monitor_singleton_applies_divider_ratio(void)
+{
+    PowerMonitor & monitor = PowerMonitor::get_instance();
+    TEST_ASSERT_TRUE(monitor.update_adc_voltage(0.90725f, 100));
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, 24.0f, monitor.get_supply_voltage_v());
+}
+
 void setup()
 {
     UNITY_BEGIN();
     RUN_TEST(test_power_monitor_converts_and_reports_limits);
+    RUN_TEST(test_power_monitor_singleton_applies_divider_ratio);
     UNITY_END();
 }
 

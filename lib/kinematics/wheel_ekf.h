@@ -1,28 +1,52 @@
-#ifndef KINEMATICS_WHEEL_EKF_H
-#define KINEMATICS_WHEEL_EKF_H
+#ifndef _WHEEL_EKF_H_
+#define _WHEEL_EKF_H_
 
-#include <esp_timer.h>
-
+#include <cmath>
 #include <cstdint>
-#include <memory>
 
-#include "helper_func.h"
-
+// Extended Kalman filter over [angle, velocity, acceleration]. The angle is
+// sensed modulo one shaft turn; angle_period is that turn in radians (2*pi
+// for a bare shaft, less when the reading is scaled down by a gear ratio).
 class WheelKalmanFilter
 {
    public:
-    WheelKalmanFilter();
-    ~WheelKalmanFilter();
+    explicit WheelKalmanFilter(double angle_period = 2.0 * M_PI);
 
+    // Fuses one encoder angle (rad).
     void update(double measured_angle);
+
+    // Fuses one encoder angle plus one direct velocity measurement (rad/s) in
+    // a single predict/update cycle.
+    void update(double measured_angle, double measured_velocity);
+
+    // Drops the current estimate; the next update re-initializes the filter.
+    void reset();
 
     double get_angle_rad() const;
     double get_velocity_rad_s() const;
-    double get_acceleration_rad_s2() const;
 
    private:
-    struct KalmanState;
-    std::unique_ptr<KalmanState> m_state;
+    struct KalmanState
+    {
+        KalmanState();
+
+        double state[3] = {};
+        double covariance[3][3] = {};
+        int64_t last_update_us = 0;
+        bool initialized = false;
+    };
+
+    // One predict/update cycle: advances the state to the current time and
+    // reports whether the filter had a previous estimate to correct.
+    bool prepare_step();
+    void predict(double dt);
+    void scalar_update(int row, double innovation, double variance);
+
+    // Maps an angle difference into [-angle_period/2, angle_period/2).
+    double wrap_angle(double angle) const;
+
+    KalmanState m_state;
+    double m_angle_period;
 };
 
-#endif  // KINEMATICS_WHEEL_EKF_H
+#endif  // _WHEEL_EKF_H_
