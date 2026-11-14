@@ -11,6 +11,14 @@
 
 static const char * TAG = "ToFPerceptionService";
 
+/**
+ * @brief Accept only fully valid, positive ranges from a received frame.
+ */
+bool ToFPerceptionFrame::has_valid_target(size_t index) const
+{
+    return valid && index < MAX_TARGETS && target_status[index] == 5 && distance_mm[index] > 0;
+}
+
 ToFPerceptionService::~ToFPerceptionService()
 {
     stop();
@@ -22,7 +30,7 @@ esp_err_t ToFPerceptionService::init(gpio_num_t interrupt_gpio, uint8_t frequenc
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
-    if (frequency_hz == 0 || frequency_hz > 60)
+    if (frequency_hz == 0 || frequency_hz > 15)
         return ESP_ERR_INVALID_ARG;
 
     esp_err_t err = m_sensor.init();
@@ -31,9 +39,18 @@ esp_err_t ToFPerceptionService::init(gpio_num_t interrupt_gpio, uint8_t frequenc
     if (!m_sensor.test_connection())
         return ESP_ERR_NOT_FOUND;
 
-    if (m_sensor.set_resolution(VL53L5CX_RESOLUTION_4X4) != VL53L5CX_STATUS_OK ||
-        m_sensor.set_ranging_frequency(frequency_hz) != VL53L5CX_STATUS_OK)
+    // Continuous mode uses the full frame period for ranging. Closest-first
+    // keeps a nearby target ahead of a stronger background reflection.
+    // Disable the sharpener to retain detections across the full field of view.
+    if (m_sensor.set_resolution(VL53L5CX_RESOLUTION_8X8) != VL53L5CX_STATUS_OK ||
+        m_sensor.set_ranging_frequency(frequency_hz) != VL53L5CX_STATUS_OK ||
+        m_sensor.set_ranging_mode(VL53L5CX_RANGING_MODE_CONTINUOUS) != VL53L5CX_STATUS_OK ||
+        m_sensor.set_target_order(VL53L5CX_TARGET_ORDER_CLOSEST) != VL53L5CX_STATUS_OK ||
+        m_sensor.set_sharpener_percent(0) != VL53L5CX_STATUS_OK)
+    {
+        ESP_LOGE(TAG, "Failed to configure the short-range measurement profile");
         return ESP_ERR_INVALID_RESPONSE;
+    }
 
     bool configure_interrupt = (interrupt_gpio >= 0 && interrupt_gpio < GPIO_NUM_MAX);
 #if defined(CONFIG_ESP_CONSOLE_UART_NUM) && CONFIG_ESP_CONSOLE_UART_NUM == 0
@@ -67,6 +84,8 @@ esp_err_t ToFPerceptionService::init(gpio_num_t interrupt_gpio, uint8_t frequenc
     m_frequency_hz = frequency_hz;
     m_initialized = true;
     m_available = true;
+    ESP_LOGI(
+      TAG, "8x8 at %u Hz, continuous mode, closest target, sharpener disabled", frequency_hz);
     return ESP_OK;
 }
 
@@ -146,12 +165,11 @@ LocalPerceptionState ToFPerceptionService::project_frame(const ToFPerceptionFram
     int16_t nearest_distance_mm = -1;
     for (size_t index = 0; index < ToFPerceptionFrame::MAX_TARGETS; ++index)
     {
-        state.range_mm[index] = frame.distance_mm[index];
+        const int16_t distance_mm = frame.has_valid_target(index) ? frame.distance_mm[index] : 0;
+        state.range_mm[index] = distance_mm;
         state.target_status[index] = frame.target_status[index];
 
-        const int16_t distance_mm = frame.distance_mm[index];
-        if (frame.target_status[index] != 0 && distance_mm > 0 &&
-            (nearest_distance_mm < 0 || distance_mm < nearest_distance_mm))
+        if (distance_mm > 0 && (nearest_distance_mm < 0 || distance_mm < nearest_distance_mm))
         {
             nearest_distance_mm = distance_mm;
             state.nearest_zone = static_cast<uint8_t>(index);
@@ -171,8 +189,7 @@ bool ToFPerceptionService::is_available() const
     // read as online.
     constexpr uint64_t FRAME_FRESH_WINDOW_US = 500000;
     const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
-    return m_available.load() &&
-           now_us - m_last_frame_us.load() < FRAME_FRESH_WINDOW_US;
+    return m_available.load() && now_us - m_last_frame_us.load() < FRAME_FRESH_WINDOW_US;
 }
 
 void ToFPerceptionService::task_wrapper(void * arg)
@@ -215,14 +232,14 @@ void ToFPerceptionService::publish_result(const VL53L5CX_ResultsData & results)
     if (m_mutex == nullptr || xSemaphoreTake(m_mutex, pdMS_TO_TICKS(10)) != pdTRUE)
         return;
 
-    constexpr size_t target_count = ToFPerceptionFrame::MAX_TARGETS;
+    constexpr size_t TARGET_COUNT = ToFPerceptionFrame::MAX_TARGETS;
     memcpy(m_frame.distance_mm.data(),
            results.distance_mm,
-           target_count * sizeof(results.distance_mm[0]));
+           TARGET_COUNT * sizeof(results.distance_mm[0]));
     memcpy(m_frame.target_status.data(),
            results.target_status,
-           target_count * sizeof(results.target_status[0]));
-    m_frame.resolution = VL53L5CX_RESOLUTION_4X4;
+           TARGET_COUNT * sizeof(results.target_status[0]));
+    m_frame.resolution = VL53L5CX_RESOLUTION_8X8;
     ++m_frame.sequence;
     m_frame.timestamp_us = esp_timer_get_time();
     m_frame.valid = true;

@@ -1,5 +1,5 @@
-#ifndef TOF_PERCEPTION_SERVICE_H
-#define TOF_PERCEPTION_SERVICE_H
+#ifndef _TOF_PERCEPTION_SERVICE_H_
+#define _TOF_PERCEPTION_SERVICE_H_
 
 #include <driver/gpio.h>
 #include <esp_err.h>
@@ -19,12 +19,14 @@ struct ToFPerceptionFrame
     static constexpr size_t MAX_ZONES = VL53L5CX_RESOLUTION_8X8;
     static constexpr size_t MAX_TARGETS = VL53L5CX_RESOLUTION_8X8 * VL53L5CX_NB_TARGET_PER_ZONE;
 
-    uint8_t resolution = VL53L5CX_RESOLUTION_4X4;
+    uint8_t resolution = VL53L5CX_RESOLUTION_8X8;
     uint32_t sequence = 0;
     int64_t timestamp_us = 0;
     bool valid = false;
     std::array<int16_t, MAX_TARGETS> distance_mm = {};
     std::array<uint8_t, MAX_TARGETS> target_status = {};
+
+    bool has_valid_target(size_t index) const;
 };
 
 class ToFPerceptionService
@@ -62,4 +64,4 @@ class ToFPerceptionService
     std::atomic<uint64_t> m_last_frame_us = 0;
 };
 
-#endif  // TOF_PERCEPTION_SERVICE_H
+#endif  // _TOF_PERCEPTION_SERVICE_H_
