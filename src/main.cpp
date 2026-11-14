@@ -15,8 +15,9 @@
  *   3.: GPIO ISR service (must precede any GPIO interrupt registration)
  *   4.: IMU hardware driver init (IMUGY85)
  *   5.: Wheel encoders (ADC) + NVS ADC callbacks
- *   6.: Motor driver + WheelController
- *   7.: Radio + ProtocolHandler + Telemetry
+ *   6.: Shared SPI bus, 74HC595 (motor direction, CD4052B select and radio
+ *       CE), then the radio hardware
+ *   7.: Motor driver + WheelController
  *   8.: Calibration (blocking; loads NVS or runs interactive routine)
  *   9.: Start orientation task (OrientationHandler @ 100 Hz)
  *   Idle: idle loop.
@@ -56,12 +57,6 @@ static constexpr ledc_timer_t MOTOR_LEDC_TIMER = LEDC_TIMER_0;
 static constexpr ledc_mode_t MOTOR_LEDC_SPEED_MODE = LEDC_LOW_SPEED_MODE;
 static constexpr ledc_timer_bit_t MOTOR_DUTY_RESOLUTION = LEDC_TIMER_10_BIT;
 static constexpr uint32_t MOTOR_PWM_FREQ_HZ = 20000;
-
-#ifdef CONFIG_SPI2_HOST
-static constexpr spi_host_device_t SPI_HOST_ID = SPI2_HOST;
-#else
-static constexpr spi_host_device_t SPI_HOST_ID = SPI3_HOST;
-#endif
 
 extern "C" void app_main(void)
 {
@@ -122,7 +117,8 @@ extern "C" void app_main(void)
         RobotState::get_instance().set_error(ERROR_TOF_FAIL);
     }
 
-    // 5: Wheel encoders (ADC)
+    // 5: Wheel encoders. The estimator creates the shared ADC stream (encoder
+    // channels plus the VMON supply channel) and registers its sample handlers.
     const std::array<adc_channel_t, 4> enc_channels = {
       static_cast<adc_channel_t>(CONFIG_MOTOR_FL_ENC_CHANNEL),
       static_cast<adc_channel_t>(CONFIG_MOTOR_BL_ENC_CHANNEL),
@@ -133,14 +129,15 @@ extern "C" void app_main(void)
     WheelStateEstimator & wse = WheelStateEstimator::get_instance();
     ESP_ERROR_CHECK(wse.init(enc_channels, ADC_ATTEN_DB_12));
 
-    // 6: Radio initializes the shared SPI bus. On Rev B the 74HC595 is then
-    // added to that bus as a device without chip select; its RCKSR pin is
-    // the latch. Rev A has no 74HC595 and no CD4052B.
-    SPIdev::init(SPI_HOST_ID);
-    static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO));
-    const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;
+    // 6: Radio and shared-bus peripherals. SPIdev::init() creates the shared
+    // SPI bus from the sdkconfig pins; the 74HC595 and the radio both register
+    // on it, and all bus traffic — radio, 74HC595 and CD4052B — goes through
+    // SPIdev's transaction mutex. The 74HC595 carries the four motor direction
+    // outputs, the CD4052B select lines and the radio CE line, so the shift
+    // register is initialized and attached to the radio before the radio
+    // hardware stage.
+    SPIdev::init();
 
-#if CONFIG_BOARD_REV_B
     static HC595 shift_register;
     HC595::Config output_config = {
       .latch_gpio = static_cast<gpio_num_t>(CONFIG_SHIFT_REGISTER_LATCH_GPIO),
@@ -157,7 +154,19 @@ extern "C" void app_main(void)
     };
     ESP_ERROR_CHECK(cd4052b.init(&shift_register, mux_config));
     wse.set_cd4052b(&cd4052b);
-#endif
+
+    // Radio CE is a 74HC595 output bit: the radio driver writes it through the
+    // generic CE pin callback, so it stays independent of the shift register.
+    static HC595::Pin radio_ce_pin{&shift_register,
+                                   static_cast<uint8_t>(1U << CONFIG_SHIFT_REGISTER_RF_CE_BIT)};
+    NRF24_CePin radio_ce = {};
+    radio_ce.gpio = GPIO_NUM_NC;
+    radio_ce.write = &HC595::Pin::write;
+    radio_ce.context = &radio_ce_pin;
+    static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO), radio_ce);
+
+    radio.init_hw();
+    const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;
 
     // 7: Motor driver + WheelController
     config::driver::MotorDriverConfig motor_config;
@@ -171,15 +180,13 @@ extern "C" void app_main(void)
       static_cast<gpio_num_t>(CONFIG_MOTOR_BR_PWM_GPIO),
       static_cast<gpio_num_t>(CONFIG_MOTOR_FR_PWM_GPIO),
     };
-#if CONFIG_BOARD_REV_A
-    // Rev A wiring: each motor direction input is a dedicated GPIO pin.
-    motor_config.motor_dir_pins = {
-      static_cast<gpio_num_t>(CONFIG_MOTOR_FL_DIR_GPIO),
-      static_cast<gpio_num_t>(CONFIG_MOTOR_BL_DIR_GPIO),
-      static_cast<gpio_num_t>(CONFIG_MOTOR_BR_DIR_GPIO),
-      static_cast<gpio_num_t>(CONFIG_MOTOR_FR_DIR_GPIO),
+    // Digital pulse-feedback inputs (FBM1-4) feed the hardware pulse counters.
+    motor_config.motor_fb_pins = {
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FL_FB_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BL_FB_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_BR_FB_GPIO),
+      static_cast<gpio_num_t>(CONFIG_MOTOR_FR_FB_GPIO),
     };
-#else
     motor_config.direction_shift_register = &shift_register;
     motor_config.direction_bits = {
       static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR1_BIT),
@@ -187,7 +194,6 @@ extern "C" void app_main(void)
       static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR3_BIT),
       static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DIR4_BIT),
     };
-#endif
     motor_config.motor_channels = {
       LEDC_CHANNEL_0,
       LEDC_CHANNEL_1,
@@ -209,9 +215,12 @@ extern "C" void app_main(void)
         ProtocolHandler::get_instance().init(&radio, &WheelController::get_instance(), &robot);
         Telemetry::get_instance().init(&radio);
 
-        radio.start([](const uint8_t * payload, uint8_t len) {
-            ProtocolHandler::get_instance().on_packet(payload, len);
-        });
+        radio.start(
+          [](void * pvParameters) {
+              auto * event = static_cast<DataReceivedEvent *>(pvParameters);
+              ProtocolHandler::get_instance().on_packet(event->payload, event->length);
+          },
+          nullptr);
         ESP_LOGI(TAG, "Radio initialized on channel %d.", CONFIG_RADIO_CHANNEL);
     }
     else

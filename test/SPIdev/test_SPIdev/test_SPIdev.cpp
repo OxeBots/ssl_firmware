@@ -1,10 +1,10 @@
-#include <74HC595.h>
-#include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <sdkconfig.h>
 #include <unity.h>
 
 #include "../shared_test_bus.h"
+#include "74HC595.h"
+#include "SPIdev.h"
 
 namespace
 {
@@ -25,7 +25,7 @@ void test_spi_device_registration_and_write()
     device_config.queue_size = 1;
     device_config.flags = SPI_DEVICE_NO_DUMMY;
 
-    TEST_ASSERT_TRUE(SPIdev::register_device(TEST_DEVICE_KEY, &device_config));
+    TEST_ASSERT_TRUE(SPIdev::register_device(TEST_DEVICE_KEY, GPIO_NUM_NC, &device_config));
 
     const uint8_t value = 0xA5;
     TEST_ASSERT_TRUE(SPIdev::write(TEST_DEVICE_KEY, &value, sizeof(value)));

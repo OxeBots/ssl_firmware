@@ -30,6 +30,8 @@ CONFIG_SHIFT_REGISTER_DIR4_BIT=3
 CONFIG_SHIFT_REGISTER_MUX_A_BIT=4
 CONFIG_SHIFT_REGISTER_MUX_B_BIT=5
 CONFIG_SHIFT_REGISTER_MUX_INH_BIT=6
+# nRF24L01 CE input, driven through the register (CERF24 / output QH)
+CONFIG_SHIFT_REGISTER_RF_CE_BIT=7
 
 # Bound VL53L5CX I2C operations so a missing or unpowered module cannot block startup forever.
 CONFIG_VL53L5CX_I2C_TIMEOUT=y
@@ -61,13 +63,23 @@ CONFIG_MOTOR_BR_FB_GPIO=13
 # ENCM4: GPIO39 / ADC1 Channel 3
 CONFIG_MOTOR_FR_ENC_CHANNEL=3
 CONFIG_MOTOR_FR_PWM_GPIO=12
-CONFIG_MOTOR_FR_FB_GPIO=3
+# FBM4: GPIO2
+CONFIG_MOTOR_FR_FB_GPIO=2
 
 #
 # Supply-voltage monitoring
 #
 # VMON: GPIO33 / ADC1 Channel 5
 CONFIG_VMON_ADC_CHANNEL=5
+# Divider: 56k series + 2k2 shunt, ratio = (56 + 2.2) / 2.2 = 26.4545
+CONFIG_VMON_SUPPLY_RATIO_MILLI=26455
+# 6S2P 18650 lithium ion pack: 25.2 V full, 19.8 V low (3.3 V/cell)
+CONFIG_VMON_UNDERVOLTAGE_MV=19800
+CONFIG_VMON_OVERVOLTAGE_MV=26500
+# Aggregate conversions per second shared by the scan table slots
+CONFIG_ADC_SAMPLE_FREQ_HZ=80000
+# Block mean of N conversions per sampled channel
+CONFIG_ADC_OVERSAMPLE=32
 
 #
 # GY-85 interrupts
@@ -97,9 +109,10 @@ CONFIG_SERIAL_DEBUG=y
 CONFIG_GPIO_RANGE_MAX=39
 CONFIG_RADIO_CHANNEL=76
 
-CONFIG_CE_GPIO=2
 CONFIG_CSN_GPIO=0
 CONFIG_IRQ_GPIO=4
+# Software key for the shared SPI driver (manual chip-select, not a GPIO)
+CONFIG_NRF24_SPI_DEVICE_KEY=253
 
 CONFIG_SPI2_HOST=y
 # CONFIG_SPI3_HOST is not set

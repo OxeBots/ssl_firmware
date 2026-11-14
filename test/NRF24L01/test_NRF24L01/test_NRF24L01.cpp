@@ -3,23 +3,26 @@
  * @brief Hardware diagnostic tests for the NRF24L01 module on ESP32.
  *
  * Tests are ordered from most fundamental to most specific so that an early
- * failure immediately points to the root cause (GPIO, SPI bus, or RF module).
+ * failure immediately points to the root cause (GPIO, 74HC595, SPI bus or RF
+ * module).
  *
  * Test execution order:
  *   1. test_gpio_irq_pin         — IRQ input pin is configurable and reads a stable level
- *   2. test_gpio_ce_csn_pins     — CE / CSN can be driven as digital outputs
- *   3. test_spi_status_plausible — STATUS byte is not 0x00 or 0xFF after Nrf24_init()
- *   4. test_status_reset_value   — STATUS[3:0] matches the nRF24L01(+) power-on reset value
- *   5. test_config_register_rw   — CONFIG register round-trip write / read-back
- *   6. test_rf_channel_rw        — RF_CH register two-value round-trip write / read-back
- *   7. test_set_rx_tx_address    — Nrf24_setRADDR + Nrf24_setTADDR succeed with address verify
+ *   2. test_gpio_csn_pin         — CSN can be driven as a digital output
+ *   3. test_ce_shift_register    — CE reaches 74HC595 output bit 7 without disturbing other bits
+ *   4. test_spi_status_plausible — STATUS byte is not 0x00 or 0xFF after Nrf24_init()
+ *   5. test_status_reset_value   — STATUS[3:0] matches the nRF24L01(+) power-on reset value
+ *   6. test_config_register_rw   — CONFIG register round-trip write / read-back
+ *   7. test_rf_channel_rw        — RF_CH register two-value round-trip write / read-back
+ *   8. test_set_rx_tx_address    — Nrf24_setRADDR + Nrf24_setTADDR succeed with address verify
  *
  * Pin mapping (from sdkconfig.defaults):
  *   MISO  → GPIO 19   (CONFIG_MISO_GPIO)
  *   MOSI  → GPIO 23   (CONFIG_MOSI_GPIO)
  *   SCLK  → GPIO 18   (CONFIG_SCLK_GPIO)
- *   CE    → GPIO  2   (CONFIG_CE_GPIO)
- *   CSN   → GPIO  5   (CONFIG_CSN_GPIO)
+ *   CE    → 74HC595 output QH, bit 7 (CERF24); the radio test drives it through
+ *           the shift register, like the firmware does
+ *   CSN   → GPIO  0   (CONFIG_CSN_GPIO)
  *   IRQ   → GPIO  4   (CONFIG_IRQ_GPIO)   ← active-LOW, pulled up internally
  *
  * Hardware tips:
@@ -33,21 +36,25 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <sdkconfig.h>
 #include <unity.h>
 
+#include "../shared_test_shift_register.h"
+#include "74HC595.h"
 #include "mirf.h"  // NRF24_t, Nrf24_*, Nrf24_readRegister, Nrf24_configRegister, etc.
 
 // ============================================================================
 // Pin definitions — must match sdkconfig.defaults
-// (These echo the CONFIG_* macros that mirf.c reads at compile time.)
 // ============================================================================
 
 #define PIN_MISO CONFIG_MISO_GPIO  // 19
 #define PIN_MOSI CONFIG_MOSI_GPIO  // 23
 #define PIN_SCLK CONFIG_SCLK_GPIO  // 18
-#define PIN_CE CONFIG_CE_GPIO      //  2
-#define PIN_CSN CONFIG_CSN_GPIO    //  5
+#define PIN_CSN CONFIG_CSN_GPIO    //  0
 #define PIN_IRQ CONFIG_IRQ_GPIO    //  4
+
+// CE is 74HC595 output QH; the shift register is part of the radio CE path.
+static const uint8_t CE_MASK = static_cast<uint8_t>(1U << CONFIG_SHIFT_REGISTER_RF_CE_BIT);
 
 // RF settings used in main.cpp — kept identical for a realistic test
 #define RF_CHANNEL CONFIG_RADIO_CHANNEL  // 76
@@ -62,10 +69,16 @@ static const char * PIPE_TX_ADDR = "ADMIN";  // → Nrf24_setTADDR → RX_ADDR_P
 static const char * TAG = "NRF24L01_TEST";
 
 // ============================================================================
-// Module-level device handle (shared across all tests in one run)
+// Module-level handles (shared across all tests in one run)
 // ============================================================================
 
 static NRF24_t s_dev;
+
+// The radio CE line is 74HC595 output QH, so the CE pin is a shift-register
+// output. The shift register itself is shared with the other hardware suites
+// (see shared_test_shift_register.h): one SPI device owns the latch.
+static HC595 * s_shift_register = nullptr;
+static HC595::Pin s_ce_pin;
 
 // ============================================================================
 // Internal helpers — use only real mirf API functions
@@ -97,18 +110,30 @@ static uint8_t write_and_readback(uint8_t reg, uint8_t value)
 // ============================================================================
 
 /**
- * @brief Initialize the SPI bus and attach the NRF24L01 device.
+ * @brief Initialize the shift register, the SPI bus and the NRF24L01 device.
  *
- * Delegates entirely to Nrf24_init() which internally calls
- * spi_bus_initialize() + spi_bus_add_device() and configures CE / CSN GPIOs.
- * If the SPI bus cannot be initialised, Nrf24_init() will assert() — that
- * crash itself is a diagnostic result (SPI pin conflict or GPIO already in use).
+ * The radio CE line is 74HC595 output QH on this board, so the test has a hard
+ * dependency on the shift-register driver: CE is written through
+ * HC595::Pin::write, the same callback the firmware hands to the radio driver.
+ * SPIdev and the shift register are shared with the other hardware suites.
+ * Nrf24_init() then registers the radio device through SPIdev, handing it
+ * CSNRF24 as the device chip select. If the bus or the registration fails, the
+ * assert() in Nrf24_init() fires — that crash itself is a diagnostic result
+ * (SPI pin conflict or GPIO already in use).
  */
 static void setup_spi()
 {
+    s_shift_register = &shared_test_shift_register();
+    s_ce_pin.shift_register = s_shift_register;
+    s_ce_pin.mask = CE_MASK;
+
     memset(&s_dev, 0, sizeof(NRF24_t));
-    Nrf24_init(&s_dev);
-    vTaskDelay(pdMS_TO_TICKS(20));  // let the module power up after CE/CSN settle
+    NRF24_CePin ce = {};
+    ce.gpio = GPIO_NUM_NC;
+    ce.write = &HC595::Pin::write;
+    ce.context = &s_ce_pin;
+    Nrf24_init(&s_dev, ce);
+    vTaskDelay(pdMS_TO_TICKS(20));  // let the module power up after CSN settles
 }
 
 // ============================================================================
@@ -151,51 +176,70 @@ void test_gpio_irq_pin(void)
 }
 
 // ============================================================================
-// TEST 2 — CE and CSN GPIO output drive
+// TEST 2 — CSN GPIO output drive
 //
-// Verify the pin numbers are valid and driveable as outputs before
+// Verify the pin number is valid and driveable as an output before
 // Nrf24_init() runs. Invalid pin numbers cause gpio_config() to return
-// ESP_ERR_INVALID_ARG.
+// ESP_ERR_INVALID_ARG. CE is covered by TEST 3 through the 74HC595.
 // ============================================================================
 
-void test_gpio_ce_csn_pins(void)
+void test_gpio_csn_pin(void)
 {
-    ESP_LOGI(TAG, "--- Test 2: CE (GPIO %d) / CSN (GPIO %d) output drive ---", PIN_CE, PIN_CSN);
+    ESP_LOGI(TAG, "--- Test 2: CSN (GPIO %d) output drive ---", PIN_CSN);
 
-    const gpio_num_t pins[] = {(gpio_num_t)PIN_CE, (gpio_num_t)PIN_CSN};
-    const char * labels[] = {"CE", "CSN"};
+    gpio_config_t cfg = {};
+    cfg.pin_bit_mask = (1ULL << PIN_CSN);
+    cfg.mode = GPIO_MODE_OUTPUT;
+    cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+    cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    cfg.intr_type = GPIO_INTR_DISABLE;
 
-    for (int i = 0; i < 2; ++i)
-    {
-        gpio_config_t cfg = {};
-        cfg.pin_bit_mask = (1ULL << pins[i]);
-        cfg.mode = GPIO_MODE_OUTPUT;
-        cfg.pull_up_en = GPIO_PULLUP_DISABLE;
-        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        cfg.intr_type = GPIO_INTR_DISABLE;
+    esp_err_t err = gpio_config(&cfg);
+    TEST_ASSERT_EQUAL_MESSAGE(
+      ESP_OK, err, "CSN gpio_config() failed — invalid pin or already in use?");
 
-        esp_err_t err = gpio_config(&cfg);
-        char msg[80];
-        snprintf(msg,
-                 sizeof(msg),
-                 "%s gpio_config() failed for GPIO %d — invalid pin or already in use?",
-                 labels[i],
-                 (int)pins[i]);
-        TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err, msg);
+    // Toggle HIGH → LOW → HIGH; a driver error would have fired above.
+    gpio_set_level((gpio_num_t)PIN_CSN, 1);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    gpio_set_level((gpio_num_t)PIN_CSN, 0);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    gpio_set_level((gpio_num_t)PIN_CSN, 1);
 
-        // Toggle HIGH → LOW → HIGH; a driver error would have fired above.
-        gpio_set_level(pins[i], 1);
-        vTaskDelay(pdMS_TO_TICKS(5));
-        gpio_set_level(pins[i], 0);
-        vTaskDelay(pdMS_TO_TICKS(5));
-        gpio_set_level(pins[i], 1);
-
-        ESP_LOGI(TAG, "  %s GPIO %d toggled HIGH → LOW → HIGH  OK", labels[i], (int)pins[i]);
-    }
+    ESP_LOGI(TAG, "  CSN GPIO %d toggled HIGH → LOW → HIGH  OK", PIN_CSN);
 }
 
 // ============================================================================
-// TEST 3 — SPI bus plausibility (STATUS byte after Nrf24_init)
+// TEST 3 — CE reaches the 74HC595 output
+//
+// The CE line is 74HC595 output QH (bit 7), so the radio cannot be enabled
+// without the shift register. Drive the other outputs to a known pattern,
+// toggle CE through the mirf API and verify that only the CE bit changes;
+// the shift-register driver has to preserve every unrelated output.
+// ============================================================================
+
+void test_ce_shift_register(void)
+{
+    ESP_LOGI(TAG, "--- Test 3: CE through 74HC595 bit %d ---", CONFIG_SHIFT_REGISTER_RF_CE_BIT);
+
+    const uint8_t other_outputs = static_cast<uint8_t>(~CE_MASK);
+    TEST_ASSERT_EQUAL(ESP_OK, s_shift_register->write(other_outputs));
+
+    Nrf24_ceHi(&s_dev);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(static_cast<uint8_t>(other_outputs | CE_MASK),
+                                    s_shift_register->get_output(),
+                                    "CE high did not reach the shift-register CE bit.");
+
+    Nrf24_ceLow(&s_dev);
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(other_outputs,
+                                    s_shift_register->get_output(),
+                                    "CE low did not reach the shift-register CE bit.");
+
+    // Leave the register idle for the suites that run after this one.
+    TEST_ASSERT_EQUAL(ESP_OK, s_shift_register->write(0));
+}
+
+// ============================================================================
+// TEST 4 — SPI bus plausibility (STATUS byte after Nrf24_init)
 //
 // After Nrf24_init() the STATUS register is read. Any value other than 0xFF
 // (MISO floating) or 0x00 (MOSI/SCLK shorted to GND) means the SPI bus and
@@ -204,13 +248,12 @@ void test_gpio_ce_csn_pins(void)
 
 void test_spi_status_plausible(void)
 {
-    ESP_LOGI(TAG, "--- Test 3: SPI bus plausibility (STATUS register) ---");
+    ESP_LOGI(TAG, "--- Test 4: SPI bus plausibility (STATUS register) ---");
     ESP_LOGI(TAG,
-             "  MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CE=%-2d  CSN=%-2d",
+             "  MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CSN=%-2d  (CE via 74HC595 QH)",
              PIN_MISO,
              PIN_MOSI,
              PIN_SCLK,
-             PIN_CE,
              PIN_CSN);
 
     uint8_t status = Nrf24_getStatus(&s_dev);
@@ -220,7 +263,7 @@ void test_spi_status_plausible(void)
       0xFF,
       status,
       "STATUS=0xFF — MISO is floating or CSN is never asserted. "
-      "Check MISO wiring (GPIO 19), CSN wiring (GPIO 5), and module VCC (3.3V).");
+      "Check MISO wiring (GPIO 19), CSN wiring (GPIO 0), and module VCC (3.3V).");
 
     TEST_ASSERT_NOT_EQUAL_MESSAGE(
       0x00,
@@ -230,19 +273,19 @@ void test_spi_status_plausible(void)
 }
 
 // ============================================================================
-// TEST 4 — STATUS register reset value
+// TEST 5 — STATUS register reset value
 //
 // On a freshly powered nRF24L01(+) the STATUS register reset value is 0x0E:
 //   RX_DR=0  TX_DS=0  MAX_RT=0  RX_P_NO=111b  TX_FULL=0
 // We mask off the upper interrupt bits (which may be set if the module was
 // active before this test) and only verify the stable lower nibble.
 //
-// If this test fails but test 3 passes: a power cycle usually resets STATUS.
+// If this test fails but test 4 passes: a power cycle usually resets STATUS.
 // ============================================================================
 
 void test_status_reset_value(void)
 {
-    ESP_LOGI(TAG, "--- Test 4: STATUS register reset value ---");
+    ESP_LOGI(TAG, "--- Test 5: STATUS register reset value ---");
 
     uint8_t status = Nrf24_getStatus(&s_dev);
     // RX_P_NO[2:0]=111b and TX_FULL=0 → lower nibble = 0x0E
@@ -263,19 +306,19 @@ void test_status_reset_value(void)
 }
 
 // ============================================================================
-// TEST 5 — CONFIG register write / read-back
+// TEST 6 — CONFIG register write / read-back
 //
 // Exercises a full single-byte SPI write + read-back.
 // CONFIG (0x00) is safe to modify; we write 0x0A (EN_CRC | PWR_UP, TX mode)
 // and verify the read-back matches exactly.
 //
-// Failure here with tests 3–4 passing means write transactions are broken
+// Failure here with tests 4–5 passing means write transactions are broken
 // while read transactions work — check MOSI line integrity (GPIO 23).
 // ============================================================================
 
 void test_config_register_rw(void)
 {
-    ESP_LOGI(TAG, "--- Test 5: CONFIG register write / read-back ---");
+    ESP_LOGI(TAG, "--- Test 6: CONFIG register write / read-back ---");
 
     // 0x0A = EN_CRC(bit3)=1 | PWR_UP(bit1)=1  — a valid CONFIG value
     const uint8_t WRITE_VALUE = 0x0A;
@@ -295,7 +338,7 @@ void test_config_register_rw(void)
 }
 
 // ============================================================================
-// TEST 6 — RF_CH register write / read-back (two distinct values)
+// TEST 7 — RF_CH register write / read-back (two distinct values)
 //
 // RF_CH (0x05) stores the 7-bit RF channel (0–125). Writing two clearly
 // different values and reading each back rules out a stuck data line.
@@ -304,7 +347,7 @@ void test_config_register_rw(void)
 
 void test_rf_channel_rw(void)
 {
-    ESP_LOGI(TAG, "--- Test 6: RF_CH register write / read-back ---");
+    ESP_LOGI(TAG, "--- Test 7: RF_CH register write / read-back ---");
 
     const uint8_t CH_A = 40;
     const uint8_t CH_B = RF_CHANNEL;  // 76 — restore production channel
@@ -322,7 +365,7 @@ void test_rf_channel_rw(void)
 }
 
 // ============================================================================
-// TEST 7 — Nrf24_setRADDR and Nrf24_setTADDR
+// TEST 8 — Nrf24_setRADDR and Nrf24_setTADDR
 //
 // This is the exact call that fails in the reported error log:
 //   E (466) NRF24L01: nrf24l01 not installed / failed to set RADDR
@@ -334,7 +377,7 @@ void test_rf_channel_rw(void)
 // Both functions return ESP_FAIL on any byte mismatch in their internal
 // read-back.  We additionally log the raw read-back for byte-level visibility.
 //
-// If tests 1–6 pass but this one fails:
+// If tests 1–7 pass but this one fails:
 //   The single-byte SPI path works but the 5-byte burst write is corrupted.
 //   Most common cause: VCC brown-out during the longer SPI transaction.
 //   Fix → add a 10 µF electrolytic capacitor on the module's VCC/GND pins.
@@ -343,7 +386,7 @@ void test_rf_channel_rw(void)
 void test_set_rx_tx_address(void)
 {
     ESP_LOGI(TAG,
-             "--- Test 7: Nrf24_setRADDR(\"%s\") / Nrf24_setTADDR(\"%s\") ---",
+             "--- Test 8: Nrf24_setRADDR(\"%s\") / Nrf24_setTADDR(\"%s\") ---",
              PIPE_RX_ADDR,
              PIPE_TX_ADDR);
 
@@ -426,31 +469,32 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "=================================================================");
     ESP_LOGI(TAG, " NRF24L01 Hardware Diagnostic");
     ESP_LOGI(TAG,
-             " MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CE=%-2d  CSN=%-2d  IRQ=%-2d",
+             " MISO=%-2d  MOSI=%-2d  SCLK=%-2d  CSN=%-2d  IRQ=%-2d  (CE = 74HC595 QH, bit %d)",
              PIN_MISO,
              PIN_MOSI,
              PIN_SCLK,
-             PIN_CE,
              PIN_CSN,
-             PIN_IRQ);
+             PIN_IRQ,
+             CONFIG_SHIFT_REGISTER_RF_CE_BIT);
     ESP_LOGI(TAG, "=================================================================");
 
     // --- Phase 1: raw GPIO tests (before Nrf24_init touches the pins) ---
     UNITY_BEGIN();
     RUN_TEST(test_gpio_irq_pin);
-    RUN_TEST(test_gpio_ce_csn_pins);
+    RUN_TEST(test_gpio_csn_pin);
     UNITY_END();
 
     // --- SPI init ---
     // Nrf24_init() asserts on SPI failure, so a crash here is diagnostic too.
-    // The log will show "spi_bus_initialize=<err>" and "spi_bus_add_device=<err>"
-    // before the assert fires.
+    // The log will show the SPIdev bus/registration error before the assert
+    // fires.
     ESP_LOGI(TAG, "Calling Nrf24_init()...");
     setup_spi();
     ESP_LOGI(TAG, "Nrf24_init() OK — proceeding with register tests.");
 
-    // --- Phase 2: SPI / register tests ---
+    // --- Phase 2: shift-register and SPI / register tests ---
     UNITY_BEGIN();
+    RUN_TEST(test_ce_shift_register);
     RUN_TEST(test_spi_status_plausible);
     RUN_TEST(test_status_reset_value);
     RUN_TEST(test_config_register_rw);

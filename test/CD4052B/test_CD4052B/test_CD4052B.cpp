@@ -1,37 +1,28 @@
-#include <74HC595.h>
-#include <CD4052B.h>
-#include <SPIdev.h>
-#include <driver/spi_master.h>
 #include <sdkconfig.h>
 #include <unity.h>
 
 #include <array>
 
-#include "../shared_test_bus.h"
+#include "../shared_test_shift_register.h"
+#include "CD4052B.h"
 
-static HC595 s_expander;
 static CD4052B s_mux;
 
 void setup_mux()
 {
-    shared_test_spi_bus();
-
-    HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
-                                     .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
-                                     .clock_hz = 1000000};
-    TEST_ASSERT_EQUAL(ESP_OK, s_expander.init(expander_config));
-
+    // The mux select lines live on the shared 74HC595 output register.
     CD4052B::Config mux_config = {.select_a_bit = CONFIG_SHIFT_REGISTER_MUX_A_BIT,
                                   .select_b_bit = CONFIG_SHIFT_REGISTER_MUX_B_BIT,
                                   .inhibit_bit = CONFIG_SHIFT_REGISTER_MUX_INH_BIT};
-    TEST_ASSERT_EQUAL(ESP_OK, s_mux.init(&s_expander, mux_config));
+    TEST_ASSERT_EQUAL(ESP_OK, s_mux.init(&shared_test_shift_register(), mux_config));
 }
 
 void test_mux_starts_disabled()
 {
     TEST_ASSERT_FALSE(s_mux.is_enabled());
-    TEST_ASSERT_EQUAL_UINT8(1U << CONFIG_SHIFT_REGISTER_MUX_INH_BIT,
-                            s_expander.get_output() & (1U << CONFIG_SHIFT_REGISTER_MUX_INH_BIT));
+    TEST_ASSERT_EQUAL_UINT8(
+      1U << CONFIG_SHIFT_REGISTER_MUX_INH_BIT,
+      shared_test_shift_register().get_output() & (1U << CONFIG_SHIFT_REGISTER_MUX_INH_BIT));
 }
 
 void test_selects_all_four_channels()
@@ -51,7 +42,8 @@ void test_selects_all_four_channels()
         TEST_ASSERT_EQUAL(ESP_OK, s_mux.select(channel));
         TEST_ASSERT_TRUE(s_mux.is_enabled());
         TEST_ASSERT_EQUAL_UINT8(channel, s_mux.selected_channel());
-        TEST_ASSERT_EQUAL_UINT8(expected_select[channel], s_expander.get_output() & select_mask);
+        TEST_ASSERT_EQUAL_UINT8(expected_select[channel],
+                                shared_test_shift_register().get_output() & select_mask);
     }
 }
 

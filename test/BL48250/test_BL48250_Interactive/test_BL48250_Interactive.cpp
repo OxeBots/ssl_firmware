@@ -1,6 +1,3 @@
-#include <74HC595.h>
-#include <BL48250.h>
-#include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <driver/uart.h>
 #include <freertos/FreeRTOS.h>
@@ -10,6 +7,10 @@
 #include <unity.h>
 
 #include <array>
+
+#include "74HC595.h"
+#include "BL48250.h"
+#include "SPIdev.h"
 
 namespace config
 {
@@ -41,14 +42,7 @@ void setUp(void)
 {
     if (!s_shift_register_initialized)
     {
-        spi_bus_config_t bus_config = {};
-        bus_config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
-        bus_config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
-        bus_config.sclk_io_num = (gpio_num_t)CONFIG_SCLK_GPIO;
-        bus_config.quadwp_io_num = -1;
-        bus_config.quadhd_io_num = -1;
-        TEST_ASSERT_EQUAL(ESP_OK, spi_bus_initialize(SPI2_HOST, &bus_config, SPI_DMA_CH_AUTO));
-        SPIdev::init(SPI2_HOST);
+        SPIdev::init();
         HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
                                          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
                                          .clock_hz = 1000000};

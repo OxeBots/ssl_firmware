@@ -98,13 +98,14 @@ pio test -vv -e test_hardware -f control/test_WheelController
 
 GPIO pins are set in `sdkconfig.defaults`. The key groups are:
 
-| Function                 | Pins                                          |
-| ------------------------ | --------------------------------------------- |
-| I2C (IMU)                | SDA=21, SCL=22                                |
-| SPI (nRF24L01)           | MISO=19, MOSI=23, SCLK=18, CE=2, CSN=5, IRQ=4 |
-| Motor PWM                | FL=32, BL=26, BR=14, FR=16                    |
-| Motor DIR                | FL=33, BL=25, BR=27, FR=17                    |
-| Motor ENC (ADC channels) | FL=0, BL=7, BR=6, FR=3                        |
+| Function                       | Pins                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| I2C (IMU)                      | SDA=21, SCL=22                                                               |
+| SPI (nRF24L01 + 74HC595)       | MISO=19, MOSI=23, SCLK=18, CSN=0, IRQ=4, latch=17                            |
+| Motor PWM                      | FL=32, BL=26, BR=14, FR=12                                                   |
+| Motor direction, mux, radio CE | 74HC595 outputs: DIR1-4 = bits 0-3, MUX A/B/INH = bits 4-6, radio CE = bit 7 |
+| Motor pulse feedback           | FL=25, BL=27, BR=13, FR=2                                                    |
+| Motor encoder ADC channels     | FL=0, BL=7, BR=6, FR=3                                                       |
 
 Change radio channel and other settings in `sdkconfig.defaults` under the `# Radio` section.
 

@@ -56,24 +56,15 @@ inline void shared_test_i2c_adopt(i2c_master_bus_handle_t handle)
         slot = handle;
 }
 
-// Initializes the shared SPI bus once. NRF24L01 runs first in the merged
-// binary and claims SPI2_HOST through its raw driver, so an already-claimed
-// host is an expected condition there.
+// Creates the shared SPI bus once; SPIdev::init() does the actual work and
+// tolerates an already-claimed host (e.g. when a suite initialized it first).
 inline void shared_test_spi_bus()
 {
     static bool initialized = false;
     if (initialized)
         return;
 
-    spi_bus_config_t config = {};
-    config.mosi_io_num = (gpio_num_t)CONFIG_MOSI_GPIO;
-    config.miso_io_num = (gpio_num_t)CONFIG_MISO_GPIO;
-    config.sclk_io_num = (gpio_num_t)CONFIG_SCLK_GPIO;
-    config.quadwp_io_num = -1;
-    config.quadhd_io_num = -1;
-    esp_err_t err = spi_bus_initialize(SPI2_HOST, &config, SPI_DMA_CH_AUTO);
-    ESP_ERROR_CHECK(err == ESP_ERR_INVALID_STATE ? ESP_OK : err);
-    SPIdev::init(SPI2_HOST);
+    SPIdev::init();
     initialized = true;
 }
 
