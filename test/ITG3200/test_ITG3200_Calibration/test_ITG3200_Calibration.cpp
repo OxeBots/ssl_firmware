@@ -14,7 +14,7 @@
 #define I2C_PORT_NUM I2C_NUM_0
 
 ITG3200 gyro;
-const char * TAG = "GYRO_CALIB";
+static const char * TAG = "GYRO_CALIB";
 i2c_master_bus_handle_t bus_handle;
 
 void setup_i2c()

@@ -1,5 +1,5 @@
-#ifndef ORIENTATION_HANDLER_H
-#define ORIENTATION_HANDLER_H
+#ifndef _ORIENTATION_HANDLER_H_
+#define _ORIENTATION_HANDLER_H_
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -107,4 +107,4 @@ class OrientationHandler
     static constexpr const char * NVS_KEY_BLOB = "calib_blob";
 };
 
-#endif  // ORIENTATION_HANDLER_H
+#endif  // _ORIENTATION_HANDLER_H_

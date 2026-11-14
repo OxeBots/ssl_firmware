@@ -14,7 +14,7 @@
 #define I2C_PORT_NUM I2C_NUM_0
 
 ITG3200 gyro;
-const char * TAG = "ITG3200_TEST";
+static const char * TAG = "ITG3200_TEST";
 i2c_master_bus_handle_t bus_handle;
 
 void setup_i2c()
@@ -35,9 +35,9 @@ void test_connection_and_device_id(void)
 
     // Test 2: Verify Device ID explicitly
     // Default ID is 0b110100 (0x34 or 52 decimal)
-    uint8_t devId = gyro.get_device_id();
-    ESP_LOGI(TAG, "Device ID Read: 0x%02X", devId);
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(0x34, devId, "Device ID mismatch! Expected 0x34");
+    uint8_t dev_id = gyro.get_device_id();
+    ESP_LOGI(TAG, "Device ID Read: 0x%02X", dev_id);
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(0x34, dev_id, "Device ID mismatch! Expected 0x34");
 }
 
 void test_configuration_read_write(void)

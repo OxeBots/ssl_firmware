@@ -1,5 +1,5 @@
-#ifndef ROBOT_VELOCITY_CONTROLLER_H
-#define ROBOT_VELOCITY_CONTROLLER_H
+#ifndef _ROBOT_VELOCITY_CONTROLLER_H_
+#define _ROBOT_VELOCITY_CONTROLLER_H_
 
 #include "RuntimeTypes.h"
 #include "omni_robot.h"
@@ -35,4 +35,4 @@ class RobotVelocityController
     VelocityControlConfig m_config;
 };
 
-#endif  // ROBOT_VELOCITY_CONTROLLER_H
+#endif  // _ROBOT_VELOCITY_CONTROLLER_H_

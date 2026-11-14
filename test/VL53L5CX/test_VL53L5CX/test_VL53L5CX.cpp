@@ -10,7 +10,7 @@
 #include "VL53L5CX.h"
 
 VL53L5CX sensor;
-const char * TAG = "VL53L5CX_TEST";
+static const char * TAG = "VL53L5CX_TEST";
 i2c_master_bus_handle_t bus_handle;
 
 void setUp(void)

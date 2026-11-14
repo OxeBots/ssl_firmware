@@ -1,6 +1,3 @@
-#include <74HC595.h>
-#include <BL48250.h>
-#include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <freertos/FreeRTOS.h>
 #include <sdkconfig.h>
@@ -12,6 +9,9 @@
 #include <cmath>
 
 #include "../shared_test_bus.h"
+#include "74HC595.h"
+#include "BL48250.h"
+#include "SPIdev.h"
 
 // Test configuration
 namespace config

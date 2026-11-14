@@ -1,5 +1,5 @@
-#ifndef ROBOT_POSITION_CONTROLLER_H
-#define ROBOT_POSITION_CONTROLLER_H
+#ifndef _ROBOT_POSITION_CONTROLLER_H_
+#define _ROBOT_POSITION_CONTROLLER_H_
 
 #include "RuntimeTypes.h"
 
@@ -23,4 +23,4 @@ class RobotPositionController
     PositionControlConfig m_config;
 };
 
-#endif  // ROBOT_POSITION_CONTROLLER_H
+#endif  // _ROBOT_POSITION_CONTROLLER_H_

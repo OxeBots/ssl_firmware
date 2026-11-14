@@ -1,5 +1,5 @@
-#ifndef RUNTIME_TYPES_H
-#define RUNTIME_TYPES_H
+#ifndef _RUNTIME_TYPES_H_
+#define _RUNTIME_TYPES_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -146,4 +146,4 @@ struct CommandEnvelope
     uint32_t sequence = 0;
 };
 
-#endif  // RUNTIME_TYPES_H
+#endif  // _RUNTIME_TYPES_H_

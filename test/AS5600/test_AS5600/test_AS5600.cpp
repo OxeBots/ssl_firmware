@@ -1,7 +1,3 @@
-#include <74HC595.h>
-#include <CD4052B.h>
-#include <I2Cdev.h>
-#include <SPIdev.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_master.h>
 #include <freertos/FreeRTOS.h>
@@ -10,7 +6,11 @@
 #include <unity.h>
 
 #include "../shared_test_bus.h"
+#include "74HC595.h"
 #include "AS5600.h"
+#include "CD4052B.h"
+#include "I2Cdev.h"
+#include "SPIdev.h"
 
 // The AS5600 shares the I2C bus only through the CD4052B analog switch:
 // one encoder at address 0x36 is exposed at a time, so every test that

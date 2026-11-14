@@ -1,5 +1,5 @@
-#ifndef COMMAND_INBOX_H
-#define COMMAND_INBOX_H
+#ifndef _COMMAND_INBOX_H_
+#define _COMMAND_INBOX_H_
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -29,4 +29,4 @@ class CommandInbox
     std::atomic<uint32_t> m_next_sequence = 1;
 };
 
-#endif  // COMMAND_INBOX_H
+#endif  // _COMMAND_INBOX_H_

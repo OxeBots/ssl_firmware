@@ -1,5 +1,5 @@
-#ifndef HEALTH_MONITOR_H
-#define HEALTH_MONITOR_H
+#ifndef _HEALTH_MONITOR_H_
+#define _HEALTH_MONITOR_H_
 
 #include <stdint.h>
 
@@ -19,4 +19,4 @@ class HealthMonitor
     HealthState m_state;
 };
 
-#endif  // HEALTH_MONITOR_H
+#endif  // _HEALTH_MONITOR_H_

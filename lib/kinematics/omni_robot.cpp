@@ -15,13 +15,13 @@ OmnidirectionalRobot::OmnidirectionalRobot(double const r = OMNI_WHEEL_RADIUS,
     // Construct H matrix
     for (size_t i = 0; i < 4; ++i)
     {
-        m_H(i, 0) = -m_wheel_distance;
-        m_H(i, 1) = std::cos(WHEELS_ANGLE_OFFSET[i]);
-        m_H(i, 2) = std::sin(WHEELS_ANGLE_OFFSET[i]);
+        m_h(i, 0) = -m_wheel_distance;
+        m_h(i, 1) = std::cos(WHEELS_ANGLE_OFFSET[i]);
+        m_h(i, 2) = std::sin(WHEELS_ANGLE_OFFSET[i]);
     }
 
     // Compute pseudoinverse: H⁺ = (HᵀH)⁻¹Hᵀ
-    m_H_pinv = (m_H.transpose() * m_H).inverse() * m_H.transpose();
+    m_h_pinv = (m_h.transpose() * m_h).inverse() * m_h.transpose();
 }
 
 /**
@@ -33,7 +33,7 @@ OmnidirectionalRobot::OmnidirectionalRobot(double const r = OMNI_WHEEL_RADIUS,
 vt::numeric_vector<4> OmnidirectionalRobot::compute_wheel_velocities(
   const vt::numeric_vector<3> & body_velocities) const
 {
-    return (m_H * body_velocities) / m_wheel_radius;
+    return (m_h * body_velocities) / m_wheel_radius;
 }
 
 /**
@@ -45,5 +45,5 @@ vt::numeric_vector<4> OmnidirectionalRobot::compute_wheel_velocities(
 vt::numeric_vector<3> OmnidirectionalRobot::compute_body_velocities(
   const vt::numeric_vector<4> & wheel_velocities) const
 {
-    return m_H_pinv * wheel_velocities * m_wheel_radius;
+    return m_h_pinv * wheel_velocities * m_wheel_radius;
 }

@@ -53,7 +53,7 @@ def _make_header(msg_type, robot_id, timestamp=None):
     return hdr
 
 
-class nRF24L01_Controller:
+class NRF24L01Controller:
     def __init__(self, port="/dev/ttyUSB0", baudrate=115200, timeout=0.1):
         """
         Initializes the serial connection.
@@ -85,7 +85,7 @@ class nRF24L01_Controller:
             if port.vid == TARGET_VID and port.pid == TARGET_PID:
                 print(f"{Colors.GREEN}Found device at: {port.device}{Colors.RESET}")
                 try:
-                    return nRF24L01_Controller(port=port.device, baudrate=baudrate, timeout=timeout)
+                    return NRF24L01Controller(port=port.device, baudrate=baudrate, timeout=timeout)
                 except serial.SerialException as e:
                     print(f"{Colors.RED}Error connecting to {port.device}: {e}{Colors.RESET}")
                     return None
@@ -204,7 +204,8 @@ class nRF24L01_Controller:
     def set_addresses(self, rx_address, tx_address):
         """Set both receive and transmit addresses"""
         print(
-            f"\n{Colors.BLUE}Setting RX: {[hex(x) for x in rx_address]}  TX: {[hex(x) for x in tx_address]}{Colors.RESET}"
+            f"\n{Colors.BLUE}Setting RX: {[hex(x) for x in rx_address]}  "
+            f"TX: {[hex(x) for x in tx_address]}{Colors.RESET}"
         )
         return self.set_receive_address(rx_address) and self.set_transmit_address(tx_address)
 
@@ -454,13 +455,15 @@ class CLIController:
                 timestamp = self.device.send_command(robot_id, x=x, y=y, vx=vx, vy=vy, w=w, kick=kick)
                 id_label = "BROADCAST" if robot_id == ROBOT_ID_BROADCAST else str(robot_id)
                 print(
-                    f"{Colors.CYAN}→ [CMD] robot={id_label} ts={timestamp} x={x} y={y} vx={vx} vy={vy} w={w} kick={kick}{Colors.RESET}",
+                    f"{Colors.CYAN}→ [CMD] robot={id_label} ts={timestamp} "
+                    f"x={x} y={y} vx={vx} vy={vy} w={w} kick={kick}{Colors.RESET}",
                     end="",
                     flush=True,
                 )
 
                 if robot_id != ROBOT_ID_BROADCAST:
-                    # Await a response from the robot firmware via NRF24 USB dongle, on average it takes 20ms. We will wait up to 200ms to be safe.
+                    # Await a response from the robot firmware via NRF24 USB dongle; on
+                    # average it takes 20ms. We will wait up to 200ms to be safe.
 
                     self.device.receive_data(timeout=0.200)
                 else:
@@ -507,9 +510,9 @@ def main():
         print(f"{Colors.BOLD}=== nRF24L01 Wireless Module Controller ==={Colors.RESET}\n")
 
         device = (
-            nRF24L01_Controller.auto_connect(baudrate=args.baud)
+            NRF24L01Controller.auto_connect(baudrate=args.baud)
             if args.port.lower() == "auto"
-            else nRF24L01_Controller(port=args.port, baudrate=args.baud)
+            else NRF24L01Controller(port=args.port, baudrate=args.baud)
         )
 
         if not device:
@@ -526,6 +529,7 @@ def main():
             device.set_frequency(2.400 + 76 * 0.001)
             device.set_data_rate(args.rate)
             device.get_system_info()
+            # device.set_baudrate(7)
         else:
             print(f"\n{Colors.YELLOW}Skipping USB Adapter AT-Configuration...{Colors.RESET}")
 

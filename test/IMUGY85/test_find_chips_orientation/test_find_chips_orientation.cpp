@@ -1,13 +1,14 @@
+#include <driver/i2c_master.h>
+#include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unity.h>
 
 #include "I2Cdev.h"
 #include "IMUGY85.h"
-#include "driver/i2c_master.h"
-#include "esp_log.h"
-#include "freertos/task.h"
-#include "unity.h"
 
 // Standard ESP32 I2C Pins (Change if using a different board/wiring)
 #define I2C_MASTER_SDA_IO 21

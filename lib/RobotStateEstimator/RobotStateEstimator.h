@@ -1,5 +1,5 @@
-#ifndef ROBOT_STATE_ESTIMATOR_H
-#define ROBOT_STATE_ESTIMATOR_H
+#ifndef _ROBOT_STATE_ESTIMATOR_H_
+#define _ROBOT_STATE_ESTIMATOR_H_
 
 #include "RuntimeTypes.h"
 #include "omni_robot.h"
@@ -20,4 +20,4 @@ class RobotStateEstimator
     bool m_has_timestamp = false;
 };
 
-#endif  // ROBOT_STATE_ESTIMATOR_H
+#endif  // _ROBOT_STATE_ESTIMATOR_H_

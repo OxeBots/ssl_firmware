@@ -1,5 +1,5 @@
-#ifndef SAFETY_SUPERVISOR_H
-#define SAFETY_SUPERVISOR_H
+#ifndef _SAFETY_SUPERVISOR_H_
+#define _SAFETY_SUPERVISOR_H_
 
 #include <stdint.h>
 
@@ -37,10 +37,9 @@ class SafetySupervisor
     void mark_self_test_complete(bool complete);
     void set_calibration_active(bool active);
 
-    /** Latch SAFE_STOP until reboot. For mandatory hardware failures: only a
-     * restart clears it, so later mark_self_test_complete() calls cannot
-     * release actuation while the fault persists.
-     */
+    // Latch SAFE_STOP until reboot. For mandatory hardware failures: only a
+    // restart clears it, so later mark_self_test_complete() calls cannot
+    // release actuation while the fault persists.
     void enter_safe_stop();
     void clear_safe_stop();
 
@@ -64,4 +63,4 @@ class SafetySupervisor
 
 using LifecycleSupervisor = SafetySupervisor;
 
-#endif  // SAFETY_SUPERVISOR_H
+#endif  // _SAFETY_SUPERVISOR_H_

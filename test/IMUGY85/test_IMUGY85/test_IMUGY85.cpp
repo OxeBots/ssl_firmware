@@ -12,7 +12,7 @@
 
 // IMU Instance
 IMUGY85 & imu = IMUGY85::get_instance();
-const char * TAG = "IMUGY85_TEST";
+static const char * TAG = "IMUGY85_TEST";
 
 void tearDown(void)
 {

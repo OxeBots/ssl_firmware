@@ -14,7 +14,7 @@
 #define I2C_PORT_NUM I2C_NUM_0
 
 ADXL345 accel;
-const char * TAG = "CALIBRATION";
+static const char * TAG = "CALIBRATION";
 i2c_master_bus_handle_t bus_handle;
 
 // Global flag to control the monitoring task
@@ -40,7 +40,7 @@ void setup_i2c()
 void monitoring_task(void * pvParameters)
 {
     int16_t x, y, z;
-    ESP_LOGI("MONITOR", "Monitoring task started...");
+    ESP_LOGI(TAG, "Monitoring task started...");
 
     while (is_calibrating)
     {
@@ -54,13 +54,13 @@ void monitoring_task(void * pvParameters)
         if (y == 0 && z == 0)
             ESP_LOGI(TAG, "x calibrated.");
 
-        ESP_LOGI("MONITOR", "Raw Input -> X: %d | Y: %d | Z: %d", x, y, z);
+        ESP_LOGI(TAG, "Raw Input -> X: %d | Y: %d | Z: %d", x, y, z);
 
         // Update frequency: 5Hz (every 200ms)
         vTaskDelay(200 / portTICK_PERIOD_MS);
     }
 
-    ESP_LOGI("MONITOR", "Monitoring task stopping...");
+    ESP_LOGI(TAG, "Monitoring task stopping...");
     vTaskDelete(NULL);
 }
 
@@ -105,22 +105,22 @@ void perform_calibration()
     vTaskDelay(500 / portTICK_PERIOD_MS);
 
     // Retrieve Data
-    float offX = accel.get_calibration_offset(0);
-    float offY = accel.get_calibration_offset(1);
-    float offZ = accel.get_calibration_offset(2);
-    float scaleX = accel.get_calibration_scale(0);
-    float scaleY = accel.get_calibration_scale(1);
-    float scaleZ = accel.get_calibration_scale(2);
+    float off_x = accel.get_calibration_offset(0);
+    float off_y = accel.get_calibration_offset(1);
+    float off_z = accel.get_calibration_offset(2);
+    float scale_x = accel.get_calibration_scale(0);
+    float scale_y = accel.get_calibration_scale(1);
+    float scale_z = accel.get_calibration_scale(2);
 
-    accel.set_offset(offX, offY, offZ);
+    accel.set_offset(off_x, off_y, off_z);
 
     // Print formatted code for copy-paste
     printf("\n\n/**************************************************/\n");
     printf("/* CALIBRATION RESULTS (Copy into your setup)   */\n");
     printf("/**************************************************/\n\n");
 
-    printf("accel.setCalibrationOffsets(%.2ff, %.2ff, %.2ff);\n", offX, offY, offZ);
-    printf("accel.setCalibrationScales(%.2ff, %.2ff, %.2ff);\n", scaleX, scaleY, scaleZ);
+    printf("accel.set_calibration_offsets(%.2ff, %.2ff, %.2ff);\n", off_x, off_y, off_z);
+    printf("accel.set_calibration_scales(%.2ff, %.2ff, %.2ff);\n", scale_x, scale_y, scale_z);
 
     printf("\n/**************************************************/\n\n");
 }
@@ -144,9 +144,9 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Testing live data with new calibration...");
     accel.set_measure_enabled(true);
 
-    float scaleX = accel.get_calibration_scale(0);
-    float scaleY = accel.get_calibration_scale(1);
-    float scaleZ = accel.get_calibration_scale(2);
+    float scale_x = accel.get_calibration_scale(0);
+    float scale_y = accel.get_calibration_scale(1);
+    float scale_z = accel.get_calibration_scale(2);
 
     while (true)
     {
@@ -156,9 +156,9 @@ extern "C" void app_main(void)
         ESP_LOGI(TAG, "Calibrated -> X: %d | Y: %d | Z: %d", ax, ay, az);
         ESP_LOGI(TAG,
                  "Scaled -> X: %f | Y: %f | Z: %f",
-                 ax * scaleX / 256.0f,
-                 ay * scaleY / 256.0f,
-                 az * scaleZ / 256.0f);
+                 ax * scale_x / 256.0f,
+                 ay * scale_y / 256.0f,
+                 az * scale_z / 256.0f);
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 
@@ -176,14 +176,14 @@ extern "C" void app_main(void)
 //     _cal_scale[2] = 1.0f;
 // }
 
-// void ADXL345::setCalibrationOffsets(float x, float y, float z)
+// void ADXL345::set_calibration_offsets(float x, float y, float z)
 // {
 //     _cal_offset[0] = x;
 //     _cal_offset[1] = y;
 //     _cal_offset[2] = z;
 // }
 
-// void ADXL345::setCalibrationScales(float x, float y, float z)
+// void ADXL345::set_calibration_scales(float x, float y, float z)
 // {
 //     _cal_scale[0] = x;
 //     _cal_scale[1] = y;
@@ -283,11 +283,11 @@ extern "C" void app_main(void)
 //     }
 
 //     // 3. Calculate Offsets: (Max + Min) / 2
-//     float offX = (maxX + minX) / (256.0f *2.0f);
-//     float offY = (maxY + minY) / (256.0f *2.0f);
-//     float offZ = (maxZ + minZ) / (256.0f *2.0f);
+//     float off_x = (maxX + minX) / (256.0f *2.0f);
+//     float off_y = (maxY + minY) / (256.0f *2.0f);
+//     float off_z = (maxZ + minZ) / (256.0f *2.0f);
 
-//     setCalibrationOffsets(offX, offY, offZ);
+//     set_calibration_offsets(off_x, off_y, off_z);
 
 //     // 4. Calculate Scales: Target / ((Max - Min) / 2)
 //     // Target is 256.0f (Standard 1g LSB for ADXL345)

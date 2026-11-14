@@ -1,5 +1,5 @@
-#ifndef ROBOT_STATE_H
-#define ROBOT_STATE_H
+#ifndef _ROBOT_STATE_H_
+#define _ROBOT_STATE_H_
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -35,4 +35,4 @@ class RobotState
     static constexpr const char * NVS_KEY = "robot_id";
 };
 
-#endif  // ROBOT_STATE_H
+#endif  // _ROBOT_STATE_H_

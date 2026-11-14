@@ -9,7 +9,7 @@
 #include "I2Cdev.h"
 
 ADXL345 accel;
-const char * TAG = "ADXL345_TEST";
+static const char * TAG = "ADXL345_TEST";
 i2c_master_bus_handle_t bus_handle;
 
 void tearDown(void)
@@ -36,9 +36,9 @@ void test_connection_and_device_id(void)
     bool connected = accel.test_connection();
     TEST_ASSERT_TRUE_MESSAGE(connected, "ADXL345 connection failed");
 
-    uint8_t devId = accel.get_device_id();
-    ESP_LOGI(TAG, "Device ID Read: 0x%02X", devId);
-    TEST_ASSERT_EQUAL_HEX8_MESSAGE(0xE5, devId, "Device ID mismatch");
+    uint8_t dev_id = accel.get_device_id();
+    ESP_LOGI(TAG, "Device ID Read: 0x%02X", dev_id);
+    TEST_ASSERT_EQUAL_HEX8_MESSAGE(0xE5, dev_id, "Device ID mismatch");
 }
 
 void test_configuration_read_write(void)

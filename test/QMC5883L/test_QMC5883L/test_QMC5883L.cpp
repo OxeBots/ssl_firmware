@@ -9,7 +9,7 @@
 #include "QMC5883L.h"
 
 QMC5883L mag;
-const char * TAG = "QMC5883L_TEST";
+static const char * TAG = "QMC5883L_TEST";
 i2c_master_bus_handle_t bus_handle;
 
 void tearDown(void)

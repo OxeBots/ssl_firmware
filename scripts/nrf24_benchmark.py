@@ -209,9 +209,9 @@ def main():
 
     # Connect
     device = (
-        nrf24_usb.nRF24L01_Controller.auto_connect(baudrate=args.baud)
+        nrf24_usb.NRF24L01Controller.auto_connect(baudrate=args.baud)
         if args.port.lower() == "auto"
-        else nrf24_usb.nRF24L01_Controller(port=args.port, baudrate=args.baud)
+        else nrf24_usb.NRF24L01Controller(port=args.port, baudrate=args.baud)
     )
 
     if not device:

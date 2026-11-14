@@ -1,6 +1,3 @@
-#include <74HC595.h>
-#include <CD4052B.h>
-#include <SPIdev.h>
 #include <driver/spi_master.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -11,9 +8,12 @@
 #include <cmath>
 
 #include "../shared_test_bus.h"
+#include "74HC595.h"
 #include "BL48250.h"
+#include "CD4052B.h"
 #include "I2Cdev.h"
 #include "NVSManager.h"
+#include "SPIdev.h"
 #include "WheelController.h"
 #include "wheel_state_estimator.h"
 

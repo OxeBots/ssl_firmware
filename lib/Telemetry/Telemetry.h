@@ -1,5 +1,5 @@
-#ifndef TELEMETRY_SERVICE_H
-#define TELEMETRY_SERVICE_H
+#ifndef _TELEMETRY_H_
+#define _TELEMETRY_H_
 
 #include <esp_err.h>
 #include <esp_log.h>
@@ -29,4 +29,4 @@ class Telemetry
     static constexpr uint16_t STUB_KICKER_VOLTAGE = 1650;
 };
 
-#endif  // TELEMETRY_SERVICE_H
+#endif  // _TELEMETRY_H_

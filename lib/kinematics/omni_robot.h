@@ -1,5 +1,5 @@
-#ifndef KINEMATICS_OMNI_ROBOT_H
-#define KINEMATICS_OMNI_ROBOT_H
+#ifndef _OMNI_ROBOT_H_
+#define _OMNI_ROBOT_H_
 
 #include <numeric_matrix.h>
 #include <numeric_vector.h>
@@ -25,19 +25,16 @@ constexpr std::array<double, 4> WHEELS_ANGLE_OFFSET = {
 }  // namespace kinematic
 }  // namespace config
 
-/**
- * @brief See https://control.ros.org/rolling/doc/ros2_controllers/doc/mobile_robot_kinematics.html
- * for mathematical details
- *
- */
+// See https://control.ros.org/rolling/doc/ros2_controllers/doc/mobile_robot_kinematics.html
+// for mathematical details
 class OmnidirectionalRobot
 {
    private:
     const double m_wheel_radius;
     const double m_wheel_distance;
 
-    vt::numeric_matrix<4, 3> m_H;
-    vt::numeric_matrix<3, 4> m_H_pinv;
+    vt::numeric_matrix<4, 3> m_h;
+    vt::numeric_matrix<3, 4> m_h_pinv;
 
    public:
     OmnidirectionalRobot(double r, double d);
@@ -52,4 +49,4 @@ class OmnidirectionalRobot
     OmnidirectionalRobot & operator=(const OmnidirectionalRobot &) = delete;
 };
 
-#endif  // KINEMATICS_OMNI_ROBOT_H
+#endif  // _OMNI_ROBOT_H_
