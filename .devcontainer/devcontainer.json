@@ -69,7 +69,7 @@
   "mounts": [
     // Hardware access for PlatformIO
     "source=/dev/,target=/dev/,type=bind,consistency=consistent",
-    // Host X11 socket so GUI apps (bench_dashboard package) open a window
+    // Host X11 socket so GUI apps (robot_bench package) open a window
     // on the desktop. Pairs with the xhost grant in initialize-command.sh.
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=consistent",
     // Host udev database: serial tools query USB metadata (vendorId, productId,

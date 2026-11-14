@@ -13,7 +13,7 @@ mkdir -p "$HOME/.local/state/opencode"
 mkdir -p "$HOME/.ssh"
 
 # Grant same-UID container processes access to the host X server so GUI apps
-# (scripts/bench_dashboard.py) can open a window through the X11 socket mount.
+# (robot_bench package) can open a window through the X11 socket mount.
 if [ -n "$DISPLAY" ]; then
   xhost +si:localuser:"$USER" >/dev/null 2>&1 || true
 fi

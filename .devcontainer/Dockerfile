@@ -41,6 +41,15 @@ RUN apt-get update \
       clangd \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# OpenGL runtime for the Dear PyGui dashboard over the forwarded X server
+RUN apt-get update \
+ && apt-get -y install --no-install-recommends \
+      libgl1 \
+      libgl1-mesa-dri \
+      libglx-mesa0 \
+      libegl1 \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Node.js (for AI agent CLIs)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y nodejs \
@@ -141,7 +150,7 @@ RUN curl -fsSL -o /tmp/get-platformio.py \
       https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py \
  && python3 /tmp/get-platformio.py
 
-RUN $HOME/.platformio/penv/bin/pip install bitproto pyserial pygame ruff
+RUN $HOME/.platformio/penv/bin/pip install bitproto pyserial dearpygui==2.3.1 ruff
 
 # Pre-warm toolchain + IDF venv. Without this, PIO Home and first `pio run` race in
 # espidf.py's `_create_venv` (rm -rf + recreate); whichever finishes first gets undone.
