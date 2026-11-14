@@ -86,18 +86,26 @@ esp_err_t OrientationHandler::load_calibration()
         result = ESP_ERR_NOT_FOUND;
     }
 
-    // Load magnetometer calibration
-    err = load_mag_calibration_from_nvs();
-    if (err == ESP_OK)
+    // Load magnetometer calibration (skipped when the sensor is absent)
+    if (m_driver.is_mag_available())
     {
-        m_mag_calibrated = true;
-        ESP_LOGI(TAG, "Magnetometer calibration loaded.");
+        err = load_mag_calibration_from_nvs();
+        if (err == ESP_OK)
+        {
+            m_mag_calibrated = true;
+            ESP_LOGI(TAG, "Magnetometer calibration loaded.");
+        }
+        else
+        {
+            m_mag_calibrated = false;
+            ESP_LOGW(TAG, "Magnetometer calibration not found.");
+            result = ESP_ERR_NOT_FOUND;
+        }
     }
     else
     {
         m_mag_calibrated = false;
-        ESP_LOGW(TAG, "Magnetometer calibration not found.");
-        result = ESP_ERR_NOT_FOUND;
+        ESP_LOGW(TAG, "Magnetometer not detected; skipping its calibration.");
     }
 
     return result;
@@ -240,12 +248,12 @@ void OrientationHandler::task_wrapper(void * arg)
  */
 void OrientationHandler::task_loop()
 {
-    TickType_t xLastWake = xTaskGetTickCount();
-    const TickType_t xPeriod = pdMS_TO_TICKS(1000 / TASK_RATE_HZ);
+    TickType_t last_wake = xTaskGetTickCount();
+    const TickType_t period = pdMS_TO_TICKS(1000 / TASK_RATE_HZ);
 
     while (true)
     {
-        vTaskDelayUntil(&xLastWake, xPeriod);
+        vTaskDelayUntil(&last_wake, period);
         update_ahrs();
     }
 }
