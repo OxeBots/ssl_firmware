@@ -53,6 +53,7 @@ class ProtocolHandler
 
     void handle_command(const RobotCommand & cmd);
     void handle_config(const RobotConfig & cfg);
+    void handle_telemetry_req(const RobotTelemetryRequest & telreq);
 
     // Serializes update(), force_safe_stop() and the status getters: update()
     // runs from the radio task and the idle loop, the getters from the debug

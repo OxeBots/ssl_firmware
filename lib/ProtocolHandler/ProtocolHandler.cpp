@@ -130,13 +130,14 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
     memset(&hdr, 0, sizeof(Header));
     DecodeHeader(&hdr, const_cast<uint8_t *>(payload));
 
-    // COMMAND and CONFIG messages only originate from the base station, so a
-    // decoded header of either type proves the base station is transmitting,
-    // even when the packet targets another robot. Clearing ERROR_COMM_LOSS
-    // here (not just in update()) means the telemetry reply built by
-    // handle_command() reports the live link instead of the stale
-    // pre-packet state; update() re-arms the flag when the link goes quiet.
-    if (hdr.msg_type == MSG_TYPE_COMMAND || hdr.msg_type == MSG_TYPE_CONFIG)
+    // COMMAND, CONFIG and TELEMETRY_REQ messages only originate from the base
+    // station, so a decoded header of any of these types proves the base
+    // station is transmitting, even when the packet targets another robot.
+    // Clearing ERROR_COMM_LOSS here (not just in update()) means a telemetry
+    // reply reports the live link instead of the stale pre-packet state;
+    // update() re-arms the flag when the link goes quiet.
+    if (hdr.msg_type == MSG_TYPE_COMMAND || hdr.msg_type == MSG_TYPE_CONFIG ||
+        hdr.msg_type == MSG_TYPE_TELEMETRY_REQ)
     {
         m_last_base_station_rx_us.store(static_cast<uint64_t>(esp_timer_get_time()),
                                         std::memory_order_relaxed);
@@ -195,6 +196,35 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             ESP_LOGD(TAG, "Received telemetry from robot %d — ignoring.", hdr.robot_id);
             break;
 
+        case MSG_TYPE_TELEMETRY_REQ:
+        {
+            if (len < BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST)
+            {
+                ESP_LOGW(TAG,
+                         "MSG_TYPE_TELEMETRY_REQ: too short (%d / %d bytes).",
+                         len,
+                         BYTES_LENGTH_ROBOT_TELEMETRY_REQUEST);
+                return;
+            }
+
+            const uint8_t my_id = RobotState::get_instance().get_id();
+
+            // Telemetry requests are strictly unicast to avoid radio collisions
+            // from multiple robots replying simultaneously.
+            if (hdr.robot_id != my_id)
+            {
+                ESP_LOGD(
+                  TAG, "Telemetry request ignored — for robot %d, we are %d.", hdr.robot_id, my_id);
+                return;
+            }
+
+            RobotTelemetryRequest telreq;
+            memset(&telreq, 0, sizeof(RobotTelemetryRequest));
+            DecodeRobotTelemetryRequest(&telreq, const_cast<uint8_t *>(payload));
+            handle_telemetry_req(telreq);
+            break;
+        }
+
         default:
             ESP_LOGW(TAG, "Unknown msg_type=0x%02X — discarding.", hdr.msg_type);
             break;
@@ -202,21 +232,21 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
 }
 
 /**
- * @brief Handle RobotCommand — convert body-frame velocities to wheel speeds.
+ * @brief Handle RobotCommand — enqueue target pose and velocity into the command inbox.
  *
- * Extracts target velocities from command, converts mm/s and 0.01 rad/s units
- * to m/s and rad/s, computes wheel velocities via inverse kinematics, and
- * sets wheel controller targets. For non-broadcast commands, sends telemetry
- * reply with echo timestamp.
+ * RobotCommand is strictly fire-and-forget; telemetry replies are only sent
+ * when an explicit RobotTelemetryRequest is received.
  *
  * @param cmd Decoded RobotCommand message
  */
 void ProtocolHandler::handle_command(const RobotCommand & cmd)
 {
-    ESP_LOGD(TAG,
-             "CMD robot=%d ts=%lu vx=%d vy=%d w=%d kick=%d",
+    ESP_LOGI(TAG,
+             "CMD robot=%d ts=%lu x=%d y=%d vx=%d vy=%d w=%d kick=%d",
              cmd.header.robot_id,
              (unsigned long)cmd.header.timestamp,
+             cmd.target_pose.x,
+             cmd.target_pose.y,
              cmd.target_pose.x_v,
              cmd.target_pose.y_v,
              cmd.target_pose.angular_vel,
@@ -225,14 +255,7 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
     if (!m_command_inbox.push(cmd, static_cast<uint64_t>(esp_timer_get_time())))
     {
         ESP_LOGW(TAG, "Command inbox full — command was not accepted.");
-        return;
     }
-
-    // Broadcast commands: execute without reply.
-    if (cmd.header.robot_id == ROBOT_ID_BROADCAST)
-        return;
-
-    Telemetry::get_instance().send(cmd.header.timestamp);
 }
 
 /**
@@ -391,4 +414,18 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         ESP_LOGI(TAG, "NVS erased. Rebooting to apply factory reset.");
         esp_restart();
     }
+}
+
+/**
+ * @brief Handle RobotTelemetryRequest — send RobotTelemetry back to the base station.
+ *
+ * Echoes the request timestamp so the base station can measure round-trip time.
+ *
+ * @param telreq Decoded RobotTelemetryRequest message
+ */
+void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest & telreq)
+{
+    ESP_LOGI(TAG, "Answering telemetry request, robot: %d", telreq.header.robot_id);
+
+    Telemetry::get_instance().send(telreq.header.timestamp);
 }
