@@ -27,6 +27,7 @@
     "--device-cgroup-rule=c 188:* rmw",
     "--device-cgroup-rule=c 166:* rmw",
     "--group-add=dialout",
+    "--group-add=uucp",
     // Share the host IPC namespace: SDL pushes frames to the X server through
     // MIT-SHM, and X_ShmPutImage fails with BadValue when the container has
     // its own IPC namespace (the server cannot attach the client's segment).

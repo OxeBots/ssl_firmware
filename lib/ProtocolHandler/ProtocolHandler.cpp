@@ -124,6 +124,21 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
         return;
     }
 
+    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+    if (len <= sizeof(m_last_rx_payload) && len == m_last_rx_len && m_last_rx_us != 0 &&
+        (now_us - m_last_rx_us) < RX_DEDUP_WINDOW_US &&
+        memcmp(payload, m_last_rx_payload, len) == 0)
+    {
+        ESP_LOGD(TAG, "Duplicate packet ignored (%u bytes).", len);
+        return;
+    }
+    if (len <= sizeof(m_last_rx_payload))
+    {
+        memcpy(m_last_rx_payload, payload, len);
+        m_last_rx_len = len;
+        m_last_rx_us = now_us;
+    }
+
     // IMPORTANT: bitproto decoders use bitwise OR — always decode into a
     // zero-initialised struct to prevent stale bits bleeding into fields.
     Header hdr;

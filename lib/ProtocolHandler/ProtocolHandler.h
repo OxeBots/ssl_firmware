@@ -67,6 +67,12 @@ class ProtocolHandler
     // control loop and status consumers read it from other tasks.
     static constexpr uint64_t BASE_STATION_LINK_TIMEOUT_US = 2000000;
     std::atomic<uint64_t> m_last_base_station_rx_us = 0;
+    // Drop identical back-to-back downlink retransmissions from the base
+    // station within this short window when Pipe 1 acknowledgement is off.
+    static constexpr uint64_t RX_DEDUP_WINDOW_US = 50000;
+    uint8_t m_last_rx_payload[31] = {};
+    uint8_t m_last_rx_len = 0;
+    uint64_t m_last_rx_us = 0;
     CommandInbox m_command_inbox;
     CommandEnvelope m_latest_command = {};
     bool m_has_latest_command = false;
