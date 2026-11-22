@@ -45,6 +45,8 @@
 #include "omni_robot.h"
 #include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
+#include "I2Cdev.h"
+#include "kicker_controller.h"
 
 // Unconditional so the PlatformIO library finder picks up lib/SerialDebug;
 // the service only starts (and only emits code) when CONFIG_SERIAL_DEBUG is set.
@@ -95,7 +97,12 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "Some IMU calibrations missing. Robot will operate in fallback mode.");
         ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate sensors.");
     }
+    const bool kicker_ready = KickerController::get_instance().init(I2Cdev::get_bus_handle()) == ESP_OK;
 
+        if (!kicker_ready) {
+        ESP_LOGW(TAG, "Kicker unavailable. Continuing without kicker.");
+        RobotState::get_instance().set_error(ERROR_KICKER_NO_CHARGE);
+        }
     // The VL53L5CX shares the IMU I2C bus. ToF is an optional perception
     // capability, so a missing sensor does not prevent safe wheel control.
     static ToFPerceptionService tof_service;
@@ -241,7 +248,16 @@ extern "C" void app_main(void)
     // the task would only poll a dead driver.
     if (imu_ready)
         OrientationHandler::get_instance().start_task();
-
+    if(kicker_ready){
+        if( KickerController::get_instance().start() != ESP_OK) {
+            ESP_LOGW(TAG, "Kicker task failed to start.");
+            RobotState::get_instance().set_error(ERROR_KICKER_NO_CHARGE);
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Kicker controller started");
+        }
+}
 #if CONFIG_SERIAL_DEBUG
     // 11: Serial debug dashboard. Streams over UART0 only while a dashboard
     // client keeps the connection alive.
