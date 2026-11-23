@@ -344,8 +344,11 @@ void ProtocolHandler::update(uint64_t now_us)
     // delivered a command, this loop owns the targets, including the zero
     // setpoint after a command timeout.
     if (m_has_latest_command)
+    {
         m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
-
+        if (!setpoint.kick_inhibited && setpoint.kick_velocity > 0U)
+            kicker.request_kick(setpoint.kick_velocity, setpoint.command_sequence);
+    }
     xSemaphoreGive(m_mutex);
 }
 

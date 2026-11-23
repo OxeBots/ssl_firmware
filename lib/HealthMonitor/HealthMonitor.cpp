@@ -59,8 +59,9 @@ HealthState HealthMonitor::update(const HealthObservationFrame & observation)
     m_state.active_faults = active_faults;
     m_state.timestamp_us = observation.timestamp_us;
     m_state.motion_inhibited = critical_faults != 0U;
+    // armengue: estou desativando o !observation.tof_available (ativar quando terminar a competição e o tof estiver ativo)
     m_state.kick_inhibited =
-      !observation.tof_available || !observation.kicker_ready || observation.kicker_fault;
+      !observation.kicker_ready || observation.kicker_fault;
     m_state.inhibit_reasons = 0;
     if (m_state.motion_inhibited)
         m_state.inhibit_reasons |= INHIBIT_MOTION;
