@@ -24,9 +24,8 @@ class Telemetry
 
     NRF24L01 * m_radio = nullptr;
 
-    // TODO: Stub values — replace when real battery/kicker sensing is wired.
+    // TODO: Replace the battery stub when battery percentage sensing is available.
     static constexpr uint8_t STUB_BATTERY_PCT = 95;
-    static constexpr uint16_t STUB_KICKER_VOLTAGE = 1650;
 };
 
 #endif  // _TELEMETRY_H_

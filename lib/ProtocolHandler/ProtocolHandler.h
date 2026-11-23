@@ -11,6 +11,7 @@
 #include "CommandInbox.h"
 #include "HealthMonitor.h"
 #include "NRF24L01.h"
+#include "kicker_controller.h"
 #include "RobotPositionController.h"
 #include "RobotVelocityController.h"
 #include "RuntimeTypes.h"

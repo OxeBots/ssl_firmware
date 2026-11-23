@@ -1,0 +1,415 @@
+import os
+import re
+import sys
+from enum import Enum, unique
+from functools import wraps
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    List,
+    NoReturn,
+    Optional,
+    Type as T,
+    TypeVar,
+    Union,
+    cast,
+    overload,
+)
+
+Function = Callable[..., Any]
+
+I = TypeVar("I")  # Any Input
+O = TypeVar("O")  # Ant Output
+C = TypeVar("C", bound=T)  # Any Class
+F = TypeVar("F", bound=Function)  # Any Function
+M = TypeVar("M", bound=Union[Function, "cached_property"])
+
+__all__ = (
+    "F",
+    "C",
+    "final",
+    "cache",
+    "conditional_cache",
+    "cached_property",
+    "frozen",
+    "safe_hash",
+    "override",
+    "override_docstring",
+    "cast_or_raise",
+    "overridable",
+    "isabstractmethod",
+    "write_file",
+    "Color",
+    "colored",
+    "pascal_case",
+    "snake_case",
+    "write_stderr",
+    "fatal",
+)
+
+
+from typing_extensions import final  # Compat 3.7
+
+if TYPE_CHECKING:
+    # Cheat mypy, which just won't let "try import" goes on.
+    from functools import lru_cache as cache
+else:
+    try:
+        from functools import cache  # 3.9+
+    except ImportError:
+        if sys.hexversion > 0x3080000:
+            from functools import lru_cache as cache
+        else:  # Compat 3.7
+            from functools import lru_cache
+
+            def cache(maxsize=128, typed=False):
+                if callable(maxsize):  # user_function passed directly
+                    user_function, maxsize = maxsize, 128
+                    decorator = lru_cache(maxsize, typed)
+                    return decorator(user_function)
+                return lru_cache(maxsize, typed)
+
+
+def conditional_cache(condition: Callable[..., bool]) -> Callable[[F], F]:
+    """Cache given function until condition function returns True.
+
+    >>> @conditional_cache(lambda fn, args, kwds: ...)
+        def get_attr(self, *args, **kwds):
+            pass
+    """
+
+    def decorator(user_function: F) -> F:
+        """The decorator focus on given condition."""
+        cache_decorated_function = cast(F, cache(user_function))
+
+        @wraps(user_function)
+        def decorated(*args: Any, **kwargs: Any) -> Any:
+            """The decorated user function."""
+            if not condition(user_function, args, kwargs):
+                # Execute directly.
+                return user_function(*args, **kwargs)
+            return cache_decorated_function(*args, **kwargs)
+
+        return cast(F, decorated)
+
+    return decorator
+
+
+class cached_property:
+    """The famous cached_property:
+    Original from:
+    https://github.com/bottlepy/bottle/commit/fa7733e075da0d790d809aa3d2f53071897e6f76
+
+        >>> class MyClass:
+                @cached_property
+                def name(self) -> str:
+                    print("cached!")
+                    return "name"
+        >>> inst = MyClass()
+        >>> inst.name
+        cached!
+        "name"
+        >>> inst.name  # already cached
+        "name"
+
+    Notes: Python 3.9+ provides cached_property in library functools.
+    This custom implementation existing for compatiable reason (3.7, 3.8).
+    """
+
+    def __init__(self, func: Callable[[I], O]) -> None:
+        self.__doc__ = func.__doc__
+        self.__name__ = func.__name__
+        self.func = func
+
+    @overload
+    def __get__(self, obj: None, cls: T[I]) -> "cached_property": ...
+
+    @overload
+    def __get__(self, obj: I, cls: T[I]) -> O:  # type: ignore
+        ...
+
+    def __get__(self, obj: Optional[I], cls: T[I]) -> Union["cached_property", O]:
+        if obj is None:
+            return self
+        value = obj.__dict__[self.func.__name__] = self.func(obj)  # type: ignore
+        return value  # type: ignore
+
+
+@overload
+def frozen(class_: C) -> C: ...
+
+
+@overload
+def frozen(*, safe_hash: bool = True, post_init: bool = True) -> Callable[[C], C]: ...
+
+
+def frozen(
+    class_: Optional[C] = None, *, safe_hash: bool = True, post_init: bool = True
+):
+    """Freeze a class.
+
+    :param class_: The class to frozen.
+    :param safe_hash: Whether to inject a `__hash__` method onto this class, checks
+       decorator `safe_hash()`.
+    :param post_init: Whether to freeze the instance after `__init__` function is called.
+
+    Example::
+
+        >>> @frozen
+            class MyClass:
+                def __init__(self, name):
+                    self.name = name
+        >>> inst = MyClass(name="ha")
+        >>> inst.name = "changed"  # AttributeError
+
+    Or::
+
+        >>> @frozen(post_init=False)
+            class MyClass:
+                pass
+        >>> inst = MyClass()
+        >>> inst.name = "init-my-name"  # ok
+        >>> inst.name = "changed"  # AttributeError
+
+    """
+
+    def wrap(class_: C) -> C:
+        def freeze(class_self) -> None:
+            if getattr(class_self, "__frozen__", False):
+                raise AttributeError("Cannot freeze frozen instance")
+            setattr(class_self, "__frozen__", True)
+
+            if hasattr(class_self, "__post_freeze__"):
+                post_freeze = getattr(class_self, "__post_freeze__")
+                if callable(post_freeze):
+                    post_freeze()
+
+        def __setattr__(self, name, value):
+            if getattr(self, "__frozen__", False):
+                raise AttributeError("Cant setattr on frozen instance")
+            else:
+                object.__setattr__(self, name, value)
+
+        def __delattr__(self, name):
+            if getattr(self, "__frozen__", False):
+                raise AttributeError("Cant delattr on frozen instance")
+            else:
+                object.__delattr__(self, name)
+
+        setattr(class_, "__frozen__", False)
+        setattr(class_, "freeze", freeze)
+        setattr(class_, "__setattr__", __setattr__)
+        setattr(class_, "__delattr__", __delattr__)
+
+        if post_init:
+            init_func = getattr(class_, "__init__")
+
+            def decorate_init(func):
+                @wraps(func)
+                def decorated(class_self, *args, **kwds):
+                    ret = func(class_self, *args, **kwds)
+                    class_self.freeze()
+                    return ret
+
+                return decorated
+
+            setattr(class_, "__init__", decorate_init(init_func))
+
+        if safe_hash:
+            return safe_hash_(class_)
+        return class_
+
+    if class_ is None:
+        return wrap
+    return wrap(class_)
+
+
+def safe_hash(class_: C) -> C:
+    """Corresponding to dataclass's unsafe_hash,
+    which is hash(dataclass_fields)."""
+
+    def __hash__(self) -> int:
+        return hash("__safe_hash__id__{0}".format(id(self)))
+
+    setattr(class_, "__hash__", __hash__)
+    return class_
+
+
+safe_hash_ = safe_hash  # Alias
+
+
+def override(c: C) -> Callable[[M], M]:
+    """Just a simple mark indicates this method is overriding super method.
+
+    >>> @override(SuperClass)
+        def some_func(self):
+            pass
+    """
+
+    def decorator(f: M) -> M:
+        super_f = getattr(c, f.__name__)
+        if not getattr(super_f, "__overridable__", False):
+            if not getattr(super_f, "__isabstractmethod__", False):
+                raise AttributeError(f"Cant override {super_f.__name__}")
+        return f
+
+    return decorator
+
+
+def overridable(f: M) -> M:
+    """Just a simple mark indicates this method could be overrided by future subclass
+    method implementation."""
+    setattr(f, "__overridable__", True)
+    return f
+
+
+def isabstractmethod(f: F) -> bool:
+    """Returns True if given f is an abstract method."""
+    return getattr(f, "__isabstractmethod__", False)
+
+
+def cast_or_raise(t: T[I], v: Any) -> I:
+    """Cast given value v to type t.
+    Raises `TypeError` if v is not an instance of t.
+    """
+    if isinstance(v, t):
+        return v
+    raise TypeError(f"Cant cast {v} to {t}")
+
+
+def write_file(filepath: str, s: str) -> None:
+    """Write given s to filepath."""
+    with open(filepath, "w") as f:
+        f.write(s)
+
+
+def write_stderr(s: str) -> None:
+    """Write a line of string to stderr."""
+    sys.stderr.write(s + "\n")
+
+
+def fatal(s: str = "", code: int = 1) -> NoReturn:
+    """Exit the whole program with given code and message."""
+    if s:
+        write_stderr(s)
+    os._exit(code)
+
+
+def override_docstring(string: str) -> Callable[[F], F]:
+    """Returns a decorator that wraps given string as this function's docstring.
+
+    >>> @override_docstring(s)
+    def foo():
+        pass
+    """
+
+    def decorator(function: F) -> F:
+        function.__doc__ = string
+        return function
+
+    return decorator
+
+
+@unique
+class Color(Enum):
+    BLACK = 0
+    RED = 1
+    GREEN = 2
+    YELLOW = 3
+    BLUE = 4
+    MAGENTA = 5
+    CYAN = 6
+    WHITE = 7
+
+
+def colored(text: str, color: Color) -> str:
+    """Color given text."""
+    return "\033[3%dm%s\033[0m" % (color.value, text)
+
+
+def keep_case(word: str) -> str:
+    """Returns the word as it is."""
+    return word
+
+
+def upper_case(word: str) -> str:
+    """Converts given word to upper case."""
+    return word.upper()
+
+
+def pascal_case(word: str) -> str:
+    """Converts given word to pascal case.
+
+    >>> pascal_case("someWord")
+    "SomeWord"
+
+    >>> pascal_case("my_prefix_someWord")
+    "MyPrefixSomeWord"
+    """
+    items: List[str] = []
+    parts = word.split("_")
+
+    for part in parts:
+        if part:
+            first_char, remain_part = part[0], part[1:]
+            if remain_part and remain_part.isupper():  # UPPERCASE
+                items.append(first_char.upper() + remain_part.lower())
+            else:  # flatcase or camelCase or PascalCase
+                items.append(first_char.upper() + remain_part)
+    return "".join(items)
+
+
+_snakecase_re_camel_b1 = re.compile(r"(.)([A-Z][a-z]+)")  # Xy boundary
+_snakecase_re_camel_b2 = re.compile(r"([a-z0-9])([A-Z])")  # aA/0A boundary
+_snakecase_re_alpha_to_digit = re.compile(r"([A-Za-z])([0-9])")
+_snakecase_re_digit_to_alpha = re.compile(r"([0-9])([A-Za-z])")
+
+_snakecase_re_multi_us = re.compile(r"__+")
+_snakecase_re_upper_or_digits = re.compile(r"^[A-Z0-9]+$")
+_snakecase_re_mixed_case = re.compile(r"[A-Z].*[a-z]|[a-z].*[A-Z]")
+_snakecase_re_leading_us = re.compile(r"^_+")
+_snakecase_re_trailing_us = re.compile(r"_+$")
+
+
+def snake_case(word: str) -> str:
+    """
+    Convert identifier to snake_case with common-sense rules:
+    - Preserve leading/trailing underscores exactly.
+    - Normalize interior underscores.
+    - Default: split at camel boundaries and letter<->digit boundaries.
+    - If original has both '_' and mixed case, do NOT split letter<->digit.
+    - Do NOT split letter<->digit inside ALL-UPPER tokens.
+    """
+    if not word:
+        return ""
+
+    # Preserve edge underscores (e.g., '__init__')
+    s = word.replace("-", "_")
+    pre_m = _snakecase_re_leading_us.match(s)
+    pre = pre_m.group(0) if pre_m else ""
+    rest = s[len(pre) :]  # use the remainder to find suffix
+    suf_m = _snakecase_re_trailing_us.search(rest)
+    suf = suf_m.group(0) if suf_m else ""
+    core = rest[: len(rest) - len(suf)]  # core = s - pre - suf
+
+    respect_author_digits = ("_" in word) and bool(
+        _snakecase_re_mixed_case.search(word)
+    )
+
+    parts: List[str] = []
+    for t in core.split("_"):
+        if not t:
+            continue
+        # camel splits (two-pass)
+        t = _snakecase_re_camel_b1.sub(r"\1_\2", t)
+        t = _snakecase_re_camel_b2.sub(r"\1_\2", t)
+        # letter<->digit split when allowed
+        if not respect_author_digits and not _snakecase_re_upper_or_digits.fullmatch(t):
+            t = _snakecase_re_alpha_to_digit.sub(r"\1_\2", t)
+            t = _snakecase_re_digit_to_alpha.sub(r"\1_\2", t)
+        parts.append(t)
+
+    core_snake = "_".join(parts)
+    core_snake = _snakecase_re_multi_us.sub("_", core_snake).strip("_").lower()
+    return f"{pre}{core_snake}{suf}"

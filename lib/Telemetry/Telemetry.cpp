@@ -5,6 +5,7 @@
 #include "OrientationHandler.h"
 #include "RobotState.h"
 #include "ssl_robot_protocol_bp.h"
+#include "kicker_controller.h"
 
 static const char * TAG = "Telemetry";
 
@@ -30,7 +31,7 @@ void Telemetry::init(NRF24L01 * radio)
  * @brief Send robot telemetry frame to base station.
  *
  * Encodes RobotTelemetry message with current robot ID, yaw from IMU,
- * battery/kicker stub values, and error flags. Sends via NRF24L01 radio.
+ * battery and kicker voltage values, and error flags. Sends via NRF24L01 radio.
  *
  * @param echo_timestamp Timestamp from command to echo in telemetry reply
  */
@@ -60,7 +61,8 @@ void Telemetry::send(uint32_t echo_timestamp)
       static_cast<int16_t>(OrientationHandler::get_instance().get_yaw() * 100.0);
 
     tel.battery_percentage = STUB_BATTERY_PCT;
-    tel.kicker_voltage = STUB_KICKER_VOLTAGE;
+    tel.kicker_voltage = static_cast<uint16_t>(
+      static_cast<uint16_t>(KickerController::get_instance().get_voltage()) * 100U);
     tel.error_flags = state.get_error_flags();
 
     uint8_t buf[BYTES_LENGTH_ROBOT_TELEMETRY] = {0};

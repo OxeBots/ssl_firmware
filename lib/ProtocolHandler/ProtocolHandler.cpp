@@ -294,7 +294,9 @@ void ProtocolHandler::update(uint64_t now_us)
     observation.tof_available = (error_flags & ERROR_TOF_FAIL) == 0U;
     // Kicker sensing does not exist on this robot yet: treat the kicker as
     // ready so only real observations inhibit.
-    observation.kicker_ready = true;
+    auto & kicker = KickerController::get_instance();
+    observation.kicker_ready = kicker.is_ready();
+    observation.kicker_fault = kicker.has_fault();
     auto & estimator = WheelStateEstimator::get_instance();
     for (size_t wheel = 0; wheel < ROBOT_WHEEL_COUNT; ++wheel)
     {
