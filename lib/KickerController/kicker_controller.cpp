@@ -305,6 +305,7 @@ void KickerController::handle_command(const KickerCommand & cmd)
              cmd.kick_velocity,
              duty,
              (unsigned long)cmd.sequence);
+    vTaskDelay(pdMS_TO_TICKS(100));
 }
 
 /**
@@ -326,6 +327,12 @@ void KickerController::poll_board()
             m_voltage = voltage;
         }
         xSemaphoreGive(m_mutex);
+    }
+
+    if (ok && !m_in_safe_stop && !kicker_is_charging(status) &&
+        !kicker_is_kicking(status) && !kicker_has_fault(status) && !kicker_has_ov_trip(status))
+    {
+        kicker_enable_charge(true);
     }
     static uint32_t poll_cnt = 0;
     if ((++poll_cnt % 20U) == 0U)
