@@ -52,6 +52,12 @@ const MSG_TYPE_TELEMETRY = 2;
 // Explicit telemetry request from base station to a specific robot
 const MSG_TYPE_TELEMETRY_REQ = 3;
 
+// payload gathering multiple robots cmds
+const MSG_TYPE_TEAM_VEL_CMD = 4;
+
+// config max robots
+const TEAM_VEL_CMD_MAX_ROBOTS = 3;
+
 // ---------------------------------------------------------------------------
 // Config flag constants (bitmask for config_flags field in RobotConfig)
 // ---------------------------------------------------------------------------
@@ -172,3 +178,13 @@ message RobotTelemetry {
     uint16 error_flags         = 5;  // Bitmask of ERROR_* constants
 }
 
+// new msg to high freq comm
+
+message SingleRobotVelCmd{
+    uint4 robot_id = 1; // 0.5 bytes
+    int12 vx = 2; // 1.5 bytes
+    int12 vy = 3; // 1.5 bytes
+    int11 vw = 4; //
+    uint7 kick_velocity = 5; //
+    uint2 flags = 6; //
+} // 48 bits = 6 bytes

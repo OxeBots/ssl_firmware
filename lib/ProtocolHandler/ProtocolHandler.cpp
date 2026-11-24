@@ -12,6 +12,7 @@
 #include "RobotState.h"
 #include "Telemetry.h"
 #include "WheelTuning.h"
+#include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "ProtocolHandler";
@@ -152,7 +153,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
     // reply reports the live link instead of the stale pre-packet state;
     // update() re-arms the flag when the link goes quiet.
     if (hdr.msg_type == MSG_TYPE_COMMAND || hdr.msg_type == MSG_TYPE_CONFIG ||
-        hdr.msg_type == MSG_TYPE_TELEMETRY_REQ)
+        hdr.msg_type == MSG_TYPE_TELEMETRY_REQ || hdr.msg_type == MSG_TYPE_TEAM_VEL_CMD)
     {
         m_last_base_station_rx_us.store(static_cast<uint64_t>(esp_timer_get_time()),
                                         std::memory_order_relaxed);
@@ -240,6 +241,44 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             break;
         }
 
+        case MSG_TYPE_TEAM_VEL_CMD:
+        {
+            const uint8_t qtd_robots = hdr.robot_id;
+            const size_t expected_lenght =
+              BYTES_LENGTH_HEADER +
+              static_cast<size_t>(qtd_robots) * BYTES_LENGTH_SINGLE_ROBOT_VEL_CMD;
+
+            if (qtd_robots > TEAM_VEL_CMD_MAX_ROBOTS || len < expected_lenght || qtd_robots == 0)
+            {
+                ESP_LOGD(TAG,
+                         "MSG_TYPE_TEAM_VEL_CMD: invalid message (%d/ %zu bytes)",
+                         len,
+                         expected_lenght);
+                return;
+            }
+
+            const uint8_t my_id = RobotState::get_instance().get_id();
+
+            for (size_t i = 0; i < qtd_robots; i++)
+            {
+                const uint8_t * slot_atual =
+                  payload + BYTES_LENGTH_HEADER + i * BYTES_LENGTH_SINGLE_ROBOT_VEL_CMD;
+
+                const uint8_t slot_id = slot_atual[0] & 0x0F;  // 0000 1111
+
+                if (slot_id == my_id)
+                {
+                    SingleRobotVelCmd t_comand;
+                    memset(&t_comand, 0, sizeof(SingleRobotVelCmd));
+                    DecodeSingleRobotVelCmd(&t_comand, const_cast<uint8_t *>(slot_atual));
+                    handle_TeamCommand(t_comand, hdr);
+                    update(static_cast<uint64_t>(esp_timer_get_time()));
+                    break;
+                }
+            }
+            break;
+        }
+
         default:
             ESP_LOGW(TAG, "Unknown msg_type=0x%02X — discarding.", hdr.msg_type);
             break;
@@ -266,6 +305,37 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
              cmd.target_pose.y_v,
              cmd.target_pose.angular_vel,
              cmd.kick_velocity);
+
+    if (!m_command_inbox.push(cmd, static_cast<uint64_t>(esp_timer_get_time())))
+    {
+        ESP_LOGW(TAG, "Command inbox full — command was not accepted.");
+    }
+}
+
+void ProtocolHandler::handle_TeamCommand(const SingleRobotVelCmd & r_comand, const Header & hdr)
+{
+    ESP_LOGI(TAG,
+             "r_command vx=%d vy=%d vw=%d kick=%d",
+             r_comand.vx,
+             r_comand.vy,
+             r_comand.vw,
+             r_comand.kick_velocity);
+
+    const uint8_t clamped_kick = (r_comand.kick_velocity > 100U) ? 100U : r_comand.kick_velocity;
+
+    RobotCommand cmd = {};
+    cmd.header = hdr;
+    cmd.header.robot_id = r_comand.robot_id;
+    cmd.kick_velocity =
+      (clamped_kick > 0U)
+        ? static_cast<uint8_t>((static_cast<uint16_t>(clamped_kick) * 255U + 50U) / 100U)
+        : 0U;  // conversão 7bits (0-100) -> (0-256)
+    cmd.target_pose.angle = 0;
+    cmd.target_pose.angular_vel = r_comand.vw;
+    cmd.target_pose.x = 0;
+    cmd.target_pose.x_v = r_comand.vx;
+    cmd.target_pose.y = 0;
+    cmd.target_pose.y_v = r_comand.vy;
 
     if (!m_command_inbox.push(cmd, static_cast<uint64_t>(esp_timer_get_time())))
     {

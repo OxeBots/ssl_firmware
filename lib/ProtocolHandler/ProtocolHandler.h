@@ -11,12 +11,12 @@
 #include "CommandInbox.h"
 #include "HealthMonitor.h"
 #include "NRF24L01.h"
-#include "kicker_controller.h"
 #include "RobotPositionController.h"
 #include "RobotVelocityController.h"
 #include "RuntimeTypes.h"
 #include "SafetySupervisor.h"
 #include "WheelController.h"
+#include "kicker_controller.h"
 #include "omni_robot.h"
 #include "ssl_robot_protocol_bp.h"
 
@@ -55,6 +55,7 @@ class ProtocolHandler
     void handle_command(const RobotCommand & cmd);
     void handle_config(const RobotConfig & cfg);
     void handle_telemetry_req(const RobotTelemetryRequest & telreq);
+    void handle_TeamCommand(const SingleRobotVelCmd & r_comand, const Header & hdr);
 
     // Serializes update(), force_safe_stop() and the status getters: update()
     // runs from the radio task and the idle loop, the getters from the debug
