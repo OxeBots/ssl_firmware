@@ -151,73 +151,25 @@ esp_err_t OrientationHandler::calibrate_mag(uint32_t timeout_s)
 /**
  * @brief Run interactive accelerometer calibration and save to NVS.
  * @param timeout_s Maximum seconds to wait for interactive calibration.
- * @return ESP_OK on success.
+ * @return ESP_ERR_NOT_SUPPORTED while calibration is being migrated to IMUGY85.
  */
 esp_err_t OrientationHandler::calibrate_accel(uint32_t timeout_s)
 {
-    ESP_LOGI(TAG,
-             "Starting Accelerometer Calibration. Place robot completely FLAT and STATIONARY!");
-    for (int i = 3; i > 0; i--)
-    {
-        ESP_LOGI(TAG, "%d...", i);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-
-    ADXL345 & accel = m_driver.get_accel();
-    accel.calibrate();
-
-    // Apply calibration to driver
-    Vector3f scale = {accel.get_calibration_scale(0),
-                      accel.get_calibration_scale(1),
-                      accel.get_calibration_scale(2)};
-    Vector3f offset = {accel.get_calibration_offset(0),
-                       accel.get_calibration_offset(1),
-                       accel.get_calibration_offset(2)};
-    m_driver.set_accel_calibration(scale, offset);
-
-    // Save to NVS
-    esp_err_t err = save_accel_calibration_to_nvs();
-    if (err == ESP_OK)
-    {
-        m_accel_calibrated = true;
-        ESP_LOGI(TAG, "Accelerometer calibration saved to NVS.");
-    }
-    return err;
+    (void)timeout_s;
+    ESP_LOGW(TAG, "calibrate_accel temporarily disabled during IMUGY85 calibration refactor.");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 /**
  * @brief Run interactive gyroscope calibration and save to NVS.
  * @param timeout_s Maximum seconds to wait for interactive calibration.
- * @return ESP_OK on success.
+ * @return ESP_ERR_NOT_SUPPORTED while calibration is being migrated to IMUGY85.
  */
 esp_err_t OrientationHandler::calibrate_gyro(uint32_t timeout_s)
 {
-    ESP_LOGI(TAG, "Starting Gyroscope Calibration. Keep robot COMPLETELY STILL!");
-    for (int i = 3; i > 0; i--)
-    {
-        ESP_LOGI(TAG, "%d...", i);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-
-    ITG3200 & gyro = m_driver.get_gyro();
-    gyro.calibrate(1000);
-
-    // Apply calibration to driver (ITG3200 only has offset, no scale)
-    int16_t x_off, y_off, z_off;
-    gyro.get_offsets(&x_off, &y_off, &z_off);
-    Vector3f scale = {1.0f, 1.0f, 1.0f};  // ITG3200 doesn't use scale
-    Vector3f offset = {
-      static_cast<float>(x_off), static_cast<float>(y_off), static_cast<float>(z_off)};
-    m_driver.set_gyro_calibration(scale, offset);
-
-    // Save to NVS
-    esp_err_t err = save_gyro_calibration_to_nvs();
-    if (err == ESP_OK)
-    {
-        m_gyro_calibrated = true;
-        ESP_LOGI(TAG, "Gyroscope calibration saved to NVS.");
-    }
-    return err;
+    (void)timeout_s;
+    ESP_LOGW(TAG, "calibrate_gyro temporarily disabled during IMUGY85 calibration refactor.");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 /**
@@ -268,9 +220,18 @@ void OrientationHandler::task_loop()
  */
 void OrientationHandler::update_ahrs()
 {
-    // Read calibrated sensor data from driver
+    // Read sensor data from driver (gyro raw -> deg/s temporarily until IMUGY85 calibration lands)
     Vector3f accel = m_driver.read_acceleration_calibrated();
-    Vector3f gyro = m_driver.read_gyro_calibrated();
+
+    int16_t gx_raw = 0, gy_raw = 0, gz_raw = 0, temp_raw = 0;
+    m_driver.read_gyro(&gx_raw, &gy_raw, &gz_raw, &temp_raw);
+    const float g_res = m_driver.get_gyro_resolution();
+    Vector3f gyro = {
+      static_cast<float>(gx_raw) * g_res,
+      static_cast<float>(gy_raw) * g_res,
+      static_cast<float>(gz_raw) * g_res,
+    };
+
     Vector3f mag = m_driver.read_magnetometer_calibrated();
 
     // Convert to Fusion types
@@ -337,22 +298,22 @@ bool OrientationHandler::is_mag_calibrated() const
 
 /**
  * @brief Save accelerometer calibration to NVS.
- * @return ESP_OK on success, esp_err_t error code on failure.
+ * @return ESP_ERR_NOT_SUPPORTED while calibration is being migrated to IMUGY85.
  */
 esp_err_t OrientationHandler::save_accel_calibration_to_nvs()
 {
-    ADXL345 & accel = m_driver.get_accel();
-    return accel.save_calibration_to_nvs();
+    ESP_LOGW(TAG, "save_accel_calibration_to_nvs temporarily disabled during IMUGY85 refactor.");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 /**
  * @brief Save gyroscope calibration to NVS.
- * @return ESP_OK on success, esp_err_t error code on failure.
+ * @return ESP_ERR_NOT_SUPPORTED while calibration is being migrated to IMUGY85.
  */
 esp_err_t OrientationHandler::save_gyro_calibration_to_nvs()
 {
-    ITG3200 & gyro = m_driver.get_gyro();
-    return gyro.save_calibration_to_nvs();
+    ESP_LOGW(TAG, "save_gyro_calibration_to_nvs temporarily disabled during IMUGY85 refactor.");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 /**
@@ -367,48 +328,20 @@ esp_err_t OrientationHandler::save_mag_calibration_to_nvs()
 
 /**
  * @brief Load accelerometer calibration from NVS and apply to driver.
- * @return ESP_OK on success, ESP_ERR_NOT_FOUND if no calibration data exists.
+ * @return ESP_ERR_NOT_FOUND while calibration is being migrated to IMUGY85.
  */
 esp_err_t OrientationHandler::load_accel_calibration_from_nvs()
 {
-    ADXL345 & accel = m_driver.get_accel();
-    esp_err_t err = accel.load_calibration_from_nvs();
-
-    if (err == ESP_OK)
-    {
-        Vector3f scale = {accel.get_calibration_scale(0),
-                          accel.get_calibration_scale(1),
-                          accel.get_calibration_scale(2)};
-        Vector3f offset = {accel.get_calibration_offset(0),
-                           accel.get_calibration_offset(1),
-                           accel.get_calibration_offset(2)};
-        m_driver.set_accel_calibration(scale, offset);
-    }
-
-    return err;
+    return ESP_ERR_NOT_FOUND;
 }
 
 /**
  * @brief Load gyroscope calibration from NVS and apply to driver.
- * @return ESP_OK on success, ESP_ERR_NOT_FOUND if no calibration data exists.
+ * @return ESP_ERR_NOT_FOUND while calibration is being migrated to IMUGY85.
  */
 esp_err_t OrientationHandler::load_gyro_calibration_from_nvs()
 {
-    ITG3200 & gyro = m_driver.get_gyro();
-    esp_err_t err = gyro.load_calibration_from_nvs();
-
-    if (err == ESP_OK)
-    {
-        // ITG3200 only has offset, no scale
-        int16_t x_off, y_off, z_off;
-        gyro.get_offsets(&x_off, &y_off, &z_off);
-        Vector3f scale = {1.0f, 1.0f, 1.0f};
-        Vector3f offset = {
-          static_cast<float>(x_off), static_cast<float>(y_off), static_cast<float>(z_off)};
-        m_driver.set_gyro_calibration(scale, offset);
-    }
-
-    return err;
+    return ESP_ERR_NOT_FOUND;
 }
 
 /**

@@ -43,7 +43,7 @@ void test_safety_supervisor_gates_commands_and_timeouts()
     TEST_ASSERT_EQUAL_UINT8(80, decision.goal.kick_velocity);
 
     decision = supervisor.update(300000, &envelope, healthy_state(), {});
-    TEST_ASSERT_EQUAL_INT(static_cast<int>(LifecycleState::SAFE_STOP),
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(LifecycleState::DISARMED),
                           static_cast<int>(decision.lifecycle));
     TEST_ASSERT_TRUE(decision.goal.motion_inhibited);
     TEST_ASSERT_TRUE(decision.goal.kick_inhibited);

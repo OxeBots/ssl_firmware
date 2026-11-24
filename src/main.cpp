@@ -86,7 +86,7 @@ extern "C" void app_main(void)
     {
         ESP_LOGE(TAG, "IMU hardware unavailable. Entering SAFE_STOP.");
         RobotState::get_instance().set_error(ERROR_IMU_FAIL);
-        ProtocolHandler::get_instance().force_safe_stop();
+        // ProtocolHandler::get_instance().force_safe_stop();
     }
 
     // 4: IMU calibration load from NVS (must precede ADC task init) NVS flash

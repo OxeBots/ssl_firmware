@@ -77,10 +77,7 @@ SafetyDecision SafetySupervisor::update(uint64_t now_us,
 
     if (!decision.command_fresh)
     {
-        if (m_state == LifecycleState::ACTIVE || m_state == LifecycleState::DEGRADED)
-            m_state = LifecycleState::SAFE_STOP;
-        else
-            m_state = LifecycleState::DISARMED;
+        m_state = LifecycleState::DISARMED;
         decision.lifecycle = m_state;
         return decision;
     }

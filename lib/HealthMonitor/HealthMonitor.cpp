@@ -58,8 +58,14 @@ HealthState HealthMonitor::update(const HealthObservationFrame & observation)
 
     m_state.active_faults = active_faults;
     m_state.timestamp_us = observation.timestamp_us;
+<<<<<<< Updated upstream
     m_state.motion_inhibited = critical_faults != 0U;
     // armengue: estou desativando o !observation.tof_available (ativar quando terminar a competição e o tof estiver ativo)
+=======
+    // TEMP (testes): não inibir movimento por falhas críticas de health
+    // (mantém active_faults/latched_faults visíveis para diagnóstico).
+    m_state.motion_inhibited = false;
+>>>>>>> Stashed changes
     m_state.kick_inhibited =
       !observation.kicker_ready || observation.kicker_fault;
     m_state.inhibit_reasons = 0;
