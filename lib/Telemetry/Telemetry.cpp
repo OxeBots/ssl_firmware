@@ -1,11 +1,15 @@
 #include "Telemetry.h"
 
+#include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <algorithm>
 
 #include "OrientationHandler.h"
 #include "RobotState.h"
 #include "ssl_robot_protocol_bp.h"
 #include "kicker_controller.h"
+#include "PowerMonitor.h"
 
 static const char * TAG = "Telemetry";
 
@@ -60,7 +64,18 @@ void Telemetry::send(uint32_t echo_timestamp)
     tel.robot_pose.angle =
       static_cast<int16_t>(OrientationHandler::get_instance().get_yaw() * 100.0);
 
-    tel.battery_percentage = STUB_BATTERY_PCT;
+    // conversão da tensão da bat em %
+    const PowerMonitor & power_mon = PowerMonitor::get_instance();
+    uint8_t bat_per = 0;
+    if(power_mon.is_valid()){
+        const float bat_empty = 19.8f; // CONFIG_VMON_UNDERVOLTAGE_MV = 19800
+        const float bat_max = 25.2f; // CONFIG_VMON_OVERVOLTAGE_MV = 26500
+        const float per = (power_mon.get_supply_voltage_v() - bat_empty ) / (bat_max - bat_empty) * 100.0f;
+        bat_per = static_cast<uint8_t>(std::lround(std::clamp(per, 0.0f, 100.0f)));
+    }
+
+
+    tel.battery_percentage = static_cast<uint8_t>(PowerMonitor::get_instance().get_supply_voltage_v());
     tel.kicker_voltage = static_cast<uint16_t>(
       static_cast<uint16_t>(KickerController::get_instance().get_voltage()) * 100U);
     tel.error_flags = state.get_error_flags();
