@@ -119,13 +119,18 @@ esp_err_t KickerController::start()
 void KickerController::request_kick(uint8_t kick_velocity, uint32_t sequence)
 {
     if (m_cmd_queue == nullptr || kick_velocity == 0U)
+    {
+        ESP_LOGW(TAG, "[KICK-Q] dropped: queue=%p vel=%u", m_cmd_queue, kick_velocity);    
         return;
-
+    }
     KickerCommand cmd = {};
     cmd.type = CommandType::KICK;
     cmd.kick_velocity = kick_velocity;
     cmd.sequence = sequence;
-    xQueueSend(m_cmd_queue, &cmd, 0);
+    if (xQueueSend(m_cmd_queue, &cmd, 0) != pdPASS)
+        ESP_LOGW(TAG, "[KICK-Q] queue full! seq=%lu", (unsigned long)sequence);
+    else
+        ESP_LOGI(TAG, "[KICK-Q] queued vel=%u seq=%lu", kick_velocity, (unsigned long)sequence);
 }
 
 /**
@@ -188,7 +193,7 @@ bool KickerController::is_ready() const
     bool ready = false;
     if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(MUTEX_WAIT_MS)) == pdTRUE)
     {
-        ready = m_comm_ok && kicker_is_done(m_status) && !kicker_is_kicking(m_status) &&
+        ready = m_comm_ok && !kicker_is_kicking(m_status) &&
                 !kicker_has_fault(m_status) && !kicker_has_ov_trip(m_status);
         xSemaphoreGive(m_mutex);
     }
@@ -252,31 +257,54 @@ void KickerController::handle_command(const KickerCommand & cmd)
     }
 
     if (m_in_safe_stop || cmd.kick_velocity == 0U || cmd.sequence == m_last_kick_seq)
+    {    
+        ESP_LOGW(TAG, "[KICK-EXEC] skip: safe_stop=%d vel=%u seq=%lu last_seq=%lu", m_in_safe_stop, cmd.kick_velocity, (unsigned long)cmd.sequence, (unsigned long)m_last_kick_seq);
         return;
-
+    }
     uint8_t status = 0;
     if (kicker_get_status(&status) != ESP_OK)
+    {
+        ESP_LOGW(TAG, "[KICK-EXEC] get_status I2C failed");
         return;
+    }
 
-    const bool can_kick = kicker_is_done(status) && !kicker_is_kicking(status) &&
+    const bool can_kick = !kicker_is_kicking(status) &&
                           !kicker_has_fault(status) && !kicker_has_ov_trip(status);
     if (!can_kick)
+    {
+        ESP_LOGW(
+          TAG,
+          "[KICK-EXEC] blocked by status=0x%02X (CHG=%d KICK=%d BLD=%d FLT=%d DONE=%d OV=%d REG_ERR=%d VAL_ERR=%d)",
+          status,
+          kicker_is_charging(status),
+          kicker_is_kicking(status),
+          kicker_is_bleeder_enabled(status),
+          kicker_has_fault(status),
+          kicker_is_done(status),
+          kicker_has_ov_trip(status),
+          kicker_has_i2c_reg_error(status),
+          kicker_has_i2c_value_error(status));
         return;
-
+    }
     const uint8_t duty = velocity_to_duty(cmd.kick_velocity);
     if (kicker_set_kick_duty(duty) != ESP_OK)
     {
-        ESP_LOGW(TAG, "Failed to set kick duty (%u).", duty);
+        ESP_LOGW(TAG, "[KICK-EXEC] failed to set kick duty (%u).", duty);
         return;
     }
 
     if (kicker_start_kick() != ESP_OK)
     {
-        ESP_LOGW(TAG, "Failed to trigger kick.");
+        ESP_LOGW(TAG, "[KICK-EXEC] failed to trigger kick.");
         return;
     }
 
     m_last_kick_seq = cmd.sequence;
+    ESP_LOGI(TAG,
+             "[KICK-EXEC] fired! vel=%u duty=%u seq=%lu",
+             cmd.kick_velocity,
+             duty,
+             (unsigned long)cmd.sequence);
 }
 
 /**
@@ -298,5 +326,19 @@ void KickerController::poll_board()
             m_voltage = voltage;
         }
         xSemaphoreGive(m_mutex);
+    }
+    static uint32_t poll_cnt = 0;
+    if ((++poll_cnt % 20U) == 0U)
+    {
+        ESP_LOGI(TAG,
+                 "[KICK-POLL] ok=%d V=%u status=0x%02X (CHG=%d DONE=%d KICK=%d FLT=%d OV=%d)",
+                 ok,
+                 voltage,
+                 status,
+                 kicker_is_charging(status),
+                 kicker_is_done(status),
+                 kicker_is_kicking(status),
+                 kicker_has_fault(status),
+                 kicker_has_ov_trip(status));
     }
 }

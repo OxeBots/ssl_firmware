@@ -346,6 +346,22 @@ void ProtocolHandler::update(uint64_t now_us)
     if (m_has_latest_command)
     {
         m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
+        if (m_latest_command.command.kick_velocity > 0U)
+        {
+            ESP_LOGI(TAG,
+                     "[KICK-FLOW] cmd_kick=%u seq=%lu | ready=%d fault=%d V=%u | "
+                     "lifecycle=%d sev=%d | goal_inh=%d sp_inh=%d sp_kick=%u",
+                     m_latest_command.command.kick_velocity,
+                     (unsigned long)m_latest_command.sequence,
+                     kicker.is_ready(),
+                     kicker.has_fault(),
+                     kicker.get_voltage(),
+                     static_cast<int>(decision.lifecycle),
+                     static_cast<int>(m_health_state.severity),
+                     decision.goal.kick_inhibited,
+                     setpoint.kick_inhibited,
+                     setpoint.kick_velocity);
+        }
         if (!setpoint.kick_inhibited && setpoint.kick_velocity > 0U)
             kicker.request_kick(setpoint.kick_velocity, setpoint.command_sequence);
     }
