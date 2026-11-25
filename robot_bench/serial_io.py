@@ -7,9 +7,7 @@ import serial
 
 from . import protocol as proto
 
-# START_STREAM / keepalive interval: well under the 1.5 s firmware watchdog.
-# START_STREAM is re-sent until the first frame arrives: the board may reboot
-# as the port opens or may still be booting when the first one is sent.
+# Repeat the subscription well inside the 1.5 s firmware timeout.
 SEND_PERIOD_S = 0.9
 RECONNECT_DELAY_S = 0.5
 # Boot signatures that reveal the firmware rebooted mid-session.
@@ -73,7 +71,7 @@ class BenchReader(threading.Thread):
             candidates = []
         for device in candidates:
             try:
-                ser = serial.Serial(device, self.baud, timeout=0.05)
+                ser = serial.Serial(device, self.baud, timeout=0.05, write_timeout=0.5, exclusive=True)
             except (serial.SerialException, OSError, ValueError):
                 continue
             try:
@@ -88,45 +86,32 @@ class BenchReader(threading.Thread):
         return None
 
     def _read_loop(self, ser):
-        # Subscribe and keep the subscription alive. Until the first frame
-        # arrives we re-send START_STREAM (a board that reboots on port open
-        # loses the first one); afterwards a keepalive keeps the stream up.
+        # Send changes immediately and renew the subscription periodically.
         last_send = 0.0
+        last_mask = None
         bytes_seen = 0
         reboot_hint_shown = False
         contention_hint_shown = False
         hint_deadline = time.monotonic() + 6.0
         while not self.state.quit:
             now = time.monotonic()
-            if (
-                self.state.streaming
-                and self.state.last_state_t
-                and now - self.state.last_state_t > STREAM_STALL_S
-            ):
-                # No state frames for a while: the subscription is gone
-                # (board reset without boot text reaching us, or a frozen
-                # stream). Fall back to START_STREAM until they return.
+            last_link_t = self.state.last_link_t
+            if self.state.streaming and last_link_t and now - last_link_t > STREAM_STALL_S:
                 self.state.streaming = False
-            if now - max(self.state.last_state_t, self._session_start) > REOPEN_STALL_S:
+            if now - max(last_link_t, self._session_start) > REOPEN_STALL_S:
                 # Connected but this session never produced (or long stopped
                 # producing) state frames and resubscribing did not help:
                 # reopen the port. Its DTR/RTS edge hardware-resets the board
                 # for a clean session.
                 self.state.add_console("sem quadros - reabrindo a porta para recuperar o link")
                 return
-            if now - last_send >= SEND_PERIOD_S:
+            mask = self.state.stream_mask
+            if mask != last_mask or now - last_send >= SEND_PERIOD_S:
                 last_send = now
-                if self.state.streaming:
-                    self.send_frame(
-                        proto.MSG_CONTROL,
-                        proto.encode_control(proto.OP_KEEPALIVE, self.state.control_sequence),
-                    )
-                else:
-                    self.send_frame(
-                        proto.MSG_CONTROL, proto.encode_control(proto.OP_START_STREAM)
-                    )
+                last_mask = mask
+                self.send_frame(proto.MSG_SUBSCRIBE, proto.encode_subscription(mask))
             try:
-                chunk = ser.read(256)
+                chunk = ser.read(min(ser.in_waiting or 1, 1024))
             except (serial.SerialException, OSError):
                 self.state.add_console("conexão serial perdida, reconectando...")
                 return
@@ -138,10 +123,15 @@ class BenchReader(threading.Thread):
                 if not reboot_hint_shown:
                     reboot_hint_shown = True
                     self.state.add_console("firmware reiniciou no meio da sessão - reativando a transmissão")
-                # The rebooted firmware dropped its stream state: fall back to
-                # START_STREAM until frames arrive again.
                 self.state.clear_freshness()
-            for msg_type, message in self.decoder.feed(chunk):
+                # Drop the half frame of the dead session; the bootloader lines
+                # that follow are decoded as plain console text.
+                self.decoder.restart()
+                last_mask = None
+            frames = self.decoder.feed(chunk)
+            for line in self.decoder.drain_lines():
+                self.state.add_console(line)
+            for msg_type, message in frames:
                 data = proto.parse_frame(msg_type, message)
                 if data is None:
                     continue
@@ -161,8 +151,10 @@ class BenchReader(threading.Thread):
                 )
 
     def _dispatch(self, msg_type, data):
-        if msg_type == proto.MSG_STATE:
+        if msg_type == proto.MSG_LINK:
             self.state.streaming = True
+            self.state.update_link(data)
+        elif msg_type == proto.MSG_STATE:
             self.state.update_state(data)
         elif msg_type == proto.MSG_IMU:
             self.state.update_imu(data)
@@ -178,6 +170,8 @@ class BenchReader(threading.Thread):
             self.state.update_tuning(data)
         elif msg_type == proto.MSG_POSITION:
             self.state.update_position(data)
+        elif msg_type == proto.MSG_RAW:
+            self.state.update_raw(data)
 
     def _close(self):
         self._stop_stream()

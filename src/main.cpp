@@ -6,33 +6,39 @@
  *   2. Launch FreeRTOS tasks via each subsystem's start method.
  *   3. Enter the idle loop.
  *
- * This file contains NO global variables and NO free-standing runtime
- * functions. All runtime logic lives in the appropriate component under lib/.
+ * This file contains no global service state and no free-standing runtime
+ * functions: the module tag and compile-time configuration constants are the
+ * only file-scope declarations, and the service objects are local to
+ * app_main(). All runtime logic lives in the appropriate component under lib/.
  *
  * Boot sequence:
  *   1.: NVS (no dependencies)
  *   2.: Robot state (depends on NVS)
  *   3.: GPIO ISR service (must precede any GPIO interrupt registration)
- *   4.: IMU hardware driver init (IMUGY85)
- *   5.: Wheel encoders (ADC) + NVS ADC callbacks
- *   6.: Shared SPI bus, 74HC595 (motor direction, CD4052B select and radio
- *       CE), then the radio hardware
- *   7.: Motor driver + WheelController
- *   8.: Calibration (blocking; loads NVS or runs interactive routine)
- *   9.: Start orientation task (OrientationHandler @ 100 Hz)
- *   Idle: idle loop.
+ *   4.: Shared SPI bus and shift register, with the encoder mux disabled
+ *   5.: IMU hardware driver init (IMUGY85)
+ *   6.: IMU calibration load from NVS
+ *   7.: Kicker and ToF perception (optional, share the IMU I2C bus)
+ *   8.: Wheel encoders (ADC) and encoder calibration
+ *   9.: Radio hardware
+ *  10.: Motor driver + WheelController
+ *  11.: Kinematics, ProtocolHandler and Telemetry
+ *  12.: Start orientation and kicker tasks
+ *  13.: Serial debug dashboard (optional)
+ *  Idle: idle loop.
  */
 
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <esp_log.h>
-#include <esp_timer.h>
 #include <nvs_flash.h>
 #include <sdkconfig.h>
 
 #include "74HC595.h"
+#include "AS5600.h"
 #include "BL48250.h"
 #include "CD4052B.h"
+#include "I2Cdev.h"
 #include "NRF24L01.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
@@ -42,11 +48,10 @@
 #include "Telemetry.h"
 #include "ToFPerceptionService.h"
 #include "WheelController.h"
+#include "kicker_controller.h"
 #include "omni_robot.h"
 #include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
-#include "I2Cdev.h"
-#include "kicker_controller.h"
 
 // Unconditional so the PlatformIO library finder picks up lib/SerialDebug;
 // the service only starts (and only emits code) when CONFIG_SERIAL_DEBUG is set.
@@ -74,22 +79,41 @@ extern "C" void app_main(void)
 
     // 3: GPIO ISR service
     // Must be installed before NRF24L01 init and any GPIO interrupt handlers.
-    gpio_install_isr_service(0);
+    ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
-    // 4: IMU hardware driver init (IMUGY85). Mandatory hardware: on failure
-    // the system latches SAFE_STOP and keeps running (radio + telemetry up,
-    // actuation inhibited) instead of restarting forever.
+    // 4: Disable the encoder mux before checking the shared bus. The shift
+    // register can retain a selected encoder across an ESP32 reset.
+    SPIdev::init();
+
+    static HC595 shift_register;
+    HC595::Config output_config = {
+      .latch_gpio = static_cast<gpio_num_t>(CONFIG_SHIFT_REGISTER_LATCH_GPIO),
+      .device_key = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DEVICE_KEY),
+      .clock_hz = 1000000,
+    };
+    const uint8_t initial_shift_outputs =
+      static_cast<uint8_t>(1U << CONFIG_SHIFT_REGISTER_MUX_INH_BIT);
+    ESP_ERROR_CHECK(shift_register.init(output_config, initial_shift_outputs));
+
+    static CD4052B cd4052b;
+    CD4052B::Config mux_config = {
+      .select_a_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_A_BIT),
+      .select_b_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_B_BIT),
+      .inhibit_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_INH_BIT),
+    };
+    ESP_ERROR_CHECK(cd4052b.init(&shift_register, mux_config));
+
+    // 5: IMU hardware driver init (IMUGY85).
     const bool imu_ready = OrientationHandler::get_instance().init() == ESP_OK;
     if (imu_ready)
         ESP_LOGI(TAG, "IMU hardware initialized.");
     else
     {
-        ESP_LOGE(TAG, "IMU hardware unavailable. Entering SAFE_STOP.");
+        ESP_LOGW(TAG, "IMU hardware unavailable.");
         RobotState::get_instance().set_error(ERROR_IMU_FAIL);
-        // ProtocolHandler::get_instance().force_safe_stop();
     }
 
-    // 4: IMU calibration load from NVS (must precede ADC task init) NVS flash
+    // 6: IMU calibration load from NVS (must precede ADC task init). NVS flash
     // operations disable the cache; the ADC task would preempt the NVS writer
     // and crash on flash code.
     if (imu_ready && OrientationHandler::get_instance().load_calibration() != ESP_OK)
@@ -97,12 +121,16 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "Some IMU calibrations missing. Robot will operate in fallback mode.");
         ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate sensors.");
     }
-    const bool kicker_ready = KickerController::get_instance().init(I2Cdev::get_bus_handle()) == ESP_OK;
 
-        if (!kicker_ready) {
+    // 7: Kicker and ToF perception service (optional).
+    auto & kicker = KickerController::get_instance();
+    const bool kicker_ready = kicker.init(I2Cdev::get_bus_handle()) == ESP_OK;
+    if (!kicker_ready)
+    {
         ESP_LOGW(TAG, "Kicker unavailable. Continuing without kicker.");
         RobotState::get_instance().set_error(ERROR_KICKER_NO_CHARGE);
-        }
+    }
+
     // The VL53L5CX shares the IMU I2C bus. ToF is an optional perception
     // capability, so a missing sensor does not prevent safe wheel control.
     static ToFPerceptionService tof_service;
@@ -124,7 +152,7 @@ extern "C" void app_main(void)
         RobotState::get_instance().set_error(ERROR_TOF_FAIL);
     }
 
-    // 5: Wheel encoders. The estimator creates the shared ADC stream (encoder
+    // 8: Wheel encoders. The estimator creates the shared ADC stream (encoder
     // channels plus the VMON supply channel) and registers its sample handlers.
     const std::array<adc_channel_t, 4> enc_channels = {
       static_cast<adc_channel_t>(CONFIG_MOTOR_FL_ENC_CHANNEL),
@@ -135,34 +163,14 @@ extern "C" void app_main(void)
 
     WheelStateEstimator & wse = WheelStateEstimator::get_instance();
     ESP_ERROR_CHECK(wse.init(enc_channels, ADC_ATTEN_DB_12));
-
-    // 6: Radio and shared-bus peripherals. SPIdev::init() creates the shared
-    // SPI bus from the sdkconfig pins; the 74HC595 and the radio both register
-    // on it, and all bus traffic — radio, 74HC595 and CD4052B — goes through
-    // SPIdev's transaction mutex. The 74HC595 carries the four motor direction
-    // outputs, the CD4052B select lines and the radio CE line, so the shift
-    // register is initialized and attached to the radio before the radio
-    // hardware stage.
-    SPIdev::init();
-
-    static HC595 shift_register;
-    HC595::Config output_config = {
-      .latch_gpio = static_cast<gpio_num_t>(CONFIG_SHIFT_REGISTER_LATCH_GPIO),
-      .device_key = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_DEVICE_KEY),
-      .clock_hz = 1000000,
-    };
-    ESP_ERROR_CHECK(shift_register.init(output_config));
-
-    static CD4052B cd4052b;
-    CD4052B::Config mux_config = {
-      .select_a_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_A_BIT),
-      .select_b_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_B_BIT),
-      .inhibit_bit = static_cast<uint8_t>(CONFIG_SHIFT_REGISTER_MUX_INH_BIT),
-    };
-    ESP_ERROR_CHECK(cd4052b.init(&shift_register, mux_config));
     wse.set_cd4052b(&cd4052b);
 
-    // Radio CE is a 74HC595 output bit: the radio driver writes it through the
+    // The ADC range calibration assumes the AS5600 reduced analog output
+    // (0.1..0.9 VCC, the ESP32 ADC linear range): enforce it on every boot.
+    if (wse.configure_encoder_output_stage(AS5600::OutputStage::ANALOG_REDUCED) != ESP_OK)
+        ESP_LOGW(TAG, "Not all encoders are in the reduced output stage.");
+
+    // 9: Radio hardware. The radio driver writes the 74HC595 CE output through the
     // generic CE pin callback, so it stays independent of the shift register.
     static HC595::Pin radio_ce_pin{&shift_register,
                                    static_cast<uint8_t>(1U << CONFIG_SHIFT_REGISTER_RF_CE_BIT)};
@@ -175,7 +183,7 @@ extern "C" void app_main(void)
     radio.init_hw();
     const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;
 
-    // 7: Motor driver + WheelController
+    // 10: Motor driver + WheelController
     config::driver::MotorDriverConfig motor_config;
     motor_config.timer = MOTOR_LEDC_TIMER;
     motor_config.speed_mode = MOTOR_LEDC_SPEED_MODE;
@@ -211,45 +219,52 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(BL48250::get_instance().configure(motor_config));
     ESP_ERROR_CHECK(WheelController::get_instance().init());
 
+    // Load wheel encoder calibration before starting the radio receiver.
+    ESP_LOGI(TAG, "Checking wheel encoder calibration...");
+    if (wse.load_calibration() != ESP_OK)
+        ESP_LOGW(TAG, "Wheel encoder calibration missing. Calibrate encoders from Robot Bench.");
+
     // Kinematics model: wheel radius and robot centre-to-wheel distance from
     // the omni_robot config namespace.
     static OmnidirectionalRobot robot(config::kinematic::OMNI_WHEEL_RADIUS,
                                       config::kinematic::OMNI_WHEEL_DISTANCE);
 
-    // 8: ProtocolHandler + Telemetry
+    // 11: Kinematics, ProtocolHandler and Telemetry
+    auto & protocol = ProtocolHandler::get_instance();
+    protocol.init(radio_ready ? &radio : nullptr, &WheelController::get_instance(), &robot);
     if (radio_ready)
     {
-        ProtocolHandler::get_instance().init(&radio, &WheelController::get_instance(), &robot);
         Telemetry::get_instance().init(&radio);
 
-        radio.start(
-          [](void * pvParameters) {
-              auto * event = static_cast<DataReceivedEvent *>(pvParameters);
-              ProtocolHandler::get_instance().on_packet(event->payload, event->length);
-          },
-          nullptr);
-        ESP_LOGI(TAG, "Radio initialized on channel %d.", CONFIG_RADIO_CHANNEL);
+        if (radio.start(
+              [](void * pvParameters) {
+                  auto * event = static_cast<DataReceivedEvent *>(pvParameters);
+                  ProtocolHandler::get_instance().on_packet(event->payload, event->length);
+              },
+              nullptr))
+        {
+            ESP_LOGI(TAG, "Radio initialized on channel %d.", CONFIG_RADIO_CHANNEL);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Radio receiver task failed to start. Proceeding without radio link.");
+            RobotState::get_instance().set_error(ERROR_COMM_LOSS);
+        }
     }
     else
     {
-        ESP_LOGE(TAG, "Radio initialization failed! Proceeding without radio link.");
+        ESP_LOGW(TAG, "Radio initialization failed. Proceeding without radio link.");
         RobotState::get_instance().set_error(ERROR_COMM_LOSS);
     }
 
-    // 9: Calibration (blocking; loads NVS or runs interactive routine)
-    ESP_LOGI(TAG, "Checking wheel encoder calibration...");
-    if (wse.load_calibration() != ESP_OK)
-    {
-        ESP_LOGW(TAG, "Wheel encoder calibration missing. Robot will operate in fallback mode.");
-        ESP_LOGW(TAG, "Send CONFIG_FLAG_RUN_CALIBRATION to calibrate encoders.");
-    }
-
-    // 10: Start orientation task (100 Hz); skipped when the IMU is absent —
+    // 12: Start orientation task (100 Hz); skipped when the IMU is absent —
     // the task would only poll a dead driver.
     if (imu_ready)
         OrientationHandler::get_instance().start_task();
-    if(kicker_ready){
-        if( KickerController::get_instance().start() != ESP_OK) {
+    if (kicker_ready)
+    {
+        if (kicker.start() != ESP_OK)
+        {
             ESP_LOGW(TAG, "Kicker task failed to start.");
             RobotState::get_instance().set_error(ERROR_KICKER_NO_CHARGE);
         }
@@ -257,11 +272,11 @@ extern "C" void app_main(void)
         {
             ESP_LOGI(TAG, "Kicker controller started");
         }
-}
+    }
 #if CONFIG_SERIAL_DEBUG
-    // 11: Serial debug dashboard. Streams over UART0 only while a dashboard
+    // 13: Serial debug dashboard. Streams over UART0 only while a dashboard
     // client keeps the connection alive.
-    if (SerialDebug::get_instance().init(&tof_service) == ESP_OK)
+    if (SerialDebug::get_instance().init(&tof_service, &cd4052b) == ESP_OK)
         SerialDebug::get_instance().start_task();
     else
         ESP_LOGW(TAG, "Serial debug service unavailable.");
@@ -274,7 +289,6 @@ extern "C" void app_main(void)
     {
         vTaskDelay(pdMS_TO_TICKS(50));
 
-        if (radio_ready)
-            ProtocolHandler::get_instance().update(static_cast<uint64_t>(esp_timer_get_time()));
+        protocol.update();
     }
 }

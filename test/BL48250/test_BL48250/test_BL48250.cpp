@@ -185,6 +185,33 @@ void test_set_duties_zero()
     BL48250::get_instance().deinit();
 }
 
+void test_reversal_cuts_duty_and_waits_for_standstill()
+{
+    configure_driver();
+    auto & driver = BL48250::get_instance();
+    auto dirs = driver.get_directions();
+    const std::array<uint32_t, 4> duties = {1, 2, 0, 0};
+    driver.set_duties(duties, dirs);
+    DELAY_MS(20);
+
+    dirs[0] = config::driver::MOTOR_CCW;
+    driver.set_duties(duties, dirs, 1U);
+    DELAY_MS(20);
+    assert_motor_duty(0, 0, "reversal cuts duty before switching direction");
+    assert_motor_direction(0, config::driver::MOTOR_CW, "direction held while disabling duty");
+    assert_motor_duty(1, duties[1], "unaffected motor keeps driving");
+
+    driver.set_duties(duties, dirs, 0);
+    assert_motor_direction(0, config::driver::MOTOR_CW, "direction held without standstill");
+    assert_motor_duty(0, 0, "duty held at zero without standstill");
+
+    driver.set_duties(duties, dirs, 1U);
+    DELAY_MS(20);
+    assert_motor_direction(0, config::driver::MOTOR_CCW, "direction latched at standstill");
+    assert_motor_duty(0, duties[0], "reverse duty applied after direction latched");
+    driver.deinit();
+}
+
 void test_destructor_reset_outputs()
 {
     {
@@ -210,6 +237,7 @@ void setup()
     RUN_TEST(test_set_duties_ccw);
     RUN_TEST(test_set_duties_mixed);
     RUN_TEST(test_set_duties_zero);
+    RUN_TEST(test_reversal_cuts_duty_and_waits_for_standstill);
     RUN_TEST(test_destructor_reset_outputs);
     UNITY_END();
 }

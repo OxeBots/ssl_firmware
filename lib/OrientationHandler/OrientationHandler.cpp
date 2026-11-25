@@ -22,7 +22,11 @@ esp_err_t OrientationHandler::init()
 {
     // Create mutex
     m_mutex = xSemaphoreCreateMutex();
-    configASSERT(m_mutex != nullptr);
+    if (m_mutex == nullptr)
+    {
+        ESP_LOGE(TAG, "Failed to create the orientation mutex.");
+        return ESP_ERR_NO_MEM;
+    }
 
     // Initialize hardware driver
     esp_err_t err = m_driver.init();
@@ -180,7 +184,13 @@ void OrientationHandler::start_task()
 {
     configASSERT(m_task_handle == nullptr);
 
-    xTaskCreate(task_wrapper, "orient_task", TASK_STACK_BYTES, this, TASK_PRIORITY, &m_task_handle);
+    if (xTaskCreate(
+          task_wrapper, "orient_task", TASK_STACK_BYTES, this, TASK_PRIORITY, &m_task_handle) !=
+        pdPASS)
+    {
+        ESP_LOGE(TAG, "Orientation task creation failed.");
+        return;
+    }
 
     ESP_LOGI(TAG, "Orientation task started at %lu Hz.", (unsigned long)TASK_RATE_HZ);
 }

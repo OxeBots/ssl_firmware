@@ -120,8 +120,8 @@ void test_wheel_controller_set_target()
 
     vTaskDelay(pdMS_TO_TICKS(200));
 
-    // The duties should not be 0 because soft-start will increase the setpoint
-    // and PID will output something non-zero to track 10 rad/s
+    // The duties should not be 0 because the start-up kick and PID will
+    // output something non-zero to track 10 rad/s
     uint32_t d1 = ledc_get_duty(LEDC_LOW_SPEED_MODE, config::test::MOTOR_CHANNELS[0]);
     uint32_t d2 = ledc_get_duty(LEDC_LOW_SPEED_MODE, config::test::MOTOR_CHANNELS[1]);
 
@@ -130,9 +130,12 @@ void test_wheel_controller_set_target()
     TEST_ASSERT_NOT_EQUAL(0xFFFFFFFF, d1);
     TEST_ASSERT_NOT_EQUAL(0xFFFFFFFF, d2);
 
-    // reset targets
     wc.set_target_velocities({0, 0, 0, 0});
     vTaskDelay(pdMS_TO_TICKS(300));
+    const std::array<uint32_t, 4> stopped_duties = {};
+    const auto applied_duties = BL48250::get_instance().get_duty_cycles();
+    TEST_ASSERT_EQUAL_UINT32_ARRAY(
+      stopped_duties.data(), applied_duties.data(), stopped_duties.size());
 }
 
 extern "C" void app_main(void)

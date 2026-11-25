@@ -27,12 +27,11 @@ Disarmed : kick inhibited
 Active : execute bounded motion command
 Active : kick only through independent gate
 
-Degraded : keep only capabilities marked safe
-Degraded : report fault + fallback in telemetry
+Degraded : execute bounded motion command
+Degraded : report active warnings in telemetry
 
 SafeStop : PWM = 0 before direction update
 SafeStop : kick inhibited
-SafeStop : latch reason in HealthState.latched_faults
 
 Calibration : wheel encoders + IMU sensors
 Calibration : wheel PID tuning
@@ -42,30 +41,26 @@ Calibration : command execution disabled
 Boot -right-> SelfTest : <back:#FFFFFF>platform initialized</back>
 SelfTest -right-> Disarmed : <back:#FFFFFF>mandatory interfaces ready</back>
 Disarmed -right-> Active : <back:#FFFFFF>fresh permitted command</back>
-Active -right-> Degraded : <back:#FFFFFF>HealthState.severity = recoverable</back>
+Disarmed -right-> Degraded : <back:#FFFFFF>fresh command with health warnings</back>
+Active -right-> Degraded : <back:#FFFFFF>HealthState.severity = warning</back>
 
-Active -down-> SafeStop : <back:#FFFFFF>command timeout</back>\n<back:#FFFFFF>or HealthState.severity = critical</back>
-SafeStop -left-> Disarmed : <back:#FFFFFF>explicit clear + HealthState restored</back>
+Active -down-> SafeStop : <back:#FFFFFF>command timeout or critical fault</back>
+Degraded -down-> SafeStop : <back:#FFFFFF>command timeout or critical fault</back>
+SafeStop -up-> Active : <back:#FFFFFF>fresh command, no latched fault</back>
+SafeStop -right-> Degraded : <back:#FFFFFF>fresh command, warnings only, no latched fault</back>
 Disarmed -down-> Calibration : <back:#FFFFFF>calibration request</back>
 
 note top of Active
   LifecycleSupervisor PRIORITY_P0
 
   LifecycleSupervisor command-authority order:
-  1. electrical + actuator safety
+  1. calibration mode
   2. command freshness
-  3. calibration-mode
-  4. base-station motion + kick intent
-end note
-
-note right of SelfTest
-  Mandatory initialization failure enters SAFE_STOP.
+  3. base-station motion + kick intent
 end note
 
 note right of Degraded
-  Recovery returns to ACTIVE.
-  Explicit disable returns to DISARMED.
-  A critical fault enters SAFE_STOP.
+  A fresh command returns to ACTIVE when warnings clear.
 
   Examples:
   - ToF unavailable: motion allowed, kick inhibited
@@ -76,18 +71,9 @@ end note
 
 note bottom of Calibration
   Completion or cancellation returns to DISARMED.
-  Any unsafe condition enters SAFE_STOP.
 
   Calibration routines include the accelerometer,
   gyroscope, magnetometer and wheel encoders.
-end note
-
-note right of SafeStop
-  This transition is available from every mode for:
-  - command timeout
-  - unsafe supply voltage
-  - motor stall or implausible wheel motion
-  - loss of all feedback for any driven wheel
 end note
 
 legend bottom

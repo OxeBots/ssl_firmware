@@ -2,21 +2,20 @@
 #define _WHEEL_STATE_ESTIMATOR_H_
 
 #include <esp_adc/adc_continuous.h>
+#include <esp_attr.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
 #include <array>
-#include <memory>
 
 #include "AS5600.h"
 #include "CD4052B.h"
-#include "wheel_ekf.h"
+#include "encoder_channel.h"
 
 static constexpr adc_unit_t ADC_UNIT = ADC_UNIT_1;
 static constexpr uint8_t NUM_ENC_CHANNELS = 4;
-static constexpr adc_bitwidth_t ADC_BITWIDTH = ADC_BITWIDTH_12;
 static constexpr int MIN_VALID_SWING_MV = 2000;
 
 struct AS5600Settings
@@ -77,9 +76,8 @@ class WheelStateEstimator
     // ENC1) and mux_map[wheel] the CD4052B channel that reaches the same
     // encoder over I2C.
     std::array<uint8_t, NUM_ENC_CHANNELS> get_analog_mapping() const;
-    std::array<uint8_t, NUM_ENC_CHANNELS> get_mux_mapping() const;
-    // True once a calibration run has stored the wiring map in NVS.
-    bool has_calibrated_mapping() const;
+    // Reports whether the returned mux map was calibrated and stored in NVS.
+    std::array<uint8_t, NUM_ENC_CHANNELS> get_mux_mapping(bool * calibrated = nullptr) const;
     // Apply a permutation pair, rebuild the encoder routing and persist both
     // maps in NVS. The caller must have verified both maps are permutations.
     esp_err_t apply_mapping(const std::array<uint8_t, NUM_ENC_CHANNELS> & analog_map,
@@ -88,11 +86,28 @@ class WheelStateEstimator
     // -- Wiring calibration support -------------------------------------
     // Latest raw ADC block mean of every analog input slot (init order).
     std::array<uint16_t, NUM_ENC_CHANNELS> get_raw_values() const;
-    // Raw I2C angle (0..4095) of every CD4052B channel. Selects each channel,
-    // reads it, and disables the mux again.
-    esp_err_t read_i2c_raw_angles(std::array<uint16_t, NUM_ENC_CHANNELS> * angles);
-    // Tracked analog range (mV) of every analog input slot.
-    std::array<int, NUM_ENC_CHANNELS> get_range_mv() const;
+    // Reads each mux input and optionally its magnetic field status.
+    esp_err_t read_i2c_raw_angles(
+      std::array<uint16_t, NUM_ENC_CHANNELS> * angles,
+      std::array<EncoderChannel::MagnetField, NUM_ENC_CHANNELS> * magnet_fields = nullptr);
+    // Raw I2C angle (0..4095) of one wheel's encoder: selects the wheel's mux
+    // channel from the wiring map, reads its AS5600 and disables the mux again.
+    esp_err_t read_wheel_i2c_raw_angle(uint8_t wheel, uint16_t * angle);
+    // Anchors the applied raw ADC range of the encoder mapped to one wheel
+    // (calibration ADC-I2C alignment). Fails when the range is implausible.
+    esp_err_t set_wheel_raw_range(uint8_t wheel, uint16_t min_raw, uint16_t max_raw);
+
+    // -- Encoder output stage -------------------------------------------
+    // Applies the AS5600 analog output stage to every wheel: selects its
+    // CD4052B channel, reads the configuration, and writes and verifies the
+    // new stage when it differs. The slow/fast filters are left untouched and
+    // no OTP is burned. Consumers that display the stage read it from the
+    // AS5600 (read_output_stage) instead of caching it here.
+    esp_err_t configure_encoder_output_stage(AS5600::OutputStage stage);
+    // Stored raw ADC endpoints of the encoder mapped to every wheel (0 when the
+    // stored range is absent or invalid).
+    std::array<uint16_t, NUM_ENC_CHANNELS> get_range_raw_min() const;
+    std::array<uint16_t, NUM_ENC_CHANNELS> get_range_raw_max() const;
 
     // Data accessors
     std::array<float, NUM_ENC_CHANNELS> get_filtered_angle_rad();
@@ -104,25 +119,29 @@ class WheelStateEstimator
     std::array<float, NUM_ENC_CHANNELS> get_smoothed_velocity_rad_s();
     std::array<float, NUM_ENC_CHANNELS> get_measured_angle_rad();
 
-   private:
-    struct EncoderChannel
+    // Latest published values and the producer timestamp of each wheel.
+    struct ControlSnapshot
     {
-        std::unique_ptr<AS5600> encoder;
-        WheelKalmanFilter filter;
-        // Latest encoder-shaft angle before filtering (rad, one motor turn).
-        float measured_angle_rad = 0.0f;
-        // Latest raw ADC block mean of the analog input feeding this wheel.
-        uint16_t raw = 0;
-        // Low-pass output of the filter velocity used by the wheel controller.
-        float smoothed_velocity_rad_s = 0.0f;
-        bool smoothed_velocity_started = false;
+        std::array<float, NUM_ENC_CHANNELS> smoothed_velocity_rad_s = {};
+        std::array<float, NUM_ENC_CHANNELS> measured_angle_rad = {};
+        std::array<float, NUM_ENC_CHANNELS> fast_velocity_rad_s = {};
+        uint8_t smoothed_valid_mask = 0;
+        uint8_t fast_valid_mask = 0;
+        uint8_t stuck_analog_mask = 0;
+        uint8_t clamped_raw_mask = 0;
+        std::array<int64_t, NUM_ENC_CHANNELS> sample_us = {};
     };
+    bool get_control_snapshot(ControlSnapshot * snapshot) const;
 
+   private:
     WheelStateEstimator();
 
-    // ADC sample consumption, called from the AdcStream task
-    void on_sample(adc_channel_t channel, uint16_t raw);
-    static void s_on_sample(void * pvParameters);
+    // Called from the acquisition task.
+    void IRAM_ATTR on_sample(adc_channel_t channel, uint16_t raw);
+    static void IRAM_ATTR s_on_sample(void * pvParameters);
+    void IRAM_ATTR publish_control_sample(size_t wheel,
+                                          const EncoderChannel & state,
+                                          int64_t now_us);
 
     // Loads the persisted wiring map; identity when NVS has none.
     void load_mapping();
@@ -148,7 +167,10 @@ class WheelStateEstimator
     std::array<uint8_t, NUM_ENC_CHANNELS> m_analog_map = {0, 1, 2, 3};
     std::array<uint8_t, NUM_ENC_CHANNELS> m_mux_map = {0, 1, 2, 3};
     std::array<uint8_t, NUM_ENC_CHANNELS> m_slot_wheel = {0, 1, 2, 3};
+
     SemaphoreHandle_t m_data_mutex;
+    mutable portMUX_TYPE m_control_mux = portMUX_INITIALIZER_UNLOCKED;
+    ControlSnapshot m_published_control = {};
     CD4052B * m_cd4052b = nullptr;
 };
 

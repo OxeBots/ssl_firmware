@@ -13,13 +13,10 @@ TAB_HEALTH = 2
 TAB_TOF = 3
 TAB_IMU = 4
 TAB_CONSOLE = 5
-TAB_TUNING = 6
-TAB_TITLES = ("Motores", "Calibração", "Saúde", "ToF", "IMU", "Console", "Controle")
+TAB_TITLES = ("Motores", "Calibração", "Saúde", "ToF", "IMU", "Console")
 
 # Speed strip chart time span
 CHART_WINDOW_S = 12.0
-# Wheel target square sweep amplitude (dashboard-driven)
-SWEEP_RPM = 1000.0
 
 TOF_SIDE = 8
 TOF_MAX_MM = 4000.0
@@ -30,6 +27,8 @@ CALIBRATION_STALE_S = 1.5
 # Control-calibration frames arrive at ~5 Hz, position frames at ~10 Hz.
 TUNING_STALE_S = 1.5
 POSITION_STALE_S = 1.0
+# Raw encoder/motor snapshots arrive at ~10 Hz.
+RAW_STALE_S = 0.5
 # Default speed cap of a wheel position move (wheel-shaft RPM).
 POSITION_MAX_RPM = 300.0
 # Acceptable wheel position inputs (degrees; relative moves accumulate).
@@ -62,6 +61,7 @@ ACCENT = (91, 198, 232)
 INSET = (17, 25, 36)
 TARGET_COLOR = (185, 185, 195)
 VELOCITY_COLOR = (90, 200, 255)
+PULSE_COLOR = (196, 140, 255)
 PWM_COLOR = (255, 176, 64)
 OK_COLOR = (110, 220, 130)
 BAD_COLOR = (235, 90, 80)

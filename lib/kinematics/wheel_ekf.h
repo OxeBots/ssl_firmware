@@ -1,6 +1,8 @@
 #ifndef _WHEEL_EKF_H_
 #define _WHEEL_EKF_H_
 
+#include <esp_attr.h>
+
 #include <cmath>
 #include <cstdint>
 
@@ -12,12 +14,13 @@ class WheelKalmanFilter
    public:
     explicit WheelKalmanFilter(double angle_period = 2.0 * M_PI);
 
-    // Fuses one encoder angle (rad).
-    void update(double measured_angle);
+    // Fuses one encoder angle (rad). IRAM hot path: the acquisition task calls
+    // this for every published sample.
+    void IRAM_ATTR update(double measured_angle);
 
     // Fuses one encoder angle plus one direct velocity measurement (rad/s) in
     // a single predict/update cycle.
-    void update(double measured_angle, double measured_velocity);
+    void IRAM_ATTR update(double measured_angle, double measured_velocity);
 
     // Drops the current estimate; the next update re-initializes the filter.
     void reset();
@@ -37,13 +40,14 @@ class WheelKalmanFilter
     };
 
     // One predict/update cycle: advances the state to the current time and
-    // reports whether the filter had a previous estimate to correct.
-    bool prepare_step();
-    void predict(double dt);
-    void scalar_update(int row, double innovation, double variance);
+    // reports whether the filter had a previous estimate to correct. All the
+    // helpers below are in IRAM as part of the acquisition hot path.
+    bool IRAM_ATTR prepare_step();
+    void IRAM_ATTR predict(double dt);
+    void IRAM_ATTR scalar_update(int row, double innovation, double variance);
 
     // Maps an angle difference into [-angle_period/2, angle_period/2).
-    double wrap_angle(double angle) const;
+    double IRAM_ATTR wrap_angle(double angle) const;
 
     KalmanState m_state;
     double m_angle_period;

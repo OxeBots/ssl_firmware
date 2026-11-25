@@ -1,5 +1,7 @@
 #include "SafetySupervisor.h"
 
+#include <sdkconfig.h>
+
 static constexpr float PI = 3.14159265359f;
 
 SafetySupervisor::SafetySupervisor(const SafetySupervisorConfig & config) : m_config(config)
@@ -20,16 +22,17 @@ void SafetySupervisor::set_calibration_active(bool active)
     m_calibration_active = active;
 }
 
-void SafetySupervisor::enter_safe_stop()
+/**
+ * @brief Check whether active or latched faults inhibit actuation.
+ */
+bool SafetySupervisor::health_inhibits_motion(const HealthState & health)
 {
-    m_forced_safe_stop = true;
-    m_state = LifecycleState::SAFE_STOP;
-}
-
-void SafetySupervisor::clear_safe_stop()
-{
-    if (m_state == LifecycleState::SAFE_STOP && m_self_test_complete)
-        m_state = LifecycleState::DISARMED;
+#if CONFIG_DISABLE_SAFE_STOP
+    (void)health;
+    return false;
+#else
+    return health.severity == HealthSeverity::CRITICAL || health.latched_faults != 0U;
+#endif
 }
 
 /**
@@ -42,13 +45,6 @@ SafetyDecision SafetySupervisor::update(uint64_t now_us,
 {
     SafetyDecision decision = {};
     decision.goal = make_safe_goal();
-
-    if (m_forced_safe_stop)
-    {
-        m_state = LifecycleState::SAFE_STOP;
-        decision.lifecycle = m_state;
-        return decision;
-    }
 
     if (!m_self_test_complete)
     {
@@ -64,20 +60,15 @@ SafetyDecision SafetySupervisor::update(uint64_t now_us,
         return decision;
     }
 
-    if (health.severity == HealthSeverity::CRITICAL || health.motion_inhibited)
-        m_state = LifecycleState::SAFE_STOP;
-
     decision.command_fresh = is_command_fresh(now_us, command);
-
-    if (m_state == LifecycleState::SAFE_STOP)
-    {
-        decision.lifecycle = m_state;
-        return decision;
-    }
-
-    if (!decision.command_fresh)
+    const bool health_stop = health_inhibits_motion(health);
+    if (health_stop || !decision.command_fresh)
     {
         m_state = LifecycleState::DISARMED;
+#if !CONFIG_DISABLE_SAFE_STOP
+        if (health_stop || command != nullptr)
+            m_state = LifecycleState::SAFE_STOP;
+#endif
         decision.lifecycle = m_state;
         return decision;
     }
@@ -90,7 +81,7 @@ SafetyDecision SafetySupervisor::update(uint64_t now_us,
         decision.goal.motion_inhibited = true;
     }
 
-    m_state = health.severity == HealthSeverity::RECOVERABLE || decision.goal.motion_inhibited
+    m_state = health.severity != HealthSeverity::HEALTHY || decision.goal.motion_inhibited
                 ? LifecycleState::DEGRADED
                 : LifecycleState::ACTIVE;
     decision.lifecycle = m_state;

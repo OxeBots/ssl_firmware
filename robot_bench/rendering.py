@@ -169,6 +169,9 @@ def apply_theme():
             ):
                 dpg.add_theme_color(target, rgba(color), category=dpg.mvThemeCat_Plots)
             dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1.5, category=dpg.mvThemeCat_Plots)
+            # The charts carry no titles or legends; a small padding leaves the
+            # pixels to the traces instead of to the empty border.
+            dpg.add_theme_style(dpg.mvPlotStyleVar_PlotPadding, 2.0, 2.0, category=dpg.mvThemeCat_Plots)
     _PLOT_THEME = plot_theme
 
 
@@ -191,8 +194,16 @@ def resize_item(tag, width=None, height=None):
     dpg.configure_item(tag, **settings)
 
 
+def item_height(tag):
+    """Rendered height of an item, or 0 while Dear PyGui has not laid it out yet."""
+    if not dpg.does_item_exist(tag):
+        return 0
+    size = dpg.get_item_state(tag).get("rect_size")
+    return size[1] if size else 0
+
+
 def add_plot(tag, height, width=0):
-    """Create an empty history plot with hidden axes and a fixed time window."""
+    """Create an empty history plot with a hidden time axis and a fixed window."""
     with dpg.plot(
         tag=tag,
         height=height,
@@ -207,7 +218,9 @@ def add_plot(tag, height, width=0):
         dpg.add_plot_axis(
             dpg.mvXAxis, no_tick_labels=True, no_tick_marks=True, no_gridlines=True, tag=tag + "_x"
         )
-        with dpg.plot_axis(dpg.mvYAxis, no_tick_labels=True, no_tick_marks=True, tag=tag + "_y"):
+        # The vertical axis is the scale the traces are read against, so it keeps
+        # its tick labels; the time axis stays implicit.
+        with dpg.plot_axis(dpg.mvYAxis, tag=tag + "_y"):
             pass
     if _PLOT_THEME is not None:
         dpg.bind_item_theme(tag, _PLOT_THEME)
@@ -264,9 +277,32 @@ def history_peak(samples, value_index, now, window_s, minimum):
     """Automatic vertical scale with a headroom margin and a lower bound."""
     peak = minimum
     for sample in samples:
-        if now - window_s <= sample[0] <= now:
-            peak = max(peak, abs(sample[value_index]) * 1.15)
+        value = sample[value_index]
+        if now - window_s <= sample[0] <= now and math.isfinite(value):
+            peak = max(peak, abs(value) * 1.15)
     return peak
+
+
+def series_bounds(series, minimum_span):
+    """Vertical limits fitted to the plotted values with a margin.
+
+    Missing values are ignored. A flat or empty trace keeps a range of at
+    least minimum_span, so the axis never collapses.
+    """
+    low = high = None
+    for ys in series:
+        for value in ys:
+            if not math.isfinite(value):
+                continue
+            low = value if low is None else min(low, value)
+            high = value if high is None else max(high, value)
+    if low is None:
+        return 0.0, minimum_span
+    if high - low < minimum_span:
+        middle = (low + high) / 2.0
+        low, high = middle - minimum_span / 2.0, middle + minimum_span / 2.0
+    margin = (high - low) * 0.08
+    return low - margin, high + margin
 
 
 def distance_color(distance_mm):

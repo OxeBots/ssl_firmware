@@ -26,7 +26,8 @@ void test_codec_preserves_full_raw_tof_frame(void)
     TEST_ASSERT_TRUE(decoder.has_frame());
     TEST_ASSERT_EQUAL_UINT8(DBG_MSG_TOF, decoder.message_type());
     TEST_ASSERT_EQUAL_size_t(BYTES_LENGTH_DEBUG_TOF, decoder.message_length());
-    DebugTof decoded = {};
+    DebugTof decoded;
+    memset(&decoded, 0, sizeof(decoded));
     DecodeDebugTof(&decoded, const_cast<uint8_t *>(decoder.message()));
     TEST_ASSERT_EQUAL_UINT32(original.sequence, decoded.sequence);
     TEST_ASSERT_EQUAL_INT16_ARRAY(original.distance_mm, decoded.distance_mm, 64);

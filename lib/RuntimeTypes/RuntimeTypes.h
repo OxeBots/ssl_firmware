@@ -66,7 +66,7 @@ struct BaseStationPose
 enum class HealthSeverity : uint8_t
 {
     HEALTHY = 0,
-    RECOVERABLE = 1,
+    WARNING = 1,
     CRITICAL = 2,
 };
 
@@ -75,8 +75,6 @@ struct HealthState
     HealthSeverity severity = HealthSeverity::HEALTHY;
     uint16_t active_faults = 0;
     uint16_t latched_faults = 0;
-    uint16_t inhibit_reasons = 0;
-    bool motion_inhibited = false;
     bool kick_inhibited = true;
     uint64_t timestamp_us = 0;
 };

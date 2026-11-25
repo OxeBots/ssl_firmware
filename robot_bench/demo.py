@@ -18,6 +18,8 @@ DEMO_CALIBRATION_ANALOG_MAP = (2, 0, 3, 1)
 DEMO_CALIBRATION_MUX_MAP = (1, 3, 0, 2)
 # Level magnitudes in the visible band (ADC counts / encoder angle counts).
 DEMO_CALIBRATION_LEVEL = (600, 1500)
+# Stored raw ADC endpoints (0 and 360 degree) of the simulated encoders.
+DEMO_ADC_RANGE = ((410, 3680), (420, 3690), (405, 3660), (415, 3675))
 
 
 def calibration_frame(sequence, **fields):
@@ -35,7 +37,16 @@ def calibration_frame(sequence, **fields):
         "i2c_level": [0, 0, 0, 0],
         "range_mask": 0,
         "error_code": proto.CALIBRATION_ERROR_NONE,
+        "analog_ready": 0,
+        "wheel_error": [0, 0, 0, 0],
         "sequence": sequence,
+        # The firmware enforces REDUCED at boot: the demo shows the good state.
+        "encoder_stage": [proto.ENCODER_STAGE_REDUCED] * proto.WHEEL_COUNT,
+        "stage_mask": 0xF,
+        "adc_min_raw": [0] * proto.WHEEL_COUNT,
+        "adc_max_raw": [0] * proto.WHEEL_COUNT,
+        "magnet_warning": [proto.CALIBRATION_ERROR_NONE] * proto.WHEEL_COUNT,
+        "detected_mux_map": list(range(proto.WHEEL_COUNT)),
     }
     frame.update(fields)
     return frame
@@ -51,6 +62,8 @@ def idle_calibration_frame(sequence, calibrated=False):
         analog_map=list(DEMO_CALIBRATION_ANALOG_MAP),
         mux_map=list(DEMO_CALIBRATION_MUX_MAP),
         range_mask=0xF,
+        adc_min_raw=[minimum for minimum, _maximum in DEMO_ADC_RANGE],
+        adc_max_raw=[maximum for _minimum, maximum in DEMO_ADC_RANGE],
     )
 
 
@@ -62,10 +75,14 @@ def done_calibration_frame(sequence):
         progress=100,
         result_mask=0xF,
         i2c_ready=0xF,
+        analog_ready=0xF,
         mapping_valid=1,
         analog_map=list(DEMO_CALIBRATION_ANALOG_MAP),
         mux_map=list(DEMO_CALIBRATION_MUX_MAP),
+        detected_mux_map=list(DEMO_CALIBRATION_MUX_MAP),
         range_mask=0xF,
+        adc_min_raw=[minimum for minimum, _maximum in DEMO_ADC_RANGE],
+        adc_max_raw=[maximum for _minimum, maximum in DEMO_ADC_RANGE],
     )
 
 
@@ -92,8 +109,10 @@ def running_calibration_frame(elapsed, sequence):
         progress=int(elapsed / DEMO_CALIBRATION_TOTAL_S * 100),
         result_mask=completed,
         i2c_ready=completed,
+        analog_ready=completed,
         analog_map=analog_map,
         mux_map=mux_map,
+        detected_mux_map=mux_map.copy(),
         analog_level=analog_level,
         i2c_level=i2c_level,
     )
@@ -105,29 +124,51 @@ def demo_level(sequence):
     return minimum + sequence * 97 % (maximum - minimum)
 
 
-# Simulated control calibration: one wheel per 2.6 s, 10.4 s for the whole run.
-DEMO_TUNING_WHEEL_S = 2.6
+# Simulated control calibration: both rotation directions per wheel, one wheel
+# per 5 s, 20 s for the whole run (the firmware run is longer still).
+DEMO_TUNING_WHEEL_S = 5.0
 DEMO_TUNING_TOTAL_S = 4 * DEMO_TUNING_WHEEL_S
 DEMO_TUNING_DONE_S = 4.0
 DEMO_TUNING_RPM = 287.0
-# Parameters the simulated run converges to, one entry per wheel.
+# Parameters the simulated run converges to, one entry per wheel. The forward
+# (positive target) and reverse values are intentionally asymmetric.
 DEMO_TUNED = (
-    {"kp": 58.0, "ki": 6.0, "kd": 0.0, "ff": 176.0, "velocity_ff": 54.0, "rise": 280, "overshoot": 2, "ss": 1},
-    {"kp": 64.0, "ki": 6.5, "kd": 0.0, "ff": 182.0, "velocity_ff": 56.0, "rise": 240, "overshoot": 3, "ss": 1},
-    {"kp": 61.0, "ki": 6.2, "kd": 0.0, "ff": 179.0, "velocity_ff": 55.0, "rise": 260, "overshoot": 2, "ss": 2},
-    {"kp": 67.0, "ki": 6.8, "kd": 0.0, "ff": 184.0, "velocity_ff": 57.0, "rise": 230, "overshoot": 4, "ss": 1},
+    {
+        "kp": 58.0, "ki": 6.0, "kd": 0.0,
+        "ff": 176.0, "velocity_ff": 54.0, "rise": 280, "overshoot": 2, "ss": 1,
+        "ff_rev": -198.0, "velocity_ff_rev": 57.0, "rise_rev": 310, "overshoot_rev": 3, "ss_rev": 2,
+    },
+    {
+        "kp": 64.0, "ki": 6.5, "kd": 0.0,
+        "ff": 182.0, "velocity_ff": 56.0, "rise": 240, "overshoot": 3, "ss": 1,
+        "ff_rev": -205.0, "velocity_ff_rev": 59.0, "rise_rev": 270, "overshoot_rev": 4, "ss_rev": 2,
+    },
+    {
+        "kp": 61.0, "ki": 6.2, "kd": 0.0,
+        "ff": 179.0, "velocity_ff": 55.0, "rise": 260, "overshoot": 2, "ss": 2,
+        "ff_rev": -194.0, "velocity_ff_rev": 58.0, "rise_rev": 300, "overshoot_rev": 3, "ss_rev": 3,
+    },
+    {
+        "kp": 67.0, "ki": 6.8, "kd": 0.0,
+        "ff": 184.0, "velocity_ff": 57.0, "rise": 230, "overshoot": 4, "ss": 1,
+        "ff_rev": -212.0, "velocity_ff_rev": 61.0, "rise_rev": 260, "overshoot_rev": 5, "ss_rev": 2,
+    },
 )
 DEMO_TUNING_PHASES = (
     proto.TUNING_PHASE_FRICTION,
     proto.TUNING_PHASE_IDENTIFY,
+    proto.TUNING_PHASE_MAX_SPEED,
     proto.TUNING_PHASE_VALIDATE,
     proto.TUNING_PHASE_REFINE,
     proto.TUNING_PHASE_STORE,
 )
+# Measured wheel maxima and the common limit set by the slowest wheel.
+DEMO_WHEEL_MAX_RPM = (175.0, 170.0, 165.0, 138.0)
+DEMO_MAX_RPM = min(DEMO_WHEEL_MAX_RPM)
 
 
 def tuning_parameters(index):
-    """One wheel's demo tuning parameters as the GUI stores them."""
+    """One wheel's demo tuning parameters, both directions, as the GUI stores them."""
     tuned = DEMO_TUNED[index]
     return {
         "kp": tuned["kp"],
@@ -138,6 +179,11 @@ def tuning_parameters(index):
         "rise_ms": tuned["rise"],
         "overshoot_pct": tuned["overshoot"],
         "ss_error_pct": tuned["ss"],
+        "feedforward_rev": tuned["ff_rev"],
+        "velocity_ff_rev": tuned["velocity_ff_rev"],
+        "rise_ms_rev": tuned["rise_rev"],
+        "overshoot_pct_rev": tuned["overshoot_rev"],
+        "ss_error_pct_rev": tuned["ss_rev"],
     }
 
 
@@ -152,12 +198,25 @@ def tuning_arrays(**overrides):
         "rise_ms": [0] * proto.WHEEL_COUNT,
         "overshoot_pct": [0] * proto.WHEEL_COUNT,
         "ss_error_pct": [0] * proto.WHEEL_COUNT,
+        "feedforward_rev": [0.0] * proto.WHEEL_COUNT,
+        "velocity_ff_rev": [0.0] * proto.WHEEL_COUNT,
+        "rise_ms_rev": [0] * proto.WHEEL_COUNT,
+        "overshoot_pct_rev": [0] * proto.WHEEL_COUNT,
+        "ss_error_pct_rev": [0] * proto.WHEEL_COUNT,
     }
     for wheel in range(proto.WHEEL_COUNT):
         for key, value in tuning_parameters(wheel).items():
             arrays[key][wheel] = value
     arrays.update(overrides)
     return arrays
+
+
+def raw_i2c_values(angles, focused):
+    """Synthetic DebugRaw I2C column: only the focused wheel's encoder is read."""
+    return [
+        int(angles[i] / 360.0 * 4096) % 4096 if i == focused else 0xFFFF
+        for i in range(proto.WHEEL_COUNT)
+    ]
 
 
 def tuning_frame(sequence, **fields):
@@ -169,6 +228,8 @@ def tuning_frame(sequence, **fields):
         "progress": 0,
         "result_mask": 0,
         "error_code": proto.TUNING_ERROR_NONE,
+        "max_rpm": 0.0,
+        "wheel_max_rpm": [0.0] * proto.WHEEL_COUNT,
         **tuning_arrays(
             kp=[0.0] * proto.WHEEL_COUNT,
             ki=[0.0] * proto.WHEEL_COUNT,
@@ -178,6 +239,11 @@ def tuning_frame(sequence, **fields):
             rise_ms=[0] * proto.WHEEL_COUNT,
             overshoot_pct=[0] * proto.WHEEL_COUNT,
             ss_error_pct=[0] * proto.WHEEL_COUNT,
+            feedforward_rev=[0.0] * proto.WHEEL_COUNT,
+            velocity_ff_rev=[0.0] * proto.WHEEL_COUNT,
+            rise_ms_rev=[0] * proto.WHEEL_COUNT,
+            overshoot_pct_rev=[0] * proto.WHEEL_COUNT,
+            ss_error_pct_rev=[0] * proto.WHEEL_COUNT,
         ),
         "sequence": sequence,
     }
@@ -192,17 +258,21 @@ def idle_tuning_frame(sequence, tuned=False):
     return tuning_frame(
         sequence,
         result_mask=0xF,
+        max_rpm=DEMO_MAX_RPM,
+        wheel_max_rpm=list(DEMO_WHEEL_MAX_RPM),
         **tuning_arrays(),
     )
 
 
 def done_tuning_frame(sequence):
-    """DONE frame carrying the simulated per-wheel parameters."""
+    """DONE frame carrying the simulated per-wheel parameters and speed limit."""
     return tuning_frame(
         sequence,
         state=proto.TUNING_DONE,
         progress=100,
         result_mask=0xF,
+        max_rpm=DEMO_MAX_RPM,
+        wheel_max_rpm=list(DEMO_WHEEL_MAX_RPM),
         **tuning_arrays(),
     )
 
@@ -221,9 +291,16 @@ def running_tuning_frame(elapsed, sequence):
         for key, value in tuning_parameters(done_wheel).items():
             arrays[key][done_wheel] = value
     current = tuning_parameters(wheel)
-    # The wheel under calibration shows the candidate values it is validating.
-    for key in ("kp", "ki", "kd", "feedforward", "velocity_ff"):
+    # The wheel under calibration shows the candidate values it is validating,
+    # for both rotation directions.
+    for key in ("kp", "ki", "kd", "feedforward", "velocity_ff", "feedforward_rev", "velocity_ff_rev"):
         arrays[key][wheel] = current[key]
+    # Wheel maxima appear as each wheel leaves the max-speed phase; the common
+    # limit is only reported once the whole routine finishes.
+    maxima = [DEMO_WHEEL_MAX_RPM[i] if i < measured else 0.0 for i in range(proto.WHEEL_COUNT)]
+    if DEMO_TUNING_PHASES.index(phase) >= DEMO_TUNING_PHASES.index(proto.TUNING_PHASE_MAX_SPEED):
+        maxima[wheel] = DEMO_WHEEL_MAX_RPM[wheel]
+    arrays["wheel_max_rpm"] = maxima
     return tuning_frame(
         sequence,
         state=proto.TUNING_RUNNING,
@@ -238,6 +315,13 @@ def running_tuning_frame(elapsed, sequence):
 # Simulated position-control loop: proportional approach with a small lag.
 DEMO_POSITION_GAIN = 4.0
 DEMO_POSITION_VELOCITY_LAG_S = 0.08
+
+# Simulated digital FG feedback: 10 counts per motor-shaft revolution, 3:1
+# reduction (30 per wheel revolution), 100 ms window -> the displayed speed is
+# quantized; the pulse count keeps advancing while the wheel turns.
+DEMO_PULSE_COUNTS_PER_WHEEL_REV = 30.0
+DEMO_PULSE_QUANTUM_RPM = 5.0
+DEMO_PULSE_LAG_S = 0.12
 
 
 def position_frame(sequence, **fields):
@@ -277,6 +361,10 @@ class DemoSource(threading.Thread):
         self.vel = [0.0] * proto.WHEEL_COUNT
         self.angle = [0.0] * proto.WHEEL_COUNT
         self.angle_cont = [0.0] * proto.WHEEL_COUNT
+        self.pulse_rpm = [0.0] * proto.WHEEL_COUNT
+        self.pulse_count = [0.0] * proto.WHEEL_COUNT
+        self.raw_seq = 0
+        self.raw_pulse_seen = [0] * proto.WHEEL_COUNT
 
     def run(self):
         rng = random.Random(7)
@@ -287,6 +375,7 @@ class DemoSource(threading.Thread):
         next_calibration = 0.0
         next_tuning = 0.0
         next_position = 0.0
+        next_raw = 0.0
         start = time.monotonic()
         last_t = start
         while not self.state.quit:
@@ -327,6 +416,12 @@ class DemoSource(threading.Thread):
             else:
                 self.position_active_mask = 0
                 self.position_done_mask = 0
+                # The calibrated limit is a firmware gate too: keep the simulated
+                # targets inside it once the demo calibration stores a limit.
+                limit = self.state.max_rpm
+                self.state.manual_targets = [
+                    max(-limit, min(limit, value)) for value in self.state.manual_targets
+                ]
                 targets = list(self.state.manual_targets)
                 for i in range(proto.WHEEL_COUNT):
                     self.vel[i] += (targets[i] - self.vel[i]) * min(1.0, 0.02 / 0.18)
@@ -336,6 +431,40 @@ class DemoSource(threading.Thread):
                 # Wheel angle in degrees: 1 RPM is 6 deg/s at the shaft.
                 self.angle_cont[i] += self.vel[i] * 6.0 * dt
                 self.angle[i] = self.angle_cont[i] % 360.0
+                # Digital feedback follows the analog speed with a lag and the
+                # resolution of the FG window; counts only grow.
+                self.pulse_rpm[i] += (self.vel[i] - self.pulse_rpm[i]) * min(1.0, dt / DEMO_PULSE_LAG_S)
+                self.pulse_rpm[i] = round(self.pulse_rpm[i] / DEMO_PULSE_QUANTUM_RPM) * DEMO_PULSE_QUANTUM_RPM
+                self.pulse_count[i] += abs(self.vel[i]) * dt * DEMO_PULSE_COUNTS_PER_WHEEL_REV / 60.0
+            if now >= next_raw:
+                next_raw = now + 0.1
+                self.raw_seq += 1
+                analog_raw = []
+                i2c_raw = raw_i2c_values(self.angle, self.state.raw_encoder_wheel)
+                pulse_delta = []
+                ekf_rpm = []
+                applied_pwm = []
+                for i in range(proto.WHEEL_COUNT):
+                    # The analog encoder output follows the physical wheel angle
+                    # inside the stored raw range, so ADC and I2C agree in angle.
+                    minimum, maximum = DEMO_ADC_RANGE[i]
+                    analog = minimum + (self.angle[i] / 360.0) * (maximum - minimum)
+                    analog_raw.append(max(0, min(4095, int(round(analog + rng.uniform(-8.0, 8.0))))))
+                    count = int(self.pulse_count[i])
+                    pulse_delta.append(max(0, min(65535, count - self.raw_pulse_seen[i])))
+                    self.raw_pulse_seen[i] = count
+                    ekf_rpm.append(round(self.vel[i] + rng.uniform(-3.0, 3.0), 1))
+                    applied_pwm.append(max(-1023, min(1023, int(round(pwm[i])))))
+                self.state.update_raw(
+                    {
+                        "sequence": self.raw_seq,
+                        "analog_raw": analog_raw,
+                        "i2c_raw": i2c_raw,
+                        "pulse_delta": pulse_delta,
+                        "ekf_rpm": ekf_rpm,
+                        "applied_pwm": applied_pwm,
+                    }
+                )
             yaw = 90.0 + 25.0 * math.sin(0.35 * t)
             pitch = 18.0 * math.sin(0.6 * t)
             roll = 12.0 * math.sin(0.45 * t + 1.0)
@@ -348,6 +477,8 @@ class DemoSource(threading.Thread):
                         "vel_rpm": self.vel[i],
                         "tgt_rpm": targets[i],
                         "angle_deg": self.angle[i],
+                        "pulse_rpm": self.pulse_rpm[i],
+                        "pulse_count": int(self.pulse_count[i]),
                     }
                     for i in range(proto.WHEEL_COUNT)
                 ]
@@ -355,10 +486,8 @@ class DemoSource(threading.Thread):
                     {
                         "uptime_ms": int(t * 1000),
                         "wheels": wheels,
-                        "yaw": yaw,
-                        "pitch": pitch,
-                        "roll": roll,
                         "valid_mask": 0xF,
+                        "pulse_valid_mask": 0xF,
                         "sequence": int(t * 25),
                     }
                 )
@@ -375,6 +504,9 @@ class DemoSource(threading.Thread):
                         "gyro": [3.0 * math.sin(0.8 * t), 2.0 * math.cos(0.6 * t), 1.5 * math.sin(0.4 * t)],
                         "mag": [220 + 40 * math.sin(0.3 * t), 180 + 30 * math.cos(0.35 * t), 410],
                         "sequence": self.imu_seq,
+                        "yaw": yaw,
+                        "pitch": pitch,
+                        "roll": roll,
                     }
                 )
             if now >= next_tof:
@@ -393,7 +525,6 @@ class DemoSource(threading.Thread):
                         "lifecycle": 3,
                         "active_faults": 0,
                         "latched_faults": 0,
-                        "motion_inhibited": 0,
                         "kick_inhibited": 1,
                         "imu_cal_flags": 7,
                         "tof_available": 1,

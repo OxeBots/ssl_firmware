@@ -51,6 +51,11 @@
       "object": ".pio/build/test_coverage/test/test_all/suite_tofperceptionservice_test_tofperceptionservice_logic.o"
     },
     {
+      "slug": "motorcalibration_test_tuningmath",
+      "hooks": [],
+      "object": ".pio/build/test_coverage/test/test_all/suite_motorcalibration_test_tuningmath.o"
+    },
+    {
       "slug": "control_test_robotpositioncontroller",
       "hooks": [],
       "object": ".pio/build/test_coverage/test/test_all/suite_control_test_robotpositioncontroller.o"

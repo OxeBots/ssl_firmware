@@ -27,12 +27,8 @@ class ProtocolHandler
 
     void init(NRF24L01 * radio, WheelController * wheel_ctrl, OmnidirectionalRobot * kinematics);
 
-    // Latch the safety supervisor in SAFE_STOP until reboot (mandatory
-    // hardware failure at boot).
-    void force_safe_stop();
-
     void on_packet(const uint8_t * payload, uint8_t len);
-    void update(uint64_t now_us);
+    void update();
 
     // Current safety lifecycle for status consumers (serial debug).
     LifecycleState get_lifecycle() const;
@@ -46,6 +42,12 @@ class ProtocolHandler
     // True while a base station packet arrived within the link window.
     bool is_base_station_connected() const;
 
+    bool set_bench_targets(const std::array<float, 4> & targets);
+    esp_err_t start_bench_position_move(uint8_t wheel_mask,
+                                        const std::array<float, 4> & angles,
+                                        bool relative,
+                                        float max_velocity);
+
    private:
     ProtocolHandler();
     ~ProtocolHandler() = default;
@@ -57,9 +59,7 @@ class ProtocolHandler
     void handle_telemetry_req(const RobotTelemetryRequest & telreq);
     void handle_TeamCommand(const SingleRobotVelCmd & r_comand, const Header & hdr);
 
-    // Serializes update(), force_safe_stop() and the status getters: update()
-    // runs from the radio task and the idle loop, the getters from the debug
-    // task.
+    // Serializes radio and bench commands and status reads.
     SemaphoreHandle_t m_mutex = nullptr;
 
     NRF24L01 * m_radio = nullptr;
@@ -78,6 +78,7 @@ class ProtocolHandler
     CommandInbox m_command_inbox;
     CommandEnvelope m_latest_command = {};
     bool m_has_latest_command = false;
+    bool m_radio_owns_wheels = false;
     HealthState m_health_state = {};
     HealthMonitor m_health_monitor;
     SafetySupervisor m_safety_supervisor;

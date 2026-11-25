@@ -1,12 +1,10 @@
 #include "wheel_state_estimator.h"
 
 #include <esp_rom_sys.h>
-
-#include <algorithm>
-#include <cstring>
+#include <esp_timer.h>
+#include <sdkconfig.h>
 
 #include "AdcStream.h"
-#include "BL48250.h"
 #include "NVSManager.h"
 
 static const char * TAG = "WheelStateEstimator";
@@ -86,7 +84,9 @@ esp_err_t WheelStateEstimator::init(const std::array<adc_channel_t, NUM_ENC_CHAN
         adc.set_sample_handler(channel, &WheelStateEstimator::s_on_sample, this);
     }
 
+    xSemaphoreTake(m_data_mutex, portMAX_DELAY);
     rebuild_encoders();
+    xSemaphoreGive(m_data_mutex);
     m_initialized = true;
 
     ESP_LOGI(TAG,
@@ -178,6 +178,9 @@ void WheelStateEstimator::load_mapping()
 void WheelStateEstimator::rebuild_encoders()
 {
     AdcStream & adc = AdcStream::get_instance();
+    portENTER_CRITICAL(&m_control_mux);
+    m_published_control = {};
+    portEXIT_CRITICAL(&m_control_mux);
 
     for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
     {
@@ -185,14 +188,7 @@ void WheelStateEstimator::rebuild_encoders()
         const adc_channel_t channel = m_channels[slot];
         EncoderChannel & encoder_channel = m_enc_channels[wheel];
 
-        adc_cali_handle_t cali_handle = adc.get_cali_handle(channel);
-        encoder_channel.encoder = std::make_unique<AS5600>(
-          channel, cali_handle, cali_handle != nullptr, ADC_UNIT, ADC_BITWIDTH);
-        encoder_channel.filter = WheelKalmanFilter(2.0 * M_PI / config::driver::WHEEL_REDUCTION);
-        encoder_channel.measured_angle_rad = 0.0f;
-        encoder_channel.raw = 0;
-        encoder_channel.smoothed_velocity_rad_s = 0.0f;
-        encoder_channel.smoothed_velocity_started = false;
+        encoder_channel.bind(channel, adc.get_cali_handle(channel), ADC_UNIT);
 
         m_channel_lookup[channel] = &encoder_channel;
         m_slot_wheel[slot] = static_cast<uint8_t>(wheel);
@@ -209,6 +205,9 @@ void WheelStateEstimator::rebuild_encoders()
 void WheelStateEstimator::suspend()
 {
     AdcStream::get_instance().suspend();
+    portENTER_CRITICAL(&m_control_mux);
+    m_published_control = {};
+    portEXIT_CRITICAL(&m_control_mux);
 }
 
 /**
@@ -233,7 +232,7 @@ esp_err_t WheelStateEstimator::load_calibration()
 
     for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
     {
-        AS5600 * encoder = m_enc_channels[wheel].encoder.get();
+        AS5600 * encoder = m_enc_channels[wheel].get_encoder();
         if (encoder == nullptr || encoder->load_calibration_from_nvs() != ESP_OK)
         {
             ESP_LOGW(TAG, "Wheel %s encoder range calibration not found", WHEEL_NAMES[wheel]);
@@ -263,10 +262,11 @@ void WheelStateEstimator::start_range_tracking()
     xSemaphoreTake(m_data_mutex, portMAX_DELAY);
     for (auto & channel : m_enc_channels)
     {
-        if (channel.encoder == nullptr)
+        AS5600 * encoder = channel.get_encoder();
+        if (encoder == nullptr)
             continue;
-        channel.encoder->reset_calibration_min_max();
-        channel.encoder->start_calibration_mode();
+        encoder->reset_calibration_min_max();
+        encoder->start_calibration_mode();
     }
     xSemaphoreGive(m_data_mutex);
     ESP_LOGI(TAG, "Encoder range tracking started.");
@@ -280,8 +280,8 @@ void WheelStateEstimator::stop_range_tracking()
     xSemaphoreTake(m_data_mutex, portMAX_DELAY);
     for (auto & channel : m_enc_channels)
     {
-        if (channel.encoder != nullptr)
-            channel.encoder->stop_calibration_mode();
+        if (AS5600 * encoder = channel.get_encoder())
+            encoder->stop_calibration_mode();
     }
     xSemaphoreGive(m_data_mutex);
 }
@@ -299,7 +299,7 @@ uint8_t WheelStateEstimator::finish_range_tracking()
     xSemaphoreTake(m_data_mutex, portMAX_DELAY);
     for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
     {
-        AS5600 * encoder = m_enc_channels[wheel].encoder.get();
+        AS5600 * encoder = m_enc_channels[wheel].get_encoder();
         if (encoder == nullptr)
         {
             all_calibrated = false;
@@ -307,12 +307,39 @@ uint8_t WheelStateEstimator::finish_range_tracking()
         }
 
         encoder->stop_calibration_mode();
-        const int range_mv = encoder->get_calib_max() - encoder->get_calib_min();
-        if (range_mv < MIN_VALID_SWING_MV)
+        // Validate the TRACKING range of this run; only save_calibration_to_nvs
+        // (below) promotes it to the applied range, so an invalid run leaves the
+        // stored calibration active.
+        const int min_mv = encoder->get_track_min_mv();
+        const int max_mv = encoder->get_track_max_mv();
+        const int range_mv = max_mv - min_mv;
+        const uint16_t min_raw = encoder->get_track_min_raw();
+        const uint16_t max_raw = encoder->get_track_max_raw();
+        const int range_raw = static_cast<int>(max_raw) - static_cast<int>(min_raw);
+        ESP_LOGI(TAG,
+                 "Wheel %s encoder range: raw [%u..%u] (span %d), [%d..%d] mV",
+                 WHEEL_NAMES[wheel],
+                 static_cast<unsigned>(min_raw),
+                 static_cast<unsigned>(max_raw),
+                 range_raw,
+                 min_mv,
+                 max_mv);
+        // Both endpoints must be usable and plausible: the raw span drives the
+        // mapping and the millivolt swing stays the diagnostic/compatibility
+        // fallback.
+        const bool raw_ok = min_raw >= AS5600::MIN_PLAUSIBLE_RAW_MIN &&
+                            max_raw <= AS5600::MAX_PLAUSIBLE_RAW_MAX &&
+                            range_raw >= static_cast<int>(AS5600::MIN_VALID_RAW_RANGE) &&
+                            range_raw <= static_cast<int>(AS5600::MAX_VALID_RAW_RANGE);
+        if (!raw_ok || range_mv < MIN_VALID_SWING_MV)
         {
             ESP_LOGE(TAG,
-                     "Wheel %s encoder range too small (%d mV); keeping the old calibration.",
+                     "Wheel %s encoder range implausible (raw [%u..%u] span %d, %d mV); keeping "
+                     "the old calibration.",
                      WHEEL_NAMES[wheel],
+                     static_cast<unsigned>(min_raw),
+                     static_cast<unsigned>(max_raw),
+                     range_raw,
                      range_mv);
             all_calibrated = false;
             continue;
@@ -343,12 +370,15 @@ bool WheelStateEstimator::is_channel_calibrated(size_t wheel) const
     if (wheel >= NUM_ENC_CHANNELS)
         return false;
 
-    const AS5600 * encoder = m_enc_channels[wheel].encoder.get();
+    const AS5600 * encoder = m_enc_channels[wheel].get_encoder();
     if (encoder == nullptr)
         return false;
 
     const int range = encoder->get_calib_max() - encoder->get_calib_min();
-    return range >= MIN_VALID_SWING_MV;
+    const int range_raw = static_cast<int>(encoder->get_calib_max_raw()) -
+                          static_cast<int>(encoder->get_calib_min_raw());
+    return range >= MIN_VALID_SWING_MV ||
+           range_raw >= static_cast<int>(AS5600::MIN_VALID_RAW_RANGE);
 }
 
 /**
@@ -368,29 +398,19 @@ std::array<uint8_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_analog_mapping() 
 /**
  * @brief Retrieves the persisted motor/encoder wiring map (wheel -> mux).
  */
-std::array<uint8_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_mux_mapping() const
+std::array<uint8_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_mux_mapping(bool * calibrated) const
 {
     std::array<uint8_t, NUM_ENC_CHANNELS> map = {0, 1, 2, 3};
-    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
-    {
-        map = m_mux_map;
-        xSemaphoreGive(m_data_mutex);
-    }
-    return map;
-}
-
-/**
- * @brief Reports whether a calibration run produced the stored wiring map.
- */
-bool WheelStateEstimator::has_calibrated_mapping() const
-{
     bool valid = false;
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
+        map = m_mux_map;
         valid = m_mapping_valid;
         xSemaphoreGive(m_data_mutex);
     }
-    return valid;
+    if (calibrated != nullptr)
+        *calibrated = valid;
+    return map;
 }
 
 /**
@@ -440,7 +460,8 @@ esp_err_t WheelStateEstimator::apply_mapping(
     bool all_calibrated = true;
     for (auto & channel : m_enc_channels)
     {
-        if (channel.encoder == nullptr || channel.encoder->load_calibration_from_nvs() != ESP_OK)
+        AS5600 * encoder = channel.get_encoder();
+        if (encoder == nullptr || encoder->load_calibration_from_nvs() != ESP_OK)
             all_calibrated = false;
     }
     m_calibrated = all_calibrated;
@@ -473,7 +494,7 @@ std::array<uint16_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_raw_values() con
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t slot = 0; slot < NUM_ENC_CHANNELS; ++slot)
-            values[slot] = m_enc_channels[m_slot_wheel[slot]].raw;
+            values[slot] = m_enc_channels[m_slot_wheel[slot]].get_raw();
         xSemaphoreGive(m_data_mutex);
     }
     return values;
@@ -486,9 +507,13 @@ std::array<uint16_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_raw_values() con
  * disables the mux again. A channel whose reading fails reports zero.
  *
  * @param angles Output for the raw angle of each mux channel (0..3).
+ * @param magnet_fields Optional field status in the same mux order. A failed
+ *        status read reports UNREADABLE separately from the angle result.
  * @return ESP_OK when all four channels were read, ESP_FAIL otherwise.
  */
-esp_err_t WheelStateEstimator::read_i2c_raw_angles(std::array<uint16_t, NUM_ENC_CHANNELS> * angles)
+esp_err_t WheelStateEstimator::read_i2c_raw_angles(
+  std::array<uint16_t, NUM_ENC_CHANNELS> * angles,
+  std::array<EncoderChannel::MagnetField, NUM_ENC_CHANNELS> * magnet_fields)
 {
     if (angles == nullptr)
         return ESP_ERR_INVALID_ARG;
@@ -496,6 +521,8 @@ esp_err_t WheelStateEstimator::read_i2c_raw_angles(std::array<uint16_t, NUM_ENC_
         return ESP_ERR_INVALID_STATE;
 
     angles->fill(0);
+    if (magnet_fields != nullptr)
+        magnet_fields->fill(EncoderChannel::MagnetField::UNREADABLE);
     esp_err_t result = ESP_OK;
 
     for (uint8_t mux = 0; mux < NUM_ENC_CHANNELS; ++mux)
@@ -508,10 +535,14 @@ esp_err_t WheelStateEstimator::read_i2c_raw_angles(std::array<uint16_t, NUM_ENC_
         // Analog switch settling before the I2C transfer.
         esp_rom_delay_us(50);
         uint16_t raw_angle = 0;
-        if (AS5600::read_raw_angle(&raw_angle) == ESP_OK)
-            (*angles)[mux] = raw_angle;
-        else
+        if (AS5600::read_raw_angle(&raw_angle) != ESP_OK)
+        {
             result = ESP_FAIL;
+            continue;
+        }
+        (*angles)[mux] = raw_angle;
+        if (magnet_fields != nullptr)
+            (*magnet_fields)[mux] = EncoderChannel::read_magnet_field();
     }
 
     m_cd4052b->disable();
@@ -519,22 +550,224 @@ esp_err_t WheelStateEstimator::read_i2c_raw_angles(std::array<uint16_t, NUM_ENC_
 }
 
 /**
- * @brief Returns the tracked analog range (mV) of every analog input slot.
+ * @brief Reads the raw I2C angle of one wheel's encoder through the CD4052B mux.
+ *
+ * The mux reaches one encoder pair at a time. The wheel's channel comes from
+ * the persisted wiring map; the mux is disabled again after the transfer so the
+ * rest of the firmware sees its resting state.
+ *
+ * @param wheel Wheel index (0..3).
+ * @param angle Output for the 12-bit raw angle (0..4095).
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG/STATE on a bad argument or an
+ *         uninitialized estimator, ESP_ERR_TIMEOUT when the map is locked,
+ *         ESP_FAIL when the channel cannot be selected, otherwise the AS5600
+ *         read result.
  */
-std::array<int, NUM_ENC_CHANNELS> WheelStateEstimator::get_range_mv() const
+esp_err_t WheelStateEstimator::read_wheel_i2c_raw_angle(uint8_t wheel, uint16_t * angle)
 {
-    std::array<int, NUM_ENC_CHANNELS> ranges = {};
+    if (angle == nullptr)
+        return ESP_ERR_INVALID_ARG;
+    if (!m_initialized || m_cd4052b == nullptr || wheel >= NUM_ENC_CHANNELS)
+        return ESP_ERR_INVALID_STATE;
+
+    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    const uint8_t channel = m_mux_map[wheel];
+    xSemaphoreGive(m_data_mutex);
+
+    if (m_cd4052b->select(channel) != ESP_OK)
+    {
+        m_cd4052b->disable();
+        return ESP_FAIL;
+    }
+    // Analog switch settling before the I2C transfer.
+    esp_rom_delay_us(50);
+    uint16_t raw_angle = 0;
+    const esp_err_t result = AS5600::read_raw_angle(&raw_angle);
+    m_cd4052b->disable();
+    if (result != ESP_OK)
+        return result;
+    *angle = raw_angle;
+    return ESP_OK;
+}
+
+/**
+ * @brief Applies one AS5600 analog output stage to every wheel.
+ *
+ * The encoders share the I2C bus behind the CD4052B mux: each wheel's channel
+ * is selected, its configuration register is read, and only when the stage
+ * differs the new stage is written and read back for verification. The
+ * slow/fast filters are left untouched and no OTP is burned. No ADC suspend is
+ * needed: the mux/I2C path is safe while the acquisition stream runs.
+ *
+ * @param stage Requested analog output stage.
+ * @return ESP_OK when every wheel was read and (when needed) verified in the
+ *         requested stage, ESP_FAIL/ESP_ERR_* otherwise.
+ */
+esp_err_t WheelStateEstimator::configure_encoder_output_stage(AS5600::OutputStage stage)
+{
+    if (!m_initialized || m_cd4052b == nullptr)
+        return ESP_ERR_INVALID_STATE;
+
+    // Snapshot the wheel -> mux channel map and the per-wheel drivers; the I2C
+    // transfers themselves run without the data mutex (the ADC dispatch task
+    // keeps running and only uses the analog path).
+    std::array<uint8_t, NUM_ENC_CHANNELS> mux_channels = {};
+    std::array<AS5600 *, NUM_ENC_CHANNELS> encoders = {};
+    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(50)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+    mux_channels = m_mux_map;
+    for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
+        encoders[wheel] = m_enc_channels[wheel].get_encoder();
+    xSemaphoreGive(m_data_mutex);
+
+    bool all_ok = true;
+
+    for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
+    {
+        AS5600 * encoder = encoders[wheel];
+        if (encoder == nullptr || m_cd4052b->select(mux_channels[wheel]) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "%s encoder stage: mux select failed.", WHEEL_NAMES[wheel]);
+            m_cd4052b->disable();
+            all_ok = false;
+            continue;
+        }
+        // Analog switch settling before the I2C transfer.
+        esp_rom_delay_us(50);
+
+        AS5600::OutputStage current = AS5600::OutputStage::ANALOG_FULL;
+        bool verified = false;
+        bool already = false;
+        if (!encoder->is_i2c_initialized() && encoder->init_i2c() != ESP_OK)
+        {
+            ESP_LOGE(TAG, "%s encoder stage: I2C interface failed.", WHEEL_NAMES[wheel]);
+        }
+        else if (encoder->read_configuration(&current, nullptr, nullptr) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "%s encoder stage: configuration read failed.", WHEEL_NAMES[wheel]);
+        }
+        else if (current == stage)
+        {
+            already = true;
+            verified = true;
+        }
+        else
+        {
+            AS5600::OutputStage readback = current;
+            const bool written = encoder->set_output_stage(stage) == ESP_OK;
+            if (written)
+                vTaskDelay(pdMS_TO_TICKS(10));
+            verified = written &&
+                       encoder->read_configuration(&readback, nullptr, nullptr) == ESP_OK &&
+                       readback == stage;
+            if (verified)
+                ESP_LOGI(TAG,
+                         "%s encoder stage: %s -> %s (verified)",
+                         WHEEL_NAMES[wheel],
+                         AS5600::stage_name(current),
+                         AS5600::stage_name(stage));
+            else
+                ESP_LOGE(TAG,
+                         "%s encoder stage: %s -> %s (verification failed)",
+                         WHEEL_NAMES[wheel],
+                         AS5600::stage_name(current),
+                         AS5600::stage_name(stage));
+        }
+        m_cd4052b->disable();
+
+        if (already)
+            ESP_LOGI(
+              TAG, "%s encoder stage: already %s", WHEEL_NAMES[wheel], AS5600::stage_name(stage));
+        if (!verified)
+            all_ok = false;
+    }
+
+    return all_ok ? ESP_OK : ESP_FAIL;
+}
+
+/**
+ * @brief Anchors the applied raw ADC range of the encoder mapped to one wheel.
+ *
+ * Called by the wiring calibration ADC-I2C alignment so the angle mapping uses
+ * the standstill endpoints instead of the spin-distorted ones.
+ *
+ * @param wheel Wheel index (0..3).
+ * @param min_raw Raw ADC count at the I2C angle 0.
+ * @param max_raw Raw ADC count at the I2C angle 4095.
+ * @return ESP_OK on success, ESP_ERR_INVALID_STATE when the encoder is missing,
+ *         otherwise the AS5600 validation/persistence result.
+ */
+esp_err_t WheelStateEstimator::set_wheel_raw_range(uint8_t wheel,
+                                                   uint16_t min_raw,
+                                                   uint16_t max_raw)
+{
+    if (wheel >= NUM_ENC_CHANNELS)
+        return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(50)) != pdTRUE)
+        return ESP_ERR_TIMEOUT;
+
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    AS5600 * encoder = m_enc_channels[wheel].get_encoder();
+    if (encoder != nullptr)
+        result = encoder->set_raw_calibration_range(min_raw, max_raw);
+
+    xSemaphoreGive(m_data_mutex);
+    return result;
+}
+
+/**
+ * @brief Retrieves the stored raw ADC minimum of the encoder mapped to each
+ *        wheel.
+ *
+ * @return Raw block-mean minimum per wheel; 0 when the stored range is absent
+ *         or too small to be usable.
+ */
+std::array<uint16_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_range_raw_min() const
+{
+    std::array<uint16_t, NUM_ENC_CHANNELS> mins = {};
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
-        for (size_t slot = 0; slot < NUM_ENC_CHANNELS; ++slot)
+        for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
         {
-            const AS5600 * encoder = m_enc_channels[m_slot_wheel[slot]].encoder.get();
-            if (encoder != nullptr)
-                ranges[slot] = encoder->get_calib_max() - encoder->get_calib_min();
+            const AS5600 * encoder = m_enc_channels[wheel].get_encoder();
+            if (encoder == nullptr)
+                continue;
+            const int span = static_cast<int>(encoder->get_calib_max_raw()) -
+                             static_cast<int>(encoder->get_calib_min_raw());
+            if (span >= static_cast<int>(AS5600::MIN_VALID_RAW_RANGE))
+                mins[wheel] = encoder->get_calib_min_raw();
         }
         xSemaphoreGive(m_data_mutex);
     }
-    return ranges;
+    return mins;
+}
+
+/**
+ * @brief Retrieves the stored raw ADC maximum of the encoder mapped to each
+ *        wheel.
+ *
+ * @return Raw block-mean maximum per wheel; 0 when the stored range is absent
+ *         or too small to be usable.
+ */
+std::array<uint16_t, NUM_ENC_CHANNELS> WheelStateEstimator::get_range_raw_max() const
+{
+    std::array<uint16_t, NUM_ENC_CHANNELS> maxs = {};
+    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
+    {
+        for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
+        {
+            const AS5600 * encoder = m_enc_channels[wheel].get_encoder();
+            if (encoder == nullptr)
+                continue;
+            const int span = static_cast<int>(encoder->get_calib_max_raw()) -
+                             static_cast<int>(encoder->get_calib_min_raw());
+            if (span >= static_cast<int>(AS5600::MIN_VALID_RAW_RANGE))
+                maxs[wheel] = encoder->get_calib_max_raw();
+        }
+        xSemaphoreGive(m_data_mutex);
+    }
+    return maxs;
 }
 
 /**
@@ -551,7 +784,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_measured_angle_rad(
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
-            angles[wheel] = m_enc_channels[wheel].measured_angle_rad;
+            angles[wheel] = m_enc_channels[wheel].get_measured_angle_rad();
         xSemaphoreGive(m_data_mutex);
     }
     return angles;
@@ -568,7 +801,7 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_angle_rad(
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
-            angles[wheel] = static_cast<float>(m_enc_channels[wheel].filter.get_angle_rad());
+            angles[wheel] = m_enc_channels[wheel].get_filtered_angle_rad();
 
         xSemaphoreGive(m_data_mutex);
     }
@@ -585,12 +818,24 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_filtered_velocity_r
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
-            velocities[wheel] =
-              static_cast<float>(m_enc_channels[wheel].filter.get_velocity_rad_s());
+            velocities[wheel] = m_enc_channels[wheel].get_filtered_velocity_rad_s();
 
         xSemaphoreGive(m_data_mutex);
     }
     return velocities;
+}
+
+/**
+ * @brief Copies the current publications without waiting for filter or bus work.
+ */
+bool WheelStateEstimator::get_control_snapshot(ControlSnapshot * snapshot) const
+{
+    if (snapshot == nullptr)
+        return false;
+    portENTER_CRITICAL(&m_control_mux);
+    *snapshot = m_published_control;
+    portEXIT_CRITICAL(&m_control_mux);
+    return true;
 }
 
 /**
@@ -606,72 +851,59 @@ std::array<float, NUM_ENC_CHANNELS> WheelStateEstimator::get_smoothed_velocity_r
     if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
     {
         for (size_t wheel = 0; wheel < NUM_ENC_CHANNELS; ++wheel)
-            velocities[wheel] = m_enc_channels[wheel].smoothed_velocity_rad_s;
+            velocities[wheel] = m_enc_channels[wheel].get_smoothed_velocity_rad_s();
         xSemaphoreGive(m_data_mutex);
     }
     return velocities;
 }
 
 /**
- * @brief Handles one encoder conversion delivered by the ADC stream.
- *
- * Runs in the acquisition task. Converts the raw block mean into an
- * encoder-shaft angle (kept for diagnostics), reads the motor pulse velocity
- * when that wheel has a counter, and fuses both rows in one predict/update
- * cycle. Without a counter, or while the counter reports no edges at all, the
- * filter runs angle-only and derives the speed from the encoder slope.
+ * @brief Routes a sample to the mapped wheel and publishes its state.
  */
 void WheelStateEstimator::on_sample(adc_channel_t channel, uint16_t raw)
 {
-    EncoderChannel * channel_state = m_channel_lookup[channel];
-    if (channel_state == nullptr || channel_state->encoder == nullptr)
+    const int64_t now_us = esp_timer_get_time();
+    // Skip this sample if a remap is holding the mutex to replace encoders.
+    if (xSemaphoreTake(m_data_mutex, 0) != pdTRUE)
         return;
-
-    const size_t index = static_cast<size_t>(channel_state - m_enc_channels.data());
-
-    float measured_angle_rad = 0.0f;
-    channel_state->encoder->process_new_reading(raw, &measured_angle_rad);
-    // The encoder magnet turns with the motor shaft; the filter state and
-    // every consumer speak wheel shaft, which turns WHEEL_REDUCTION slower.
-    const float wheel_angle_rad = measured_angle_rad / config::driver::WHEEL_REDUCTION;
-
-    // The driver reports velocity positive toward the commanded CW direction;
-    // the AS5600 reads that rotation as negative, so negate into the filter
-    // frame (WheelController negates it again when controlling).
-    float motor_velocity = 0.0f;
-    const bool has_motor_velocity =
-      BL48250::get_instance().pulse_velocity_rad_s(index, &motor_velocity);
-
-    if (xSemaphoreTake(m_data_mutex, pdMS_TO_TICKS(10)) != pdTRUE)
+    EncoderChannel * state = m_channel_lookup[channel];
+    if (state == nullptr)
+    {
+        xSemaphoreGive(m_data_mutex);
         return;
-
-    channel_state->measured_angle_rad = measured_angle_rad;
-    channel_state->raw = raw;
-    // A zero sliding-window velocity means the counter saw no edges. If the
-    // wheel turns anyway, the feedback line is dead or absent (for example no
-    // motor driver on the bench): use the angle slope instead of pinning the
-    // estimate to zero.
-    if (has_motor_velocity && motor_velocity != 0.0f)
-        channel_state->filter.update(wheel_angle_rad, -motor_velocity);
-    else
-        channel_state->filter.update(wheel_angle_rad);
-
-    // Light low-pass for the wheel-level control loops (~80 ms at the nominal
-    // acquisition rate). The raw filtered velocity keeps feeding kinematics.
-    constexpr float VELOCITY_SMOOTHING_ALPHA = 0.02f;
-    const float filter_velocity = static_cast<float>(channel_state->filter.get_velocity_rad_s());
-    if (!channel_state->smoothed_velocity_started)
-    {
-        channel_state->smoothed_velocity_rad_s = filter_velocity;
-        channel_state->smoothed_velocity_started = true;
-    }
-    else
-    {
-        channel_state->smoothed_velocity_rad_s +=
-          VELOCITY_SMOOTHING_ALPHA * (filter_velocity - channel_state->smoothed_velocity_rad_s);
     }
 
+    const size_t wheel = static_cast<size_t>(state - m_enc_channels.data());
+    const bool processed = state->process_sample(wheel, raw, now_us);
+    if (processed)
+        publish_control_sample(wheel, *state, now_us);
     xSemaphoreGive(m_data_mutex);
+
+#if CONFIG_ENCODER_DIAG
+    if (processed)
+        state->record_sample_timing(wheel);
+#endif
+}
+
+void WheelStateEstimator::publish_control_sample(size_t wheel,
+                                                 const EncoderChannel & state,
+                                                 int64_t now_us)
+{
+    const uint8_t bit = static_cast<uint8_t>(1U << wheel);
+    portENTER_CRITICAL(&m_control_mux);
+    m_published_control.sample_us[wheel] = now_us;
+    m_published_control.measured_angle_rad[wheel] = state.get_measured_angle_rad();
+    m_published_control.smoothed_velocity_rad_s[wheel] = state.get_smoothed_velocity_rad_s();
+    m_published_control.fast_velocity_rad_s[wheel] = state.get_fast_velocity_rad_s();
+    m_published_control.smoothed_valid_mask =
+      (m_published_control.smoothed_valid_mask & ~bit) | (state.has_smoothed_velocity() ? bit : 0);
+    m_published_control.fast_valid_mask =
+      (m_published_control.fast_valid_mask & ~bit) | (state.has_fast_velocity() ? bit : 0);
+    m_published_control.stuck_analog_mask =
+      (m_published_control.stuck_analog_mask & ~bit) | (state.is_analog_stuck() ? bit : 0);
+    m_published_control.clamped_raw_mask =
+      (m_published_control.clamped_raw_mask & ~bit) | (state.is_raw_clamped() ? bit : 0);
+    portEXIT_CRITICAL(&m_control_mux);
 }
 
 void WheelStateEstimator::s_on_sample(void * pvParameters)
@@ -702,7 +934,7 @@ esp_err_t WheelStateEstimator::configure_encoder(uint8_t channel_idx,
     suspend();
 
     esp_err_t ret = ESP_OK;
-    auto * enc = m_enc_channels[channel_idx].encoder.get();
+    AS5600 * enc = m_enc_channels[channel_idx].get_encoder();
 
     if (m_cd4052b != nullptr)
         ret = m_cd4052b->select(m_mux_map[channel_idx]);

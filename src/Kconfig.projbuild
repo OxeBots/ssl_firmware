@@ -5,6 +5,14 @@ menu "Oxebots Robot Configuration"
         default 39 if IDF_TARGET_ESP32
         default 48 if IDF_TARGET_ESP32S3
 
+    config DISABLE_SAFE_STOP
+        bool "Disable SAFE_STOP and report health faults as warnings"
+        default n
+        help
+            Report health faults as warnings without blocking valid radio
+            or USB wheel commands. Report DISARMED when a radio command
+            expires. Command timeouts and actuator prerequisites still apply.
+
     menu "Radio (nRF24L01)"
 
         config IRQ_GPIO
@@ -318,16 +326,18 @@ menu "Oxebots Robot Configuration"
         config ADC_SAMPLE_FREQ_HZ
             int "ADC acquisition aggregate sample rate (Hz)"
             range 20000 2000000
-            default 80000
+            default 160000
             help
                 Total conversions per second shared by all scan table
                 slots. With the default weights the four encoder channels
                 occupy 12 of the 13 slots and VMON one, so each encoder
                 channel converts at 3/13 of this rate and VMON at 1/13.
+                The production default is 160 kHz:
+                the encoder acquisition benchmark showed twice the publish
+                rate with the same analog noise band and no missed frames.
                 Higher rates give the encoder channels more conversions
-                per revolution but cost dispatch-task CPU; the
-                AdcStream boot log prints the resulting
-                per-channel rates.
+                per revolution but cost dispatch-task CPU and add noise;
+                the AdcStream boot log prints the per-channel rates.
 
         config ADC_OVERSAMPLE
             int "ADC oversample factor (mean of N conversions per channel)"
@@ -387,6 +397,19 @@ menu "Oxebots Robot Configuration"
                 Interrupt input from the VL53L5CX sensor.
                 Schematic net: INTTOF.
                 ESP32 pin: GPIO1.
+
+    endmenu
+
+    menu "Encoder Acquisition"
+
+        config ENCODER_DIAG
+            bool "Encoder and motor control timing diagnostics"
+            default n
+            help
+                Enable for encoder acquisition and motor control benchmarks.
+                Collect sample counts, timing, and overruns in the encoder
+                acquisition and motor control loops. Report summaries about
+                every 10 seconds.
 
     endmenu
 

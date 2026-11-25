@@ -1,20 +1,31 @@
-"""Motor/encoder wiring calibration tab and the stored wiring map."""
+"""Calibração tab: encoder wiring alignment and per-wheel control calibration.
+
+The tab owns an internal sub-tab bar. "Encoders" holds the motor/encoder wiring
+calibration and the stored map; "Controlador" embeds the control-calibration
+content from tuning.py. Both are built once and only the active one updates.
+"""
 
 import dearpygui.dearpygui as dpg
 
-from . import config, rendering
+from . import config, rendering, tuning
 from . import protocol as proto
 from .state import WHEEL_NAMES
 
 GAP = 8
 RIGHT_WIDTH = 330
 PANEL_MARGIN = 34
-BUTTON_HEIGHT = 32
+BUTTON_HEIGHT = 28
 BAR_HEIGHT = 10
+SUBTAB_BAR = "calibration_subtabs"
+SUBTAB_ENCODERS = "calibration_subtab_encoders"
+SUBTAB_CONTROL = "calibration_subtab_controller"
+# Space the sub-tab bar takes above the active sub-tab content.
+SUBTAB_BAR_HEIGHT = 34
+MIN_CONTENT_HEIGHT = 160
 # Level peak floor (ADC / encoder angle counts): sensor noise must not fill the bars.
 LEVEL_FLOOR = 200.0
 CONFIRM_LABEL = "Robô levantado · rodas livres"
-START_LABEL = "Calibrar motores"
+START_LABEL = "Alinhar encoders"
 STOP_LABEL = "Parar calibração"
 
 PANEL = "calibration_panel"
@@ -23,6 +34,7 @@ CONFIRM_CHECK = "calibration_confirm"
 START_BUTTON = "calibration_start"
 STOP_BUTTON = "calibration_stop"
 STATUS_TEXT = "calibration_status"
+MAGNET_WARNING_TEXT = "calibration_magnet_warning"
 PROGRESS_BAR = "calibration_progress"
 SPINNING_TEXT = "calibration_spinning"
 LEVELS_TABLE = "calibration_levels_table"
@@ -36,12 +48,29 @@ RESULT_STATUS = tuple(f"calibration_result_status_{wheel}" for wheel in range(pr
 MAPPING_ANALOG = tuple(f"calibration_map_analog_{wheel}" for wheel in range(proto.WHEEL_COUNT))
 MAPPING_MUX = tuple(f"calibration_map_mux_{wheel}" for wheel in range(proto.WHEEL_COUNT))
 MAPPING_RANGE = tuple(f"calibration_map_range_{wheel}" for wheel in range(proto.WHEEL_COUNT))
+MAPPING_STAGE = tuple(f"calibration_map_stage_{wheel}" for wheel in range(proto.WHEEL_COUNT))
+MAPPING_ADC_RANGE = tuple(f"calibration_map_adc_range_{wheel}" for wheel in range(proto.WHEEL_COUNT))
+STAGE_BADGE = "calibration_stage_badge"
+ADC_RANGE_HEADER = "ADC mín–máx"
+ADC_RANGE_SEPARATOR = "–"
 
 RESULT_BOTH = "Ambos os caminhos"
 RESULT_ANALOG = "Só analógico"
 RESULT_FAILED = "Falhou"
 RESULT_PENDING = "Pendente"
 RESULT_STORED = "Salvo na NVS"
+
+STAGE_NAMES = {
+    proto.ENCODER_STAGE_FULL: "FULL",
+    proto.ENCODER_STAGE_REDUCED: "REDUCED",
+    proto.ENCODER_STAGE_PWM: "PWM",
+}
+# REDUCED is required for the ADC linear range; FULL is a warning, PWM an error.
+STAGE_COLORS = {
+    proto.ENCODER_STAGE_REDUCED: config.OK_COLOR,
+    proto.ENCODER_STAGE_FULL: config.DEMO_COLOR,
+    proto.ENCODER_STAGE_PWM: config.BAD_COLOR,
+}
 
 CALIBRATION_ERROR_NAMES = {
     proto.CALIBRATION_ERROR_NONE: "Sem erro",
@@ -51,6 +80,8 @@ CALIBRATION_ERROR_NAMES = {
     proto.CALIBRATION_ERROR_BAD_MAPPING: "Mapeamento inválido",
     proto.CALIBRATION_ERROR_ABORTED: "Cancelada",
     proto.CALIBRATION_ERROR_I2C: "Falha de I2C",
+    proto.CALIBRATION_ERROR_MAGNET_TOO_CLOSE: "Ímã perto demais",
+    proto.CALIBRATION_ERROR_MAGNET_TOO_FAR: "Ímã longe demais ou ausente",
 }
 
 _TABLE_THEME = None
@@ -64,6 +95,21 @@ _STOP_THEME = None
 # ---------------------------------------------------------------------------
 # Pure helpers: freshness, button rules, text and bar fractions
 # ---------------------------------------------------------------------------
+
+
+def content_height(body_h, tab_bar_h=SUBTAB_BAR_HEIGHT):
+    """Vertical space left for the active sub-tab below the internal tab bar."""
+    return max(MIN_CONTENT_HEIGHT, int(body_h) - int(tab_bar_h))
+
+
+def active_subtab():
+    """Alias of the selected Calibração sub-tab, defaulting to Encoders."""
+    if not dpg.does_item_exist(SUBTAB_BAR):
+        return SUBTAB_ENCODERS
+    selected = dpg.get_value(SUBTAB_BAR)
+    if isinstance(selected, int):
+        selected = dpg.get_item_alias(selected)
+    return selected if selected == SUBTAB_CONTROL else SUBTAB_ENCODERS
 
 
 def calibration_fresh(state, now):
@@ -87,14 +133,7 @@ def calibration_start_enabled(state, now):
         return False
     if calibration_running(state, now) or demo_calibration_active(state):
         return False
-    if state.demo:
-        return True
-    return bool(
-        state.connected
-        and state.streaming
-        and state.last_state_t
-        and now - state.last_state_t <= config.SENSOR_STALE_S
-    )
+    return state._live_link(now)
 
 
 def calibration_stop_enabled(state, now):
@@ -134,6 +173,60 @@ def range_text(calib, wheel):
     return "pronto" if calib["range_mask"] & (1 << wheel) else "sem faixa"
 
 
+def stage_text(calib, wheel):
+    """Encoder operation mode of one wheel and its warning color."""
+    if calib is None or not calib["stage_mask"] & (1 << wheel):
+        return "—", config.TEXT_DIM
+    stage = calib["encoder_stage"][wheel]
+    return STAGE_NAMES.get(stage, "—"), STAGE_COLORS.get(stage, config.TEXT_DIM)
+
+
+def stage_summary(calib):
+    """Badge text/color: all encoders REDUCED, or a warning naming the others."""
+    if calib is None:
+        return "Modo dos encoders aguardando quadro de calibração", config.TEXT_DIM
+    problems = []
+    worst = config.TEXT_DIM
+    for wheel in range(proto.WHEEL_COUNT):
+        if not calib["stage_mask"] & (1 << wheel):
+            problems.append(f"M{wheel + 1} não verificado")
+            worst = config.DEMO_COLOR
+            continue
+        stage = calib["encoder_stage"][wheel]
+        if stage == proto.ENCODER_STAGE_REDUCED:
+            continue
+        if stage == proto.ENCODER_STAGE_PWM:
+            problems.append(f"M{wheel + 1} PWM")
+            worst = config.BAD_COLOR
+        elif stage == proto.ENCODER_STAGE_FULL:
+            problems.append(f"M{wheel + 1} FULL")
+            if worst != config.BAD_COLOR:
+                worst = config.DEMO_COLOR
+        else:
+            problems.append(f"M{wheel + 1} desconhecido")
+            if worst != config.BAD_COLOR:
+                worst = config.DEMO_COLOR
+    if not problems:
+        return "Encoders em modo REDUCED", config.OK_COLOR
+    return "Atenção: " + " · ".join(problems), worst
+
+
+def adc_range_text(calib, wheel):
+    """Stored raw ADC endpoints of one wheel (0 and 360 degree), or a dash.
+
+    A rejected raw range (for example an intermittent analog harness) publishes
+    zero or unusable endpoints even when the mV fallback keeps the range_mask
+    bit, so an inconsistent pair must never be rendered as "0–0".
+    """
+    if calib is None or not calib["range_mask"] & (1 << wheel):
+        return "—", config.TEXT_DIM
+    minimum = calib["adc_min_raw"][wheel]
+    maximum = calib["adc_max_raw"][wheel]
+    if maximum <= minimum:
+        return "—", config.TEXT_DIM
+    return f"{minimum}{ADC_RANGE_SEPARATOR}{maximum}", config.TEXT
+
+
 def mapping_header(calib):
     """Header wording and color for the stored map panel."""
     if calib is None:
@@ -144,8 +237,50 @@ def mapping_header(calib):
 
 
 def error_text(code):
-    """Portuguese description of a DebugCalibration failure reason."""
+    """Portuguese description of a DebugCalibration error or warning."""
     return CALIBRATION_ERROR_NAMES.get(code, f"Código {code}")
+
+
+def _magnet_warning_motor(calib, mux):
+    ready = calib["i2c_ready"]
+    detected = [
+        wheel for wheel, channel in enumerate(calib["detected_mux_map"]) if ready & (1 << wheel) and channel == mux
+    ]
+    if detected:
+        return detected[0] if len(detected) == 1 else None
+    if calib["mapping_valid"]:
+        return next(
+            (wheel for wheel, channel in enumerate(calib["mux_map"]) if channel == mux and not (ready & (1 << wheel))),
+            None,
+        )
+    return None
+
+
+def magnet_warning_text(calib):
+    """Show each field warning with the motor linked to its encoder."""
+    if calib is None:
+        return ""
+    warnings = []
+    for mux, code in enumerate(calib["magnet_warning"]):
+        if code not in (proto.CALIBRATION_ERROR_MAGNET_TOO_CLOSE, proto.CALIBRATION_ERROR_MAGNET_TOO_FAR):
+            continue
+        motor = _magnet_warning_motor(calib, mux)
+        label = f"M{motor + 1}" if motor is not None else f"mux {mux + 1} (motor não identificado)"
+        warnings.append(f"{label} · {error_text(code)}")
+    return "Aviso · " + ", ".join(warnings) if warnings else ""
+
+
+def failure_text(calib, wheel):
+    """Failure phrase of one failed wheel, naming the path that failed."""
+    bit = 1 << wheel
+    code = calib["wheel_error"][wheel]
+    matched_analog = bool(calib["analog_ready"] & bit)
+    matched_i2c = bool(calib["i2c_ready"] & bit)
+    if code == proto.CALIBRATION_ERROR_NO_MOVEMENT and matched_analog != matched_i2c:
+        # The ambiguous reasons already name their path in error_text().
+        return f"sem movimento no {'I2C' if matched_analog else 'analógico'}"
+    full = error_text(code)
+    return full[:1].lower() + full[1:]
 
 
 def result_text(calib, wheel):
@@ -159,6 +294,9 @@ def result_text(calib, wheel):
     if calib["result_mask"] & bit:
         return RESULT_BOTH if calib["i2c_ready"] & bit else RESULT_ANALOG
     if calib["state"] in (proto.CALIBRATION_DONE, proto.CALIBRATION_FAILED):
+        return RESULT_FAILED
+    # A partial run visited every wheel: only the ones with a reason failed.
+    if calib["state"] == proto.CALIBRATION_PARTIAL and calib["wheel_error"][wheel]:
         return RESULT_FAILED
     return RESULT_PENDING
 
@@ -200,9 +338,14 @@ def status_text(state, now):
         return f"Calibrando · {calib['progress']}% concluído", config.ACCENT
     if calib["state"] == proto.CALIBRATION_DONE:
         return "Calibração concluída · mapa salvo na NVS", config.OK_COLOR
+    if calib["state"] == proto.CALIBRATION_PARTIAL:
+        reasons = [
+            f"M{wheel + 1} {failure_text(calib, wheel)}" for wheel, code in enumerate(calib["wheel_error"]) if code
+        ]
+        return f"Calibração incompleta · {', '.join(reasons)}", config.BAD_COLOR
     if calib["state"] == proto.CALIBRATION_FAILED:
         return f"Falha · {error_text(calib['error_code'])}", config.BAD_COLOR
-    return "Ociosa · confirme o aviso de segurança para calibrar", config.TEXT_DIM
+    return "Confirme o aviso de segurança para calibrar", config.TEXT_DIM
 
 
 def spinning_text(calib):
@@ -213,6 +356,8 @@ def spinning_text(calib):
         return f"Girando {WHEEL_NAMES[min(calib['wheel'], proto.WHEEL_COUNT - 1)]}"
     if calib["state"] == proto.CALIBRATION_DONE:
         return "Rotina concluída · motores parados"
+    if calib["state"] == proto.CALIBRATION_PARTIAL:
+        return "Rotina concluída com falhas · motores parados"
     if calib["state"] == proto.CALIBRATION_FAILED:
         return "Rotina interrompida · motores parados"
     return "Nenhum motor girando"
@@ -226,7 +371,7 @@ def spinning_text(calib):
 def _create_themes():
     global _TABLE_THEME, _ANALOG_BAR_THEME, _I2C_BAR_THEME, _PROGRESS_THEME, _START_THEME, _STOP_THEME
     _TABLE_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 1.0)},
+        styles={dpg.mvStyleVar_CellPadding: (2.0, 0.0)},
         component=dpg.mvTable,
     )
     _ANALOG_BAR_THEME = rendering.create_theme(
@@ -304,14 +449,16 @@ def _build_results_table():
 
 
 def _build_mapping_table():
-    """Stored wheel -> analog input / I2C mux channel mapping."""
+    """Stored wheel -> analog input / I2C mux channel mapping and encoder mode."""
     with dpg.table(tag=MAPPING_TABLE, header_row=False, policy=dpg.mvTable_SizingStretchProp):
-        dpg.add_table_column(init_width_or_weight=0.16)
-        dpg.add_table_column(init_width_or_weight=0.28)
-        dpg.add_table_column(init_width_or_weight=0.26)
-        dpg.add_table_column(init_width_or_weight=0.30)
+        dpg.add_table_column(init_width_or_weight=0.085)
+        dpg.add_table_column(init_width_or_weight=0.165)
+        dpg.add_table_column(init_width_or_weight=0.13)
+        dpg.add_table_column(init_width_or_weight=0.175)
+        dpg.add_table_column(init_width_or_weight=0.19)
+        dpg.add_table_column(init_width_or_weight=0.255)
         with dpg.table_row():
-            for label in ("Roda", "Analógico", "I2C", "Faixa"):
+            for label in ("Roda", "Analógico", "I2C", "Faixa", "Modo", ADC_RANGE_HEADER):
                 rendering.add_text(label, "micro", config.TEXT_DIM)
         for wheel in range(proto.WHEEL_COUNT):
             with dpg.table_row():
@@ -319,12 +466,13 @@ def _build_mapping_table():
                 rendering.add_text("—", "tiny", config.TEXT_DIM, tag=MAPPING_ANALOG[wheel])
                 rendering.add_text("—", "tiny", config.TEXT_DIM, tag=MAPPING_MUX[wheel])
                 rendering.add_text("—", "tiny", config.TEXT_DIM, tag=MAPPING_RANGE[wheel])
+                rendering.add_text("—", "tiny", config.TEXT_DIM, tag=MAPPING_STAGE[wheel])
+                rendering.add_text("—", "tiny", config.TEXT_DIM, tag=MAPPING_ADC_RANGE[wheel])
     dpg.bind_item_theme(MAPPING_TABLE, _TABLE_THEME)
 
 
-def build(state):
-    """Create the Calibração tab contents once."""
-    _create_themes()
+def _build_encoders(state):
+    """Create the Encoders sub-tab contents once."""
 
     def on_confirm(_sender, app_data, _user_data=None):
         state.set_calibration_confirm(bool(app_data))
@@ -347,9 +495,11 @@ def build(state):
                 "small",
                 config.TEXT_DIM,
             )
-            rendering.add_text("PERIGO: levante o robô e mantenha as rodas livres.", "small", config.BAD_COLOR)
             rendering.add_text(
-                "As rodas vão girar; não toque no robô durante a rotina.", "small", config.BAD_COLOR
+                "PERIGO: levante o robô e mantenha as rodas livres. "
+                "As rodas vão girar; não toque no robô durante a rotina.",
+                "micro",
+                config.BAD_COLOR,
             )
             dpg.add_checkbox(
                 tag=CONFIRM_CHECK,
@@ -375,20 +525,33 @@ def build(state):
                 )
                 dpg.bind_item_theme(STOP_BUTTON, _STOP_THEME)
             rendering.add_text("Aguardando quadro de calibração", "small", config.TEXT_DIM, tag=STATUS_TEXT)
-            dpg.add_progress_bar(tag=PROGRESS_BAR, default_value=0.0, width=200, height=BAR_HEIGHT)
-            dpg.bind_item_theme(PROGRESS_BAR, _PROGRESS_THEME)
-            rendering.add_text("Nenhum motor girando", "small", config.TEXT_DIM, tag=SPINNING_TEXT)
+            rendering.add_text("", "small", config.DEMO_COLOR, tag=MAGNET_WARNING_TEXT, show=False)
+            with dpg.group(horizontal=True):
+                dpg.add_progress_bar(tag=PROGRESS_BAR, default_value=0.0, width=200, height=BAR_HEIGHT)
+                dpg.bind_item_theme(PROGRESS_BAR, _PROGRESS_THEME)
+                rendering.add_text("Nenhum motor girando", "small", config.TEXT_DIM, tag=SPINNING_TEXT)
             with dpg.group(horizontal=True):
                 _build_levels_table()
                 _build_results_table()
         with rendering.panel("Mapeamento atual", MAPPING_PANEL, width=RIGHT_WIDTH, height=1):
             rendering.add_text("Aguardando quadro de calibração", "small", config.TEXT_DIM, tag=MAPPING_HEADER)
+            rendering.add_text("", "small", config.TEXT_DIM, tag=STAGE_BADGE)
             rendering.add_text("ENCn: entrada analógica (caminho de controle)", "micro", config.TEXT_DIM)
             rendering.add_text("mux n: par I2C atrás do CD4052B", "micro", config.TEXT_DIM)
             dpg.add_spacer(height=4)
             _build_mapping_table()
             dpg.add_separator()
             rendering.add_text("O mapa é gravado na NVS e sobrevive a reinicializações.", "micro", config.TEXT_DIM)
+
+
+def build(state):
+    """Create the Calibração tab contents once: both sub-tabs are built here."""
+    _create_themes()
+    with dpg.tab_bar(tag=SUBTAB_BAR):
+        with dpg.tab(label="Encoders", tag=SUBTAB_ENCODERS):
+            _build_encoders(state)
+        with dpg.tab(label="Controlador", tag=SUBTAB_CONTROL):
+            tuning.build(state)
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +570,15 @@ def _update_controls(state, now, inner_w):
         width=(inner_w - GAP) // 2,
         enabled=calibration_stop_enabled(state, now),
     )
-    dpg.configure_item(PROGRESS_BAR, width=inner_w)
+    dpg.configure_item(PROGRESS_BAR, width=max(120, inner_w - 190))
     if dpg.get_value(CONFIRM_CHECK) != state.calibration_confirm:
         dpg.set_value(CONFIRM_CHECK, state.calibration_confirm)
     status, color = status_text(state, now)
     rendering.set_text(STATUS_TEXT, status, color)
     calib = state.calibration if calibration_fresh(state, now) else None
+    warning = magnet_warning_text(calib)
+    rendering.set_text(MAGNET_WARNING_TEXT, warning)
+    dpg.configure_item(MAGNET_WARNING_TEXT, show=bool(warning), wrap=inner_w)
     dpg.set_value(PROGRESS_BAR, calib["progress"] / 100.0 if calib is not None else 0.0)
     running = calibration_running(state, now) or demo_calibration_active(state)
     rendering.set_text(
@@ -452,6 +618,8 @@ def _update_mapping(state):
     calib = state.calibration
     header, color = mapping_header(calib)
     rendering.set_text(MAPPING_HEADER, header, color)
+    badge, badge_color = stage_summary(calib)
+    rendering.set_text(STAGE_BADGE, badge, badge_color)
     dpg.configure_item(MAPPING_TABLE, width=RIGHT_WIDTH - PANEL_MARGIN)
     for wheel in range(proto.WHEEL_COUNT):
         text_color = config.TEXT if calib is not None else config.TEXT_DIM
@@ -465,10 +633,14 @@ def _update_mapping(state):
         else:
             range_color = config.TEXT_DIM
         rendering.set_text(MAPPING_RANGE[wheel], stored_range, range_color)
+        stage, stage_color = stage_text(calib, wheel)
+        rendering.set_text(MAPPING_STAGE[wheel], stage, stage_color)
+        adc_range, adc_color = adc_range_text(calib, wheel)
+        rendering.set_text(MAPPING_ADC_RANGE[wheel], adc_range, adc_color)
 
 
-def update(state, layout, now):
-    """Refresh the Calibração tab from the latest calibration frame."""
+def _update_encoders(state, layout, now):
+    """Refresh the Encoders sub-tab from the latest calibration frame."""
     body_w = int(layout["body_w"])
     body_h = int(layout["body_h"])
     main_w = max(320, body_w - RIGHT_WIDTH - GAP)
@@ -478,3 +650,16 @@ def update(state, layout, now):
     _update_controls(state, now, inner_w)
     _update_levels(state, now, inner_w)
     _update_mapping(state)
+
+
+def update(state, layout, now):
+    """Refresh only the active Calibração sub-tab."""
+    body_h = int(layout["body_h"])
+    content = {
+        "body_w": layout["body_w"],
+        "body_h": content_height(body_h, rendering.item_height(SUBTAB_BAR) or SUBTAB_BAR_HEIGHT),
+    }
+    if active_subtab() == SUBTAB_CONTROL:
+        tuning.update(state, content, now)
+    else:
+        _update_encoders(state, content, now)

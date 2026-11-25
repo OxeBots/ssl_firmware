@@ -92,13 +92,13 @@ uint32_t FastPID::float_to_param(float in)
 int16_t FastPID::step(int16_t sp, int16_t fb)
 {
     int32_t err = static_cast<int32_t>(sp) - static_cast<int32_t>(fb);
-    int32_t P = 0;
-    int32_t I = 0;
-    int32_t D = 0;
+    int32_t proportional = 0;
+    int32_t integral = 0;
+    int32_t derivative = 0;
 
     if (m_p)
     {
-        P = static_cast<int32_t>(m_p) * static_cast<int32_t>(err);
+        proportional = static_cast<int32_t>(m_p) * static_cast<int32_t>(err);
     }
 
     if (m_i)
@@ -110,7 +110,7 @@ int16_t FastPID::step(int16_t sp, int16_t fb)
         else if (m_sum < FAST_PID_INTEG_MIN)
             m_sum = FAST_PID_INTEG_MIN;
 
-        I = static_cast<int32_t>(m_sum);
+        integral = static_cast<int32_t>(m_sum);
     }
 
     if (m_d)
@@ -124,10 +124,11 @@ int16_t FastPID::step(int16_t sp, int16_t fb)
         else if (deriv < FAST_PID_DERIV_MIN)
             deriv = FAST_PID_DERIV_MIN;
 
-        D = static_cast<int32_t>(m_d) * static_cast<int32_t>(deriv);
+        derivative = static_cast<int32_t>(m_d) * static_cast<int32_t>(deriv);
     }
 
-    int64_t out = static_cast<int64_t>(P) + static_cast<int64_t>(I) + static_cast<int64_t>(D);
+    int64_t out = static_cast<int64_t>(proportional) + static_cast<int64_t>(integral) +
+                  static_cast<int64_t>(derivative);
 
     if (out > m_outmax)
         out = m_outmax;

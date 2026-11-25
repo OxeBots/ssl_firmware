@@ -6,7 +6,8 @@ import time
 
 import dearpygui.dearpygui as dpg
 
-from . import calibration, config, console, health, motors, picker, rendering, sensing, tuning
+from . import calibration, config, console, health, motors, picker, rendering, sensing
+from . import protocol as proto
 from .discovery import PortScanner
 from .serial_io import BenchReader
 
@@ -19,7 +20,6 @@ TAB_TAGS = (
     "tab_tof",
     "tab_imu",
     "tab_console",
-    "tab_tuning",
 )
 HEADER_SPACER = "header_spacer"
 CONNECTION_STATUS = "connection_status"
@@ -48,15 +48,14 @@ KEY_ACTIONS = {
     dpg.mvKey_F4: ("tab", config.TAB_TOF),
     dpg.mvKey_F5: ("tab", config.TAB_IMU),
     dpg.mvKey_F6: ("tab", config.TAB_CONSOLE),
-    dpg.mvKey_F7: ("tab", config.TAB_TUNING),
     dpg.mvKey_1: ("wheel", 0),
     dpg.mvKey_2: ("wheel", 1),
     dpg.mvKey_3: ("wheel", 2),
     dpg.mvKey_4: ("wheel", 3),
-    dpg.mvKey_Up: ("adjust", 100),
-    dpg.mvKey_Down: ("adjust", -100),
-    dpg.mvKey_Right: ("adjust", 500),
-    dpg.mvKey_Left: ("adjust", -500),
+    dpg.mvKey_Up: ("adjust_rpm", 1.0),
+    dpg.mvKey_Down: ("adjust_rpm", -1.0),
+    dpg.mvKey_Right: ("adjust", 1.0),
+    dpg.mvKey_Left: ("adjust", -1.0),
     dpg.mvKey_Spacebar: ("stop", None),
     dpg.mvKey_W: ("sweep", None),
     dpg.mvKey_Q: ("quit", None),
@@ -71,8 +70,11 @@ def perform_action(state, action, value=None):
     elif action == "wheel":
         state.selected_wheel = value
     elif action == "adjust":
-        target = state.manual_targets[state.selected_wheel] if state.demo else state.wheels[state.selected_wheel]["tgt"]
-        state.set_selected_target(target + value)
+        # Left/right move the selected target by a fraction of the calibrated limit.
+        state.adjust_selected_target(value)
+    elif action == "adjust_rpm":
+        # Up/down move the selected target by the configurable RPM step.
+        state.adjust_selected_target_by_rpm(value * state.arrow_step_rpm)
     elif action == "stop":
         state.stop_motors()
     elif action == "sweep":
@@ -126,15 +128,12 @@ def header_spacer_width(status, body_w):
 
 
 def connection_status(state):
-    """Connection badge text and color for the header."""
+    """USB debug link badge text and color for the header."""
     if state.demo:
         return "Demo | dados simulados", config.DEMO_COLOR
-    if (
-        state.connected and state.streaming and state.last_state_t
-        and time.monotonic() - state.last_state_t <= config.SENSOR_STALE_S
-    ):
+    if state._live_link():
         return f"Ao vivo | {state.connected}", config.OK_COLOR
-    if state.connected and state.last_state_t:
+    if state.connected and (state.last_link_t or state.last_state_t):
         return "Conectado | telemetria desatualizada", config.BAD_COLOR
     if state.connected:
         return "Conectado | aguardando dados", config.TEXT_DIM
@@ -143,7 +142,7 @@ def connection_status(state):
 
 def status_line(state, hz_state, hz_tof, fps):
     """Stream rates and uptime shown under the tabs."""
-    live = state.last_state_t and time.monotonic() - state.last_state_t <= config.SENSOR_STALE_S
+    live = state.link_fresh()
     uptime = f"{state.uptime_ms // 1000}s" if live else "-"
     return (
         f"Estado {hz_state:.0f} Hz   |   Distância {hz_tof:.0f} Hz   |   Recebido {state.rx_bytes:,} B"
@@ -157,12 +156,20 @@ class KeyRepeater:
     def __init__(self):
         self._next_repeat = {}
 
-    def poll(self, now):
+    def poll(self, now, *, drive_shortcuts=True, editing_step=False):
         actions = []
         for key, action in KEY_ACTIONS.items():
             pressed = dpg.is_key_pressed(key)
             down = dpg.is_key_down(key)
-            if pressed and key not in self._next_repeat:
+            blocked = not drive_shortcuts and (key == dpg.mvKey_Q or action[0] not in ("tab", "quit"))
+            if editing_step and action[0] in ("wheel", "adjust", "adjust_rpm"):
+                blocked = True
+            if blocked:
+                if down:
+                    self._next_repeat[key] = float("inf")
+                else:
+                    self._next_repeat.pop(key, None)
+            elif pressed and key not in self._next_repeat:
                 actions.append(action)
                 self._next_repeat[key] = now + REPEAT_DELAY_S
             elif down and key in self._next_repeat and now >= self._next_repeat[key]:
@@ -180,7 +187,7 @@ def select_tab(state, index):
 
 
 def build_dashboard(state):
-    """Create the primary dashboard window and all seven tab contents."""
+    """Create the primary dashboard window and its tab contents."""
     with dpg.window(
         tag=MAIN_WINDOW,
         no_title_bar=True,
@@ -209,8 +216,6 @@ def build_dashboard(state):
                 sensing.build_imu(state)
             with dpg.tab(label="Console   F6", tag=TAB_TAGS[config.TAB_CONSOLE]):
                 console.build(state)
-            with dpg.tab(label="Controle   F7", tag=TAB_TAGS[config.TAB_TUNING]):
-                tuning.build(state)
         rendering.add_text("", "tiny", config.TEXT_DIM, tag=STATUS_BAR)
 
 
@@ -218,22 +223,38 @@ def refresh_dashboard(state, layout, now, hz_state, hz_tof, fps):
     """Push the latest telemetry into the visible tab and window chrome."""
     status, color = connection_status(state)
     rendering.set_text(CONNECTION_STATUS, status, color)
-    rendering.set_text(STATUS_BAR, status_line(state, hz_state, hz_tof, fps))
+    footer = status_line(state, hz_state, hz_tof, fps)
+    rendering.set_text(STATUS_BAR, footer)
     dpg.configure_item(HEADER_SPACER, width=header_spacer_width(status, layout["body_w"]))
+    if state.active_tab != config.TAB_MOTORS:
+        # The raw encoder mux focus only makes sense while the Motors tab is open.
+        motors.leave(state)
     if state.active_tab == config.TAB_MOTORS:
+        state.stream_mask = proto.STREAM_STATE | proto.STREAM_CALIBRATION
+        if motors.active_view() == motors.MOTORS_VIEW_RAW:
+            state.stream_mask |= proto.STREAM_RAW
+        else:
+            state.stream_mask |= proto.STREAM_TUNING
+            if motors.sidebar_tab() == motors.SIDEBAR_POSITION:
+                state.stream_mask |= proto.STREAM_POSITION
         motors.update(state, layout, now)
     elif state.active_tab == config.TAB_CALIBRATION:
+        state.stream_mask = proto.STREAM_CALIBRATION
+        if calibration.active_subtab() == calibration.SUBTAB_CONTROL:
+            state.stream_mask |= proto.STREAM_STATE | proto.STREAM_TUNING
         calibration.update(state, layout, now)
     elif state.active_tab == config.TAB_HEALTH:
+        state.stream_mask = proto.STREAM_HEALTH
         health.update(state, layout, now)
     elif state.active_tab == config.TAB_TOF:
+        state.stream_mask = proto.STREAM_TOF
         sensing.update_tof(state, layout, now)
     elif state.active_tab == config.TAB_IMU:
+        state.stream_mask = proto.STREAM_IMU
         sensing.update_imu(state, layout, now)
     elif state.active_tab == config.TAB_CONSOLE:
+        state.stream_mask = proto.STREAM_TEXT
         console.update(state, layout)
-    elif state.active_tab == config.TAB_TUNING:
-        tuning.update(state, layout, now)
 
 
 def run_gui(state, args):
@@ -260,12 +281,26 @@ def run_gui(state, args):
         picking_port = False
 
     def rescan_ports():
+        nonlocal scan_active
+        scan_active.clear()
         if state.scanner is not None:
             state.scanner.join(timeout=2.0)
+        # The port used by the running USB session must not be probed: the probe
+        # opens it and toggles the modem lines, which resets the robot.
+        busy_port = state.reader.requested_port if state.reader is not None else None
         with scan_lock:
             scan_results.clear()
+            if busy_port:
+                scan_results[busy_port] = {
+                    "desc": "Em uso por esta bancada",
+                    "status": "firmware",
+                    "detail": "",
+                }
+        scan_active = threading.Event()
         scan_active.set()
-        state.scanner = PortScanner(scan_results, scan_lock, scan_active)
+        state.scanner = PortScanner(
+            scan_results, scan_lock, scan_active, keep={busy_port} if busy_port else ()
+        )
         state.scanner.start()
 
     def on_connect(_sender, _app_data, user_data=None):
@@ -276,7 +311,7 @@ def run_gui(state, args):
     def on_rescan(_sender, _app_data, _user_data=None):
         rescan_ports()
 
-    def on_quit(_sender, _app_data, _user_data=None):
+    def on_quit(_sender=None, _app_data=None, _user_data=None):
         stop_and_exit(state)
 
     def on_wheel(_sender, app_data, _user_data=None):
@@ -328,7 +363,12 @@ def run_gui(state, args):
     try:
         while not state.quit and dpg.is_dearpygui_running():
             now = time.monotonic()
-            for action, value in keys.poll(now):
+            actions = keys.poll(
+                now,
+                drive_shortcuts=not picking_port,
+                editing_step=dpg.is_item_active(motors.ARROW_STEP_INPUT),
+            )
+            for action, value in actions:
                 perform_action(state, action, value)
                 if action == "tab" and not state.quit:
                     select_tab(state, value)
@@ -350,7 +390,6 @@ def run_gui(state, args):
                 picking_port = True
             dpg.configure_item(MAIN_WINDOW, show=not picking_port)
             dpg.configure_item(picker.WINDOW, show=picking_port)
-
             elapsed = now - last_rate_time
             if elapsed >= 1.0:
                 hz_state = (state.state_count - last_state_count) / elapsed
@@ -364,9 +403,11 @@ def run_gui(state, args):
                 frame_count = 0
                 last_frame_time = now
 
+            view_width = dpg.get_viewport_client_width()
+            view_height = dpg.get_viewport_client_height()
             if not picking_port:
                 state.update_sweep(now)
-                layout = compute_layout(dpg.get_viewport_client_width(), dpg.get_viewport_client_height())
+                layout = compute_layout(view_width, view_height)
                 refresh_dashboard(state, layout, now, hz_state, hz_tof, fps)
                 mouse = dpg.get_mouse_pos(local=False)
                 left_clicked = dpg.is_mouse_button_clicked(dpg.mvMouseButton_Left)
@@ -386,9 +427,8 @@ def run_gui(state, args):
                 elif left_released and state.active_tab == config.TAB_CONSOLE:
                     console.release(state, mouse)
             else:
+                state.stream_mask = 0
                 picker.update(scan_results, scan_lock)
-                view_width = dpg.get_viewport_client_width()
-                view_height = dpg.get_viewport_client_height()
                 picker_width, picker_height = dpg.get_item_rect_size(picker.WINDOW)
                 if picker_width and picker_height:
                     dpg.configure_item(

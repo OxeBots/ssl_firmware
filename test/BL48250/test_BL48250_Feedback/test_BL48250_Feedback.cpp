@@ -283,12 +283,13 @@ void test_estimator_tracks_spin()
     ensure_estimator();
     const ScenarioStats stats = run_estimation_scenario("angle + motor");
 
-    // The estimator reports the spin, agrees with the pulse reference on sign,
-    // and lands in a sane magnitude band around it.
+    // The estimator reports the spin with the opposite sign of the pulse
+    // reference (its filter is driven from -motor_velocity) and lands in a sane
+    // magnitude band around it.
     TEST_ASSERT_TRUE_MESSAGE(std::fabs(stats.velocity_mean) > config::test::SPIN_VELOCITY_RAD_S,
                              "Estimator did not report the spin");
     TEST_ASSERT_TRUE_MESSAGE(stats.velocity_mean * -stats.pulse_mean > 0.0f,
-                             "Estimator sign disagrees with the pulse reference");
+                             "Estimator sign is not opposite the pulse reference");
     TEST_ASSERT_TRUE_MESSAGE(std::fabs(stats.velocity_mean) > 0.6f * std::fabs(stats.pulse_mean) &&
                                std::fabs(stats.velocity_mean) < stats.pulse_mean / 0.6f,
                              "Estimator velocity diverged from the pulse reference");

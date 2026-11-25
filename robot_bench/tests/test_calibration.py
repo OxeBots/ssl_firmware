@@ -2,7 +2,7 @@
 
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from robot_bench import calibration, config, demo, protocol
 from robot_bench.serial_io import BenchReader
@@ -24,6 +24,25 @@ def calibration_state(*, confirm=False, live=True):
 
 
 class CalibrationHelperTests(unittest.TestCase):
+    def test_subtab_content_height_leaves_room_for_the_tab_bar(self):
+        self.assertEqual(calibration.content_height(492), 492 - calibration.SUBTAB_BAR_HEIGHT)
+        self.assertEqual(calibration.content_height(492, 40), 452)
+        self.assertEqual(calibration.content_height(100), calibration.MIN_CONTENT_HEIGHT)
+
+    def test_active_subtab_defaults_to_encoders(self):
+        with patch.object(calibration.dpg, "does_item_exist", return_value=False):
+            self.assertEqual(calibration.active_subtab(), calibration.SUBTAB_ENCODERS)
+        with (
+            patch.object(calibration.dpg, "does_item_exist", return_value=True),
+            patch.object(calibration.dpg, "get_value", return_value="motors_sidebar_tabs"),
+        ):
+            self.assertEqual(calibration.active_subtab(), calibration.SUBTAB_ENCODERS)
+        with (
+            patch.object(calibration.dpg, "does_item_exist", return_value=True),
+            patch.object(calibration.dpg, "get_value", return_value=calibration.SUBTAB_CONTROL),
+        ):
+            self.assertEqual(calibration.active_subtab(), calibration.SUBTAB_CONTROL)
+
     def test_freshness_helpers_track_the_stale_window(self):
         state = BenchState()
         now = 100.0
@@ -103,6 +122,90 @@ class CalibrationHelperTests(unittest.TestCase):
         self.assertEqual(calibration.error_text(protocol.CALIBRATION_ERROR_I2C), "Falha de I2C")
         self.assertEqual(calibration.error_text(9), "Código 9")
 
+    def test_magnet_warning_uses_the_saved_motor_without_replacing_calibration_status(self):
+        state = calibration_state()
+        self.assertEqual(calibration.magnet_warning_text(state.calibration), "")
+        frame = demo.calibration_frame(
+            2,
+            state=protocol.CALIBRATION_RUNNING,
+            progress=30,
+            mapping_valid=1,
+            mux_map=[1, 3, 0, 2],
+            magnet_warning=[
+                0,
+                protocol.CALIBRATION_ERROR_MAGNET_TOO_CLOSE,
+                0,
+                protocol.CALIBRATION_ERROR_MAGNET_TOO_FAR,
+            ],
+        )
+        state.update_calibration(frame)
+        self.assertEqual(
+            calibration.magnet_warning_text(frame),
+            "Aviso · M1 · Ímã perto demais, M2 · Ímã longe demais ou ausente",
+        )
+        self.assertEqual(
+            calibration.status_text(state, state.last_calibration_t),
+            ("Calibrando · 30% concluído", config.ACCENT),
+        )
+        self.assertEqual(calibration.magnet_warning_text(None), "")
+
+    def test_magnet_warning_prefers_current_i2c_match_over_saved_motor(self):
+        frame = demo.calibration_frame(
+            2,
+            state=protocol.CALIBRATION_RUNNING,
+            mapping_valid=1,
+            mux_map=[2, 3, 1, 0],
+            i2c_ready=0b0010,
+            detected_mux_map=[0, 2, 2, 3],
+            magnet_warning=[
+                0, 0, protocol.CALIBRATION_ERROR_MAGNET_TOO_FAR, protocol.CALIBRATION_ERROR_MAGNET_TOO_CLOSE,
+            ],
+        )
+        self.assertEqual(
+            calibration.magnet_warning_text(frame),
+            "Aviso · M2 · Ímã longe demais ou ausente, mux 4 (motor não identificado) · Ímã perto demais",
+        )
+
+    def test_magnet_warning_leaves_unknown_and_conflicting_assignments_unidentified(self):
+        warning = [0, 0, protocol.CALIBRATION_ERROR_MAGNET_TOO_FAR, 0]
+        for frame in (
+            demo.calibration_frame(1, magnet_warning=warning),
+            demo.calibration_frame(
+                2, mapping_valid=1, i2c_ready=0b0011, detected_mux_map=[2, 2, 0, 3], magnet_warning=warning
+            ),
+        ):
+            with self.subTest(frame=frame):
+                self.assertEqual(
+                    calibration.magnet_warning_text(frame),
+                    "Aviso · mux 3 (motor não identificado) · Ímã longe demais ou ausente",
+                )
+
+    def test_failure_text_names_the_failed_path(self):
+        i2c_failed = demo.calibration_frame(
+            1, analog_ready=0b0001, wheel_error=[protocol.CALIBRATION_ERROR_NO_MOVEMENT, 0, 0, 0]
+        )
+        self.assertEqual(calibration.failure_text(i2c_failed, 0), "sem movimento no I2C")
+        ambiguous_i2c = demo.calibration_frame(
+            1, analog_ready=0b0001, wheel_error=[protocol.CALIBRATION_ERROR_AMBIGUOUS_I2C, 0, 0, 0]
+        )
+        self.assertEqual(calibration.failure_text(ambiguous_i2c, 0), "sinal I2C ambíguo")
+        i2c_bus = demo.calibration_frame(
+            1, analog_ready=0b0001, wheel_error=[protocol.CALIBRATION_ERROR_I2C, 0, 0, 0]
+        )
+        self.assertEqual(calibration.failure_text(i2c_bus, 0), "falha de I2C")
+        analog_failed = demo.calibration_frame(
+            1, i2c_ready=0b0001, wheel_error=[protocol.CALIBRATION_ERROR_NO_MOVEMENT, 0, 0, 0]
+        )
+        self.assertEqual(calibration.failure_text(analog_failed, 0), "sem movimento no analógico")
+        ambiguous_analog = demo.calibration_frame(
+            1, i2c_ready=0b0001, wheel_error=[protocol.CALIBRATION_ERROR_AMBIGUOUS_ANALOG, 0, 0, 0]
+        )
+        self.assertEqual(calibration.failure_text(ambiguous_analog, 0), "sinal analógico ambíguo")
+        both_failed = demo.calibration_frame(
+            1, wheel_error=[protocol.CALIBRATION_ERROR_AMBIGUOUS_ANALOG, 0, 0, 0]
+        )
+        self.assertEqual(calibration.failure_text(both_failed, 0), "sinal analógico ambíguo")
+
     def test_mapping_text_names_the_analog_input_and_mux_channel(self):
         calib = demo.calibration_frame(1, analog_map=[2, 0, 3, 1], mux_map=[1, 3, 0, 2], range_mask=0b0101)
         self.assertEqual(calibration.analog_text(calib, 0), "ENC3")
@@ -127,6 +230,54 @@ class CalibrationHelperTests(unittest.TestCase):
             calibration.mapping_header(demo.done_calibration_frame(1)),
             ("Mapa calibrado · gravado na NVS", config.OK_COLOR),
         )
+
+    def test_adc_range_text_shows_the_stored_endpoints(self):
+        self.assertEqual(calibration.ADC_RANGE_HEADER, "ADC mín–máx")
+        done = demo.done_calibration_frame(1)
+        minimum, maximum = demo.DEMO_ADC_RANGE[0]
+        self.assertEqual(calibration.adc_range_text(done, 0), (f"{minimum}–{maximum}", config.TEXT))
+        no_range = demo.calibration_frame(2)
+        self.assertEqual(calibration.adc_range_text(no_range, 0), ("—", config.TEXT_DIM))
+        self.assertEqual(calibration.adc_range_text(None, 0), ("—", config.TEXT_DIM))
+        partial = demo.calibration_frame(
+            3, range_mask=0b0101, adc_min_raw=[341, 0, 2965, 0], adc_max_raw=[2965, 0, 3270, 0]
+        )
+        self.assertEqual(calibration.adc_range_text(partial, 0), ("341–2965", config.TEXT))
+        self.assertEqual(calibration.adc_range_text(partial, 1), ("—", config.TEXT_DIM))
+        # A rejected raw range keeps the mask bit via the mV fallback but has no endpoints.
+        rejected = demo.calibration_frame(
+            4, range_mask=0xF, adc_min_raw=[0, 0, 0, 0], adc_max_raw=[0, 0, 0, 0]
+        )
+        self.assertEqual(calibration.adc_range_text(rejected, 2), ("—", config.TEXT_DIM))
+        equal = demo.calibration_frame(
+            5, range_mask=0b0001, adc_min_raw=[900, 0, 0, 0], adc_max_raw=[900, 0, 0, 0]
+        )
+        self.assertEqual(calibration.adc_range_text(equal, 0), ("—", config.TEXT_DIM))
+
+    def test_stage_text_and_summary_flag_non_reduced_encoders(self):
+        reduced = demo.calibration_frame(1)
+        self.assertEqual(calibration.stage_text(reduced, 0), ("REDUCED", config.OK_COLOR))
+        self.assertEqual(calibration.stage_summary(reduced), ("Encoders em modo REDUCED", config.OK_COLOR))
+        self.assertEqual(calibration.stage_text(None, 0), ("—", config.TEXT_DIM))
+        self.assertIn("aguardando", calibration.stage_summary(None)[0])
+        full = demo.calibration_frame(2, encoder_stage=[1, 0, 1, 1])
+        self.assertEqual(calibration.stage_text(full, 1), ("FULL", config.DEMO_COLOR))
+        text, color = calibration.stage_summary(full)
+        self.assertIn("M2 FULL", text)
+        self.assertEqual(color, config.DEMO_COLOR)
+        pwm = demo.calibration_frame(3, encoder_stage=[1, 1, 2, 1])
+        self.assertEqual(calibration.stage_text(pwm, 2), ("PWM", config.BAD_COLOR))
+        text, color = calibration.stage_summary(pwm)
+        self.assertIn("M3 PWM", text)
+        self.assertEqual(color, config.BAD_COLOR)
+        unknown = demo.calibration_frame(4, encoder_stage=[1, 1, 1, 3])
+        self.assertEqual(calibration.stage_text(unknown, 3), ("—", config.TEXT_DIM))
+        self.assertIn("M4 desconhecido", calibration.stage_summary(unknown)[0])
+        unverified = demo.calibration_frame(5, stage_mask=0b0111)
+        self.assertEqual(calibration.stage_text(unverified, 3), ("—", config.TEXT_DIM))
+        text, color = calibration.stage_summary(unverified)
+        self.assertIn("M4 não verificado", text)
+        self.assertEqual(color, config.DEMO_COLOR)
 
     def test_result_text_distinguishes_analog_only_both_failed_and_pending(self):
         calib = demo.calibration_frame(1, state=protocol.CALIBRATION_RUNNING, result_mask=0b0011, i2c_ready=0b0001)
@@ -153,6 +304,25 @@ class CalibrationHelperTests(unittest.TestCase):
         self.assertEqual(calibration.result_color(calib, 1), config.DEMO_COLOR)
         self.assertEqual(calibration.result_color(failed, 1), config.BAD_COLOR)
         self.assertEqual(calibration.result_color(calib, 2), config.TEXT_DIM)
+        partial = demo.calibration_frame(
+            1,
+            state=protocol.CALIBRATION_PARTIAL,
+            result_mask=0b0011,
+            i2c_ready=0b0001,
+            analog_ready=0b0011,
+            wheel_error=[
+                0,
+                0,
+                protocol.CALIBRATION_ERROR_NO_MOVEMENT,
+                protocol.CALIBRATION_ERROR_AMBIGUOUS_ANALOG,
+            ],
+        )
+        self.assertEqual(calibration.result_text(partial, 0), calibration.RESULT_BOTH)
+        self.assertEqual(calibration.result_text(partial, 1), calibration.RESULT_ANALOG)
+        self.assertEqual(calibration.result_text(partial, 2), calibration.RESULT_FAILED)
+        self.assertEqual(calibration.result_text(partial, 3), calibration.RESULT_FAILED)
+        self.assertEqual(calibration.result_color(partial, 2), config.BAD_COLOR)
+        self.assertEqual(calibration.result_color(partial, 3), config.BAD_COLOR)
 
     def test_wheel_rows_build_the_result_table(self):
         rows = calibration.wheel_rows(demo.done_calibration_frame(1))
@@ -178,14 +348,66 @@ class CalibrationHelperTests(unittest.TestCase):
             1, state=protocol.CALIBRATION_FAILED, error_code=protocol.CALIBRATION_ERROR_AMBIGUOUS_I2C
         )
         self.assertEqual(calibration.status_text(state, now)[0], "Falha · Sinal I2C ambíguo")
+        state.calibration = demo.calibration_frame(
+            1,
+            state=protocol.CALIBRATION_PARTIAL,
+            wheel_error=[
+                0,
+                protocol.CALIBRATION_ERROR_NO_MOVEMENT,
+                0,
+                protocol.CALIBRATION_ERROR_AMBIGUOUS_ANALOG,
+            ],
+        )
+        self.assertEqual(
+            calibration.status_text(state, now),
+            (
+                "Calibração incompleta · M2 sem movimento detectado, M4 sinal analógico ambíguo",
+                config.BAD_COLOR,
+            ),
+        )
         state.calibration = demo.idle_calibration_frame(1)
-        self.assertIn("Ociosa", calibration.status_text(state, now)[0])
+        self.assertEqual(
+            calibration.status_text(state, now),
+            ("Confirme o aviso de segurança para calibrar", config.TEXT_DIM),
+        )
+
+    def test_status_line_names_the_failed_path(self):
+        now = 100.0
+        state = BenchState()
+        state.last_calibration_t = now
+        state.calibration = demo.calibration_frame(
+            1,
+            state=protocol.CALIBRATION_PARTIAL,
+            result_mask=0b0001,
+            i2c_ready=0b0101,
+            analog_ready=0b1001,
+            wheel_error=[
+                0,
+                protocol.CALIBRATION_ERROR_AMBIGUOUS_I2C,
+                protocol.CALIBRATION_ERROR_AMBIGUOUS_ANALOG,
+                protocol.CALIBRATION_ERROR_NO_MOVEMENT,
+            ],
+        )
+        self.assertEqual(
+            calibration.status_text(state, now),
+            (
+                "Calibração incompleta · M2 sinal I2C ambíguo, M3 sinal analógico ambíguo, "
+                "M4 sem movimento no I2C",
+                config.BAD_COLOR,
+            ),
+        )
 
     def test_spinning_text_names_the_wheel_and_the_outcome(self):
         running = demo.calibration_frame(1, state=protocol.CALIBRATION_RUNNING, wheel=2)
         self.assertEqual(calibration.spinning_text(running), "Girando M3 · Traseira dir.")
         done = demo.done_calibration_frame(1)
         self.assertEqual(calibration.spinning_text(done), "Rotina concluída · motores parados")
+        self.assertEqual(
+            calibration.spinning_text(
+                demo.calibration_frame(1, state=protocol.CALIBRATION_PARTIAL)
+            ),
+            "Rotina concluída com falhas · motores parados",
+        )
         self.assertEqual(
             calibration.spinning_text(
                 demo.calibration_frame(1, state=protocol.CALIBRATION_FAILED)
@@ -299,6 +521,12 @@ class DemoCalibrationTests(unittest.TestCase):
         self.assertEqual(frame["analog_map"], [0, 1, 2, 3])
         self.assertEqual(frame["mux_map"], [0, 1, 2, 3])
         self.assertEqual(frame["range_mask"], 0)
+        self.assertEqual(frame["analog_ready"], 0)
+        self.assertEqual(frame["wheel_error"], [0, 0, 0, 0])
+        self.assertEqual(frame["encoder_stage"], [protocol.ENCODER_STAGE_REDUCED] * 4)
+        self.assertEqual(frame["stage_mask"], 0xF)
+        self.assertEqual(frame["adc_min_raw"], [0, 0, 0, 0])
+        self.assertEqual(frame["adc_max_raw"], [0, 0, 0, 0])
         self.assertEqual(frame["sequence"], 7)
 
     def test_calibrated_idle_frame_keeps_the_detected_mapping(self):
@@ -308,6 +536,12 @@ class DemoCalibrationTests(unittest.TestCase):
         self.assertEqual(frame["analog_map"], list(demo.DEMO_CALIBRATION_ANALOG_MAP))
         self.assertEqual(frame["mux_map"], list(demo.DEMO_CALIBRATION_MUX_MAP))
         self.assertEqual(frame["range_mask"], 0xF)
+        self.assertEqual(
+            frame["adc_min_raw"], [minimum for minimum, _maximum in demo.DEMO_ADC_RANGE]
+        )
+        self.assertEqual(
+            frame["adc_max_raw"], [maximum for _minimum, maximum in demo.DEMO_ADC_RANGE]
+        )
 
     def test_running_frame_advances_per_wheel_and_spikes_the_mapped_inputs(self):
         frame = demo.running_calibration_frame(0.0, 1)
@@ -324,6 +558,7 @@ class DemoCalibrationTests(unittest.TestCase):
         self.assertEqual(later["wheel"], 1)
         self.assertEqual(later["result_mask"], 0b0001)
         self.assertEqual(later["i2c_ready"], 0b0001)
+        self.assertEqual(later["analog_ready"], 0b0001)
         self.assertEqual(later["progress"], 26)
         self.assertEqual(later["analog_map"][0], demo.DEMO_CALIBRATION_ANALOG_MAP[0])
         self.assertEqual(later["analog_map"][1], 1)
@@ -332,11 +567,18 @@ class DemoCalibrationTests(unittest.TestCase):
     def test_running_frame_becomes_done_with_the_stored_non_identity_map(self):
         frame = demo.running_calibration_frame(demo.DEMO_CALIBRATION_TOTAL_S, 5)
         self.assertEqual(frame, demo.done_calibration_frame(5))
+        self.assertEqual(
+            frame["adc_min_raw"], [minimum for minimum, _maximum in demo.DEMO_ADC_RANGE]
+        )
+        self.assertEqual(
+            frame["adc_max_raw"], [maximum for _minimum, maximum in demo.DEMO_ADC_RANGE]
+        )
         self.assertEqual(frame["state"], protocol.CALIBRATION_DONE)
         self.assertEqual(frame["wheel"], 4)
         self.assertEqual(frame["progress"], 100)
         self.assertEqual(frame["result_mask"], 0xF)
         self.assertEqual(frame["i2c_ready"], 0xF)
+        self.assertEqual(frame["analog_ready"], 0xF)
         self.assertEqual(frame["range_mask"], 0xF)
         self.assertEqual(frame["mapping_valid"], 1)
         self.assertEqual(frame["analog_map"], list(demo.DEMO_CALIBRATION_ANALOG_MAP))
@@ -349,6 +591,21 @@ class DemoCalibrationTests(unittest.TestCase):
             demo.idle_calibration_frame(2, calibrated=True),
             demo.running_calibration_frame(2.5, 3),
             demo.done_calibration_frame(4),
+            demo.calibration_frame(
+                5,
+                state=protocol.CALIBRATION_PARTIAL,
+                wheel=4,
+                progress=100,
+                result_mask=0b0011,
+                i2c_ready=0b0001,
+                analog_ready=0b0011,
+                wheel_error=[
+                    0,
+                    0,
+                    protocol.CALIBRATION_ERROR_NO_MOVEMENT,
+                    protocol.CALIBRATION_ERROR_I2C,
+                ],
+            ),
         ):
             with self.subTest(state=frame["state"]):
                 message = DebugCalibration(**frame).encode()

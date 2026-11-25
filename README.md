@@ -110,6 +110,12 @@ GPIO pins are set in `sdkconfig.defaults`. The key groups are:
 
 Change radio channel and other settings in `sdkconfig.defaults` under the `# Radio` section.
 
+### SAFE_STOP at flash time
+
+Run `pio run -e esp32dev -t menuconfig` in the dev container. Under **Oxebots Robot Configuration**, select **Disable SAFE_STOP and report health faults as warnings** (`CONFIG_DISABLE_SAFE_STOP`), save, and build or upload. The default build retains `SAFE_STOP`.
+
+With the option selected, health faults appear as warnings without blocking valid radio or USB commands. The firmware still applies command timeouts, control ownership, and actuator prerequisites such as calibrated encoders for position moves.
+
 ## License
 
 See `LICENSE`.

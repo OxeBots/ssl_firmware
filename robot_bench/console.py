@@ -21,6 +21,12 @@ CONSOLE_POOL = 128
 CONSOLE_CHAR_SAMPLE = 64
 CONSOLE_CHAR_W = 7.25
 CONSOLE_SCROLL_LINES = 3
+# Header button that drops the console history.
+CONSOLE_CLEAR_LABEL = "Limpar"
+CONSOLE_CLEAR_W = 76.0
+CONSOLE_CLEAR_H = 24.0
+CONSOLE_CLEAR_Y = 6.0
+CONSOLE_CLEAR_GAP = 14.0
 
 DRAWLIST = "console_drawlist"
 
@@ -28,6 +34,8 @@ _panel_item = None
 _status_item = None
 _hint_item = None
 _empty_item = None
+_clear_bg = None
+_clear_label = None
 _highlights = []
 _lines = []
 _char_w = None
@@ -86,9 +94,19 @@ def console_selection_text(state):
     return "\n".join(parts)
 
 
+def clear(state):
+    """Drop the console history and return the view to the live messages.
+
+    The absolute line counter keeps counting, so external cursors stay valid.
+    """
+    state.console.clear()
+    state.console_offset = 0
+    state.console_sel = None
+
+
 def build(state):
     """Create the console drawlist, panel header and reusable line items."""
-    global _panel_item, _status_item, _hint_item, _empty_item
+    global _panel_item, _status_item, _hint_item, _empty_item, _clear_bg, _clear_label
     with dpg.drawlist(tag=DRAWLIST, width=400, height=300):
         _panel_item = dpg.draw_rectangle(
             (0, 0),
@@ -113,6 +131,15 @@ def build(state):
             )
         for _ in range(CONSOLE_POOL):
             _lines.append(_add_text((0, 0), "", "mono", config.TEXT_DIM, show=False))
+        # Drawn last so the header button stays above the scrolled line text.
+        _clear_bg = dpg.draw_rectangle(
+            (0, 0),
+            (0, 0),
+            fill=rendering.rgba(config.INSET),
+            color=rendering.rgba(config.PANEL_BORDER),
+            rounding=4.0,
+        )
+        _clear_label = _add_text((0, 0), CONSOLE_CLEAR_LABEL, "small", config.TEXT)
 
 
 def update(state, layout):
@@ -177,11 +204,14 @@ def update(state, layout):
 
 
 def press(state, pos):
-    """Start a text selection at a screen position."""
+    """Clear the console on the header button, otherwise start a text selection."""
     width, height = dpg.get_item_rect_size(DRAWLIST)
     x, y = _local_position(pos)
     if not (0 <= x < width and 0 <= y < height):
         state.console_sel = None
+        return
+    if _inside(clear_button_rect(width), (x, y)):
+        clear(state)
         return
     hit = console_hit_test(state, width, height, (x, y))
     state.console_sel = {"anchor": hit, "focus": hit} if hit else None
@@ -283,18 +313,43 @@ def _fit_line(text, max_w):
     return text + "..." if text else ""
 
 
+def clear_button_rect(width):
+    """Header rectangle of the clear button, right-aligned inside the panel."""
+    left = float(width) - CONSOLE_PAD_X - CONSOLE_CLEAR_W
+    return left, CONSOLE_CLEAR_Y, left + CONSOLE_CLEAR_W, CONSOLE_CLEAR_Y + CONSOLE_CLEAR_H
+
+
 def _update_header(state, width):
-    """Right-align the live or history hint in the panel header."""
+    """Right-align the view hint and the clear button in the panel header."""
     if state.console_offset > 0:
         status, status_color, hint = "Histórico", config.DEMO_COLOR, CONSOLE_HISTORY_HINT
     else:
         status, status_color, hint = "Ao vivo", config.OK_COLOR, CONSOLE_LIVE_HINT
     hint = " | " + hint
+    rect = clear_button_rect(width)
     status_width = _text_width(status, "small")
     hint_width = _text_width(hint, "small")
-    x = width - CONSOLE_PAD_X - status_width - hint_width
+    x = rect[0] - CONSOLE_CLEAR_GAP - status_width - hint_width
     dpg.configure_item(_status_item, text=status, pos=(float(x), 9.0), color=rendering.rgba(status_color))
     dpg.configure_item(_hint_item, text=hint, pos=(float(x + status_width), 9.0))
+    hovered = _inside(rect, _local_position(dpg.get_mouse_pos(local=False)))
+    dpg.configure_item(
+        _clear_bg,
+        pmin=(rect[0], rect[1]),
+        pmax=(rect[2], rect[3]),
+        fill=rendering.rgba(config.TAB_ACTIVE if hovered else config.INSET),
+    )
+    label_width = _text_width(CONSOLE_CLEAR_LABEL, "small")
+    dpg.configure_item(
+        _clear_label,
+        pos=(rect[0] + (CONSOLE_CLEAR_W - label_width) / 2.0, 9.0),
+    )
+
+
+def _inside(rect, point):
+    """True when a drawlist-local point lies inside a rectangle."""
+    left, top, right, bottom = rect
+    return left <= point[0] <= right and top <= point[1] <= bottom
 
 
 def _hide_lines(first):

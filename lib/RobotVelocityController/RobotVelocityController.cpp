@@ -1,6 +1,7 @@
 #include "RobotVelocityController.h"
 
 #include <algorithm>
+#include <cmath>
 
 /**
  * @brief Construct without a kinematic model. Call init() before compute().
@@ -38,7 +39,7 @@ ActuationSetpoint RobotVelocityController::compute(const BodyVelocity & desired_
 {
     ActuationSetpoint output = {};
     output.kick_inhibited = goal.kick_inhibited || health.kick_inhibited;
-    output.motion_inhibited = goal.motion_inhibited || health.motion_inhibited;
+    output.motion_inhibited = goal.motion_inhibited;
     output.command_sequence = goal.command_sequence;
     output.timestamp_us = goal.received_at_us;
 
@@ -59,9 +60,12 @@ ActuationSetpoint RobotVelocityController::compute(const BodyVelocity & desired_
 
     for (size_t index = 0; index < ROBOT_WHEEL_COUNT; ++index)
     {
-        output.wheel_velocity_rad_s[index] = std::clamp(static_cast<float>(wheel_target(index)),
-                                                        -m_config.max_wheel_velocity_rad_s,
-                                                        m_config.max_wheel_velocity_rad_s);
+        const float target = static_cast<float>(wheel_target(index));
+        // A cancelled wheel velocity can retain roundoff after the matrix product.
+        // Keep it zero before the wheel controller applies its minimum speed.
+        if (std::fabs(target) > 1e-6f)
+            output.wheel_velocity_rad_s[index] = std::clamp(
+              target, -m_config.max_wheel_velocity_rad_s, m_config.max_wheel_velocity_rad_s);
     }
 
     if (!output.kick_inhibited)

@@ -10,14 +10,13 @@ console as long as a dashboard client keeps the connection alive.
 From the repository root (host or devcontainer):
 
 ```bash
-python3 -m robot_bench                        # port picker, then dashboard
+python3 -m robot_bench                        # connection picker, then dashboard
 python3 -m robot_bench --port /dev/ttyUSB0    # skip the picker
 python3 -m robot_bench --demo                 # synthetic data, no hardware
 python3 -m robot_bench --tab 1                # open on the Calibração tab
 python3 -m robot_bench --tab 3                # open on the ToF tab
 python3 -m robot_bench --tab 4                # open on the IMU tab
 python3 -m robot_bench --tab 5                # open on the Console tab
-python3 -m robot_bench --tab 6                # open on the Controle tab
 python3 -m robot_bench --screenshot-dir tmp/gui   # save PNG frames
 ```
 
@@ -28,39 +27,69 @@ renderer and forwards the host X11 socket, so it works without a GPU.
 
 ## GUI
 
-Resizable window (minimum 1024x640, maximizable to full screen) with seven
+Resizable window (minimum 1024x640, maximizable to full screen) with six
 tabs:
 
 | Tab         | Content                                                                 |
 | ----------- | ----------------------------------------------------------------------- |
-| Motors      | Four selectable wheel cards, speed/target plots, angle readout, motor and sweep buttons |
-| Calibração  | Motor/encoder wiring calibration controls, live detection bars and the stored map |
-| Health      | System, safety lifecycle, error flags, power and sensor availability     |
+| Motors      | Sub-tabs **Visão geral** (four selectable wheel cards with analog/FG feedback, speed/target/pulse plots, motor controls, sweep, position panel) and **Dados brutos** (raw encoder/motor values and plots) |
+| Calibração  | Sub-tabs: encoder wiring alignment (Encoders) and control calibration (Controlador) |
+| Health      | System, lifecycle, warnings, power and sensor availability             |
 | ToF         | Full-size 8x8 distance heatmap with millimetre readings and colour scale |
 | IMU         | Orientation box and twelve orientation / sensor plots                   |
 | Console     | Full-size serial log with history scrolling and text selection          |
-| Controle    | Wheel control calibration (PID + feedforward auto-tuning) and wheel position control |
 
 Connection status stays at the top and stream details at the bottom. The
 serial console has a dedicated tab; messages continue to arrive while other
-tabs are open. Each wheel card shows the encoder angle next to the RPM
-reading; the angle is a live number only and is not plotted. Click a wheel to
+tabs are open. Each wheel card shows the wheel name and the RPM reading, with
+the live values below them (angle, target, PWM, direction, pulse speed and
+count); the angle is a live number only and is not plotted. The speed plot fills
+whatever the rows leave, so it stays the largest element of the card. The card
+also shows the digital FG pulse feedback of the BL48250 motors: the pulse-window
+speed next to the analog speed and the cumulative FG edge count, both shown as
+"—" until the firmware reports a pulse baseline for that wheel. The speed plot
+has a third magenta pulse trace with a small colour legend in the caption. Click a wheel to
 select it, then use the speed adjustment, sweep or **Stop all motors** buttons.
-Stopping cancels the sweep so it cannot restart the motors. All keyboard
-shortcuts remain available:
-`[1-4]` select wheel, `[UP/DOWN]` target +/-100 RPM, `[LEFT/RIGHT]` +/-500,
-`[SPACE]` stop all motors, `[W]` dashboard-driven +/-1000 RPM square sweep,
-`[F1-F7]` switch tabs, `[Q/ESC]` quit.
+Stopping cancels the sweep so it cannot restart the motors. The adjustment buttons
+and the square sweep are fractions of the calibrated wheel-speed limit, which the
+sidebar shows as "Máximo calibrado: ±138 RPM"; before a control calibration the
+fallback limit is 4000/3 RPM and the line says it is not calibrated. The sidebar
+switches between **Controle** (wheel target and sweep) and
+**Posição** (wheel position moves, see below). All keyboard shortcuts remain
+available: `[1-4]` select wheel, `[UP/DOWN]` adjust by the RPM step shown in Controle,
+`[LEFT/RIGHT]` +/-100 %, `[SPACE]` stop all motors, `[W]` square sweep between
++/- the limit, `[F1-F6]` switch tabs, `[Q/ESC]` quit.
 
-**Bench motion override** (Motors -> Control) lets the dashboard wheel targets
-through while the health monitor inhibits motion, for bring-up on a bare bench
-without the power-board supply sense or without encoder calibration. It only
-lifts the gate on the dashboard target path: the reported health state is
-unchanged, radio commands keep their safety gating, and the firmware clears the
-override and zeroes the wheels when the streaming session ends.
+The **Dados brutos** sub-tab of Motors shows the unfiltered sensor path one wheel at a
+time, so the plots get most of the tab height. A selector row has one button per motor
+(M1..M4): the selected wheel's button is wide with its full name and the accent colour,
+while the other three stay compact, so the selected motor clearly owns most of the row. The
+selection follows the global wheel choice (button click, 1-4 keys or an overview card) and
+focuses the shared CD4052B mux on that wheel's encoder; leaving the raw view releases the
+focus so the other encoders are no longer read. The wide header lists the selected motor's raw analog ADC
+mean, raw AS5600 I2C angle (counts and degrees; "—" when the focused mux read failed),
+analog encoder angle, cumulative FG count, FG delta of the last 100 ms, EKF speed (less
+filtered than the control value), filter pulse speed, smoothed control RPM and the applied
+signed PWM with its direction, plus the raw/I2C/stale status. Three large 12-second plots
+fill the rest: the encoder angle (cyan, "ADC (ângulo)") and the raw I2C angle (amber,
+"I2C (ângulo)") on one 12-bit count scale, FG delta (violet) and the
+EKF/pulse/control speed traces. Every history plot labels its vertical scale on the left
+and fits it to the visible trace. The ADC trace converts the raw ADC mean to equivalent 12-bit
+encoder-angle counts with the wheel's stored adc_min_raw/adc_max_raw endpoints (clamped to
+0..4095), so the two encoder readings are comparable; the raw ADC counts stay visible in the
+header. Without a valid stored range the trace falls back to the raw ADC counts and is labeled
+"ADC bruto (sem faixa)".
+
+The Health tab reports health faults as warnings while wheel commands remain available.
+The firmware stops wheel targets set by the dashboard when its streaming session ends.
 
 On the Console tab, scroll up to browse history; scroll down to return to live
-messages. Drag across console text to copy the selection to the clipboard.
+messages. Drag across console text to copy the selection to the clipboard. The
+**Limpar** button in the panel header drops the history and returns the view to
+the live messages. The console also shows the plain text the board prints
+directly on the port, so a reset is readable from `ets Jun  8 2016` and the
+ESP-IDF startup log onwards, before the firmware starts sending its own framed
+messages.
 Missing or stale health data stays unknown. Motor, attitude and range readings
 expire after 1 second; health expires after 1.5 seconds. Disconnects and reboots
 clear freshness immediately. Zero orientation angles are valid.
@@ -83,61 +112,108 @@ its current reading, and an automatic vertical scale. All twelve plots fit on th
 IMU tab together. Traces break at gaps in telemetry; orientation traces also
 break at angle wraparound. Stale readings show a dash while recent history remains visible.
 
-## Calibração dos motores
+## Posição das rodas
 
-The Calibração tab drives the firmware's motor/encoder wiring calibration. The
-robot spins one motor at a time in open loop and watches every encoder input:
+The **Posição** sub-tab of the Motors sidebar commands wheel position moves. Enter an angle in
+degrees, choose **Ângulo absoluto** or leave it relative to the current angle, set the speed cap
+and press **Girar** for one wheel. The firmware runs a cascade position loop (PD outer loop
+driving the tuned velocity loop), holds the target when it is reached and stops after a timeout.
+**Parar posição** cancels every move. Absolute angles count from boot; relative moves start from
+the measured angle. Measured angle, error and state of each wheel are shown live. Position moves
+require calibrated encoders and are refused while a radio motion command or a calibration
+controls the wheels. In `--demo` mode the panel simulates the proportional approach.
+
+## Calibração dos motores (Encoders)
+
+The Calibração tab has two internal sub-tabs. **Encoders** drives the firmware's
+motor/encoder wiring calibration; **Controlador** (next section) drives the per-wheel control
+calibration. Run Encoders first: the control calibration needs a valid motor/encoder map.
+
+The Encoders sub-tab makes the robot spin one motor at a time in open loop and watches every
+encoder input:
 the analog output of each connector (ENCM1..ENCM4) and every channel of the
 CD4052B I2C mux. The detected map is `wheel -> analog input` (the path used for
 closed-loop control) plus `wheel -> I2C mux channel` (the encoder pair behind
 the mux).
 
-The safety warning on the tab is mandatory: check **Robô levantado · rodas
+The safety warning on the sub-tab is mandatory: check **Robô levantado · rodas
 livres** and keep the robot lifted or the wheels free before pressing
-**Calibrar motores**. The wheels spin during the routine and must not be
+**Alinhar encoders**. The wheels spin during the routine and must not be
 touched; **Parar calibração** aborts the run. Wheel targets are ignored while
 the routine runs, so the Motors tab cannot fight the calibration.
 
 While the routine runs the tab shows its progress, which wheel is spinning, the
 movement measured on each analog input and mux channel (one bar each, normalised
 to the column peak), and the per-wheel detection result (both encoder paths,
-analog only, failed or pending). The right panel shows the stored map and whether
-it came from a calibration run or is still the default identity map. The
-firmware saves the detected map in NVS and applies it immediately, so it
-survives reboots. In `--demo` mode the tab simulates the same 7.2 s routine so
-the layout can be exercised without hardware.
+analog only, failed or pending). A wheel that did not match shows **Falhou** and
+the status line names each failed wheel with the path that failed (analógico or
+I2C) and its reason; the routine still visits all four wheels, and when a wheel
+fails the map stored in NVS is left untouched.
+The right panel shows the stored map and whether it came from a calibration run
+or is still the default identity map. The firmware saves the detected map in NVS
+and applies it immediately, so it survives reboots.
 
-## Calibração do controle
+The firmware also enforces the encoder operation mode at boot and when a calibration starts:
+the AS5600 analog output must be in REDUCED mode (0.1..0.9 VCC) so its voltage stays inside
+the ESP32 ADC linear range (the factory FULL mode spans 0..VCC and can clip). The right panel
+adds a **Modo** column per wheel (REDUCED green, FULL amber, PWM red, "—" unknown/unverified)
+and a badge: green "Encoders em modo REDUCED" when all four are verified REDUCED, otherwise a
+warning naming the wheels that are FULL/PWM/unknown; a non-REDUCED encoder is not usable for
+the analog control path. The same table has an **ADC mín–máx** column with the stored raw ADC
+endpoints of each wheel's encoder (the 0 and 360 degree values, e.g. "410–3680"), or "—" when
+no range is stored (range_mask bit clear) or when the stored pair is unusable (max <= min, for
+example a wheel whose raw range was rejected while the mV fallback kept the mask bit, like an
+intermittent analog harness). Those raw endpoints are what the firmware prefers for the angle
+mapping, and they make the 0/360 degree wrap verifiable. In `--demo` mode the sub-tab
+simulates the same 7.2 s routine with all four encoders REDUCED and plausible ADC ranges so the
+layout, the good badge and the endpoint column can be exercised without hardware.
 
-The Controle tab drives the firmware's per-wheel control calibration. For each wheel the
-firmware measures the static friction duty and the plant gain with open-loop duty steps,
-synthesizes a PID plus friction and velocity feedforward from that model, validates the
-closed-loop speed step, refines the gains when the step does not meet the criteria, and stores
-the winning parameters in NVS. The same safety confirmation as the wiring calibration applies
-(**Robô levantado · rodas livres**): the wheels spin one at a time and **Parar calibração**
-aborts the run. Wheel targets are ignored while the routine runs.
+## Calibração do controle (Controlador)
 
-Progress, the current wheel and its phase (Atrito, Identificação, Validação, Refino, Gravação)
-are shown live, together with the speed step response of the wheel under test and the per-wheel
-result: validated gains (Kp, Ki, Kd), friction feedforward duty, velocity feedforward, rise
-time, overshoot and steady-state error. The right panel shows the parameters currently in
-effect, which at idle are the ones stored in NVS. A wheel that fails keeps its previous
-parameters; the run only fails when no wheel produces a valid step. Run the wiring
-calibration (F2) first: control calibration needs a valid motor/encoder map.
+Start in **Calibração → Controlador** with a valid encoder map and
+**Robô levantado · rodas livres** checked. Keep the robot lifted throughout
+the run. **Parar calibração** aborts it.
 
-### Posição das rodas
+The firmware measures breakaway duty, the motor response time, and the lowest
+stable continuous speed for each wheel in both directions. Below that speed,
+the controller adjusts pulsed drive from encoder travel and coasts early when
+the wheel is predicted to reach the target. Calibration compares pulse
+amplitude, drive between pulses, pulse spacing, and coast timing. It chooses the
+candidate with the smallest measured peak error, using RMS ripple to break ties.
+If the first settings give a surge on one side and underspeed on the other,
+calibration tests coast timing between those measured outcomes.
 
-The lower panel of the Controle tab commands wheel position moves. Enter an angle in degrees,
-choose **Ângulo absoluto** or leave it relative to the current angle, set the speed cap and
-press **Girar** for one wheel. The firmware runs a cascade position loop (PD outer loop driving
-the tuned velocity loop), holds the target when it is reached and stops after a timeout.
-**Parar posição** cancels every move. Absolute angles count from boot; relative moves start
-from the measured angle. Measured angle, error and state of each wheel are shown live. Position
-moves use the same motion gate (and bench override) as wheel targets and are refused while a
-calibration runs.
+The common maximum is the smallest of the four measured wheel maxima. Each
+wheel's maximum is the lower of its full-duty forward and reverse speeds.
+Calibration checks both sides of each wheel's transition, then runs all four
+wheels together at 50 RPM intervals and at the exact common maximum. The
+shared checks use 12-second captures for pulsed operation and cross-check the
+encoder travel with motor feedback counts. The console reports mean speed,
+minimum and maximum speeds, and RMS ripple from sliding 100 ms travel windows.
 
-In `--demo` mode both features simulate the firmware behavior: a 10.4 s control calibration
-per run and position moves with a proportional approach.
+At every shared checkpoint, each mean must be within 5% of target and the
+spread across wheel and direction means must also be within 5%. Each window
+must stay within 35% of target under pulsed drive and within 18% under
+continuous drive. Calibration tries alternate qualified pulse
+settings on wheels that miss a checkpoint and saves the profile only after
+the shared range passes. A failed or interrupted run keeps the previous settings. Wheel target
+commands are ignored during the run, which can take up to 20 minutes.
+
+Progress, the current wheel and its phase (Atrito, Identificação, Velocidade máxima,
+Validação, Refino, Gravação) are shown live, together with the speed step response of the
+wheel under test and the per-wheel result. The results table has two rows per wheel, **M1 +**
+(forward, positive target) and **M1 −** (reverse): validated HIGH-speed rise time, overshoot
+and steady-state error of each direction; the low-speed validation results are logged to the
+Console. The parameters table also shows two rows per wheel: Kp/Ki/Kd are common (Ki is the
+calibrated integral gain, duty per rad/s per second), while the friction intercept (Avanço)
+and the velocity feedforward (v_ff) are per direction. At idle the values shown are the ones
+stored in NVS. A line under
+the tables shows each wheel's measured maximum and the common limit ("Limite comum:
+138.0 RPM"), with "—" for wheels not measured in the session, and the finished status names the
+stored limit. Run the wiring calibration first (Encoders sub-tab): control calibration needs a
+valid motor/encoder map. In `--demo` mode the sub-tab simulates a 20 s two-direction control
+calibration with asymmetric forward/reverse values and wheel maxima 175/170/165/138 RPM that
+produce a 138 RPM limit.
 
 ## Modules
 
@@ -150,46 +226,54 @@ per run and position moves with a proportional approach.
 | `discovery.py` | USB port listing + `PortScanner` firmware probe (picker data source)  |
 | `demo.py`      | `DemoSource`: synthetic data generator for GUI work without hardware  |
 | `rendering.py` | Dear PyGui theme, fonts, panel/plot helpers, colormap and cube math |
-| `motors.py`    | Wheel cards, speed plots, angle readout and clickable motor controls |
-| `calibration.py` | Motor/encoder calibration controls, detection bars and stored map  |
-| `tuning.py`    | Control calibration (PID auto-tuning) and wheel position controls      |
+| `motors.py`    | Wheel cards with FG pulse feedback, plots, motor controls and the position panel |
+| `calibration.py` | Calibração tab: Encoders/Controlador sub-tabs, detection bars and stored map |
+| `tuning.py`    | Control calibration content (PID auto-tuning) embedded in the Controlador sub-tab |
+| `raw.py`       | Motors "Dados brutos" sub-tab: wide selected-motor selector, mux focus, raw values and three large plots |
 | `health.py`    | System, safety, power and sensor status                              |
 | `sensing.py`   | Distance heatmap, orientation and sensor measurements                 |
-| `console.py`   | Console drawlist, history scrolling and text selection                |
-| `picker.py`    | First-screen port picker window and scan status                       |
-| `app.py`       | Dear PyGui viewport, main loop, phases (picker/dashboard), input      |
+| `console.py`   | Console drawlist, history scrolling, text selection and clear button  |
+| `picker.py`    | First-screen connection picker: USB debug ports    |
+| `app.py`       | Dear PyGui viewport, main loop, phases (picker/dashboard), input |
 | `cli.py`       | Argument parsing and wiring                                           |
 
 The view modules build Dear PyGui widgets once and refresh their values from
 `BenchState` every frame. `app.py` routes mouse and keyboard input through
 `perform_action`; commands stay in `BenchState`. The demo source produces
 telemetry and uses the same sweep timing as a real session.
-
 ## GUI checks
 
 Run inside the devcontainer, from `/workspaces/ssl_firmware`:
 
 ```bash
-ruff check robot_bench/
+ruff check scripts/ robot_bench/
 python -m unittest discover -s robot_bench/tests -v
 ```
 
 The unit tests cover state handling, commands, formatting and protocol
 parsing; they do not open a window, so they also run without a display.
 
-The checks cover stop/sweep behavior, target changes, motion override arming and
+The checks cover stop/sweep behavior, target changes and
 command routing; motor calibration freshness, button rules, level normalisation,
-result/error wording, start/stop routing and the simulated routine frames; layout
+result/error wording, per-wheel encoder-mode text and the REDUCED/non-REDUCED badge,
+the ADC min–max endpoint column (stored range vs range_mask), start/stop routing and the
+simulated routine frames (all REDUCED with plausible ADC ranges in the demo); layout
 space reservation and connection/status wording; picker ordering; console history
-clamping and anchoring, hit testing, selection text, clipboard copy and scrolling;
-wheel card status and hit testing; health freshness, lifecycle, flags, supply,
-IMU calibration and connection rows; history sample filtering, gap and wraparound
+clamping and anchoring, hit testing, selection text, clipboard copy, clearing and scrolling;
+wheel card status, digital pulse text and hit testing; the six USB tabs; health
+freshness, lifecycle, flags, supply, IMU
+calibration and connection rows; history sample filtering, gap and wraparound
 breaks, automatic scaling, distance colours and rotation math; raw range transport
 (including fragmented frames, quality labels, hover text, stale/waiting modes);
 the IMU freshness and layout helpers; control-calibration freshness, gating, phase/result
-wording, metric formatting, demo frames and command routing; and wheel position parsing,
-frame encoding, move/stop gating, row formatting and tab/F7 binding. Run a firmware build
-first to generate the bindings.
+wording, per-direction row/metric formatting, max-speed phase/limit texts, demo frames and
+command routing; wheel position parsing, frame encoding, move/stop gating and row formatting
+(Motors sidebar); the Calibração sub-tab height and selection helpers; calibrated max-RPM
+tracking, target clamping and sweep amplitude, Motors fraction buttons/labels and the
+configurable arrow-key RPM step (Controle panel, default 10 RPM); the raw view helpers, per-wheel raw history, I2C sentinel handling, selector
+labels/widths and sync, distinct ADC/I2C plot colours, plot height, mux focus command/clearing,
+status and stale/disconnect clearing.
+
 
 ## Serial protocol
 
@@ -198,46 +282,60 @@ Defined in `proto/serial_debug_protocol.bitproto`. Every frame is
 
 | Direction     | Message        | Rate     | Content                                     |
 | ------------- | -------------- | -------- | ------------------------------------------- |
-| robot -> host | `DebugState`   | 25 Hz    | 4 wheels PWM/speed/target/angle, attitude   |
-| robot -> host | `DebugImu`     | 10 Hz    | calibrated accel / gyro / magnetometer      |
+| robot -> host | `DebugLink`    | 4 Hz     | uptime and link heartbeat                   |
+| robot -> host | `DebugState`   | ~83 Hz   | 4 wheels PWM/speed/target/angle + FG pulse speed/count and masks |
+| robot -> host | `DebugImu`     | 10 Hz    | attitude and calibrated accel / gyro / magnetometer |
 | robot -> host | `DebugTof`     | ~15 Hz   | 64 raw distances + 64 sensor status codes  |
 | robot -> host | `DebugHealth`  | 2 Hz     | lifecycle, faults, supply voltage, heap     |
 | robot -> host | `DebugText`    | per line | captured ESP_LOG console lines              |
 | robot -> host | `DebugCalibration` | ~5 Hz | routine state/progress, mapping and live levels |
-| robot -> host | `DebugTuning` | ~5 Hz | control-calibration state/phase, per-wheel gains and step metrics |
+| robot -> host | `DebugTuning` | ~5 Hz | control-calibration state/phase, per-wheel gains and forward/reverse step metrics, calibrated speed limit and per-wheel maxima |
+| robot -> host | `DebugRaw` | ~10 Hz | raw ADC/I2C encoder values, FG pulse deltas, EKF speed and applied PWM |
 | robot -> host | `DebugPosition` | 10 Hz | position-control masks, continuous wheel angles and targets |
-| host -> robot | `DebugControl` | on event | start/stop stream, keepalive, wheel targets, motion override, wiring calibration, control calibration |
+| host -> robot | `DebugSubscribe` | on view change and every 0.9 s | requested stream mask and keepalive |
+| host -> robot | `DebugControl` | on event | stop stream, wheel targets, wiring/control calibration, raw encoder focus |
 | host -> robot | `DebugPositionControl` | on event | relative/absolute wheel position moves and stop |
 
-`DebugTof` is 196 bytes: a 4-byte sequence, 64 signed 16-bit distances, and
-64 unsigned 8-bit statuses. `DebugCalibration` is 36 bytes: routine state and
-current wheel, progress, result masks, stored-map flag, four analog and four mux
-mappings, eight signed 16-bit movement levels, range mask, error code and a
-sequence counter. `DebugTuning` is 66 bytes: state, wheel, phase, progress,
-result and error masks, four gain/feedforward arrays (Kp x100, Ki x100,
-Kd x10000, friction duty, velocity feedforward x100), four rise times, overshoot
-and steady-state error percentages and a sequence counter. `DebugPosition` is
+`DebugState` uses 61 payload bytes, including four 13-byte wheel records.
+Encoder angles use 0.1° units and FG pulse speeds use 1 RPM units. Measured
+speed and target retain 0.1 RPM units. Attitude travels in `DebugImu`.
+`DebugTof` is 196 bytes: a 4-byte
+sequence, 64 signed 16-bit distances, and 64 unsigned 8-bit statuses. `DebugCalibration` is 70 bytes: routine state and
+current wheel, progress, per-path masks (analog, I2C and both-paths result),
+stored-map flag, four analog and four mux mappings, eight signed 16-bit movement
+levels, range mask, abort-level error code, four per-wheel failure reasons, a sequence
+counter, four per-wheel AS5600 output stages (0 FULL, 1 REDUCED, 2 PWM, 3 unknown), a
+validity mask for those stages, and four per-wheel raw ADC minima plus four maxima (the stored
+0/360 degree endpoints, 0 when that wheel has no stored range), followed by four magnet warnings in
+mux input order and the current run's wheel-to-mux assignments, valid where the matching I2C bit is set. `DebugTuning` is
+108 bytes: state, wheel, phase, progress, result and error masks, four gain/feedforward arrays
+(Kp x100, Ki x100, Kd x10000, forward friction intercept, forward velocity feedforward x100),
+four forward rise times, forward overshoot and steady-state error percentages, a sequence
+counter, then the reverse direction: four reverse friction intercepts, four reverse velocity
+feedforwards (x100), four reverse rise times, reverse overshoot and steady-state error
+percentages, and finally the common calibrated speed limit plus the four measured wheel
+maxima (both in 0.1 RPM units, 0 when not measured or stored). `DebugRaw` is 44 bytes:
+a sequence, four unsigned 16-bit analog encoder ADC means, four unsigned 16-bit AS5600 I2C
+raw angles (0xFFFF when unreadable), four unsigned 16-bit FG pulse deltas, four signed 16-bit
+EKF speeds (0.1 RPM) and four signed 16-bit applied PWM duties. `DebugPosition` is
 39 bytes: active/done masks, error code, four measured and four target continuous
 wheel angles in 0.001 degree units and a sequence counter. `DebugPositionControl`
 is 25 bytes: operation, mode, wheel mask, four requested angles (0.001 degree),
 speed cap and a command counter. Rebuild the firmware and dashboard together when
 changing this layout; generated C and Python definitions share the same source.
 
-The firmware starts streaming only after a `START_STREAM` control frame.
-Telemetry and captured application logs stop on `STOP_STREAM` or 1.5 seconds
-after the last keepalive (sent at ~1 Hz by the dashboard). Keepalives alone cannot
-start a session. While disconnected, no diagnostic frames or application log text
-are sent; normal boot output can precede service initialization. Sensor acquisition
-and robot control continue independently of the bench connection. Both the picker
-probe and the dashboard re-send `START_STREAM` until the first frame arrives, so a board
-that reboots as the port opens is still detected. The picker enables
-**Connect** only on ports where the probe actually flagged the firmware.
+The picker requests the link heartbeat to detect the firmware. The dashboard
+renews its two-byte subscription at 115200 baud and changes the mask as the
+visible screen changes. Telemetry stops on `STOP_STREAM` or 1.5 seconds after
+the last subscription. Sensor acquisition and robot control continue
+independently of the bench connection.
 
 ## Debugging
 
 - `--demo` runs the full GUI without hardware (synthetic IMU/ToF/motor data, a
-  simulated motor calibration run started from the Calibração tab, a simulated
-  control calibration and wheel position moves started from the Controle tab).
+  simulated wiring calibration started from the Calibração tab's Encoders sub-tab, a
+  simulated control calibration from the Controlador sub-tab and wheel position moves
+  from the Motors sidebar's Posição sub-tab).
 - `--screenshot-dir DIR` saves a PNG of the rendered frame every
   `--screenshot-period` seconds, e.g.:
 

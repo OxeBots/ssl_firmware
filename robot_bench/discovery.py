@@ -1,5 +1,6 @@
 """USB serial device discovery and debug-firmware detection."""
 
+import errno
 import re
 import threading
 import time
@@ -9,9 +10,9 @@ import serial.tools.list_ports
 
 from . import protocol as proto
 
-# Opening the port may reset the ESP32; give it time to boot before probing.
+# Give a board that is already rebooting time to answer the probe.
 PROBE_WINDOW_S = 4.5
-# START_STREAM re-send interval: covers a lost first frame when the board
+# Subscription retry interval: covers a lost first frame when the board
 # reboots as the port opens, or a firmware that is still booting.
 PROBE_RESEND_S = 0.9
 # Pause between full scan passes while the picker is open.
@@ -32,17 +33,22 @@ def list_candidate_ports():
 class PortScanner(threading.Thread):
     """Probes USB serial ports in the background for the debug firmware."""
 
-    def __init__(self, results, lock, active):
+    def __init__(self, results, lock, active, keep=()):
         super().__init__(daemon=True)
         self.results = results  # device -> {desc, status, detail}; guarded by lock
         self.lock = lock
         self.active = active  # threading.Event: keep scanning while set
+        # Devices the running session already owns (its serial port): the
+        # probe opens and resets those ports, so never touch or drop them.
+        self.keep = set(keep)
 
     def run(self):
         while self.active.is_set():
-            candidates = list_candidate_ports()
+            candidates = [
+                (device, desc) for device, desc in list_candidate_ports() if device not in self.keep
+            ]
             with self.lock:
-                known = {device for device, _desc in candidates}
+                known = {device for device, _desc in candidates} | self.keep
                 for device in [d for d in list(self.results) if d not in known]:
                     del self.results[device]
                 for device, desc in candidates:
@@ -52,42 +58,25 @@ class PortScanner(threading.Thread):
             for device, _desc in candidates:
                 if not self.active.is_set():
                     return
-                try:
-                    self._probe(device)
-                except (serial.SerialException, OSError):
-                    # A flapping or contended port must not kill the scanner.
-                    with self.lock:
-                        entry = self.results.get(device)
-                        if entry is not None:
-                            entry["status"] = "busy"
-                            entry["detail"] = "in use or unavailable"
+                self._probe(device)
             deadline = time.monotonic() + SCAN_RETRY_S
             while self.active.is_set() and time.monotonic() < deadline:
                 time.sleep(0.2)
 
     def _probe(self, device):
         """Open a port briefly and flag it when the debug firmware answers."""
-        status, detail = "empty", "no firmware response (is another monitor using the port?)"
+        status, detail = "empty", "no firmware response"
         try:
-            ser = serial.Serial(device, 115200, timeout=0.2)
-        except (serial.SerialException, OSError, ValueError):
-            status, detail = "busy", "in use or unavailable"
-        else:
-            try:
-                try:
-                    ser.dtr = False
-                    ser.rts = False
-                except (serial.SerialException, OSError):
-                    pass  # modem-control ioctls unsupported on this device
+            ser = serial.Serial(baudrate=115200, timeout=0.2, write_timeout=0.5, exclusive=True)
+            # Set modem lines before opening so USB discovery does not reset the ESP32.
+            ser.dtr = False
+            ser.rts = False
+            ser.port = device
+            with ser:
                 decoder = proto.FrameDecoder()
-                # The firmware streams only for subscribed clients. Re-send
-                # START_STREAM periodically: the board may reboot as the port
-                # opens or may still be booting when the first one is sent.
-                ser.write(
-                    proto.encode_frame(
-                        proto.MSG_CONTROL, proto.encode_control(proto.OP_START_STREAM)
-                    )
-                )
+                # A heartbeat-only subscription is enough to identify the firmware.
+                probe = proto.encode_frame(proto.MSG_SUBSCRIBE, proto.encode_subscription(0))
+                ser.write(probe)
                 deadline = time.monotonic() + PROBE_WINDOW_S
                 next_send = time.monotonic() + PROBE_RESEND_S
                 while time.monotonic() < deadline and status == "empty":
@@ -95,25 +84,24 @@ class PortScanner(threading.Thread):
                         break
                     if time.monotonic() >= next_send:
                         next_send = time.monotonic() + PROBE_RESEND_S
-                        ser.write(
-                            proto.encode_frame(
-                                proto.MSG_CONTROL, proto.encode_control(proto.OP_START_STREAM)
-                            )
-                        )
+                        ser.write(probe)
                     chunk = ser.read(128)
-                    if chunk and decoder.feed(chunk):
+                    if any(
+                        kind == proto.MSG_LINK and proto.parse_link(payload) is not None
+                        for kind, payload in decoder.feed(chunk)
+                    ):
                         status, detail = "firmware", "Serial debug firmware"
-                ser.write(
-                    proto.encode_frame(
-                        proto.MSG_CONTROL, proto.encode_control(proto.OP_STOP_STREAM)
+                if status == "firmware":
+                    ser.write(
+                        proto.encode_frame(
+                            proto.MSG_CONTROL, proto.encode_control(proto.OP_STOP_STREAM)
+                        )
                     )
-                )
-            except (serial.SerialException, OSError):
-                status, detail = "busy", "in use or unavailable"
-            finally:
-                ser.close()
+        except (serial.SerialException, OSError, ValueError) as error:
+            status = "busy" if getattr(error, "errno", None) in (errno.EBUSY, errno.EAGAIN) else "unavailable"
+            detail = str(error)
         with self.lock:
             entry = self.results.get(device)
-            if entry is not None:
+            if self.active.is_set() and entry is not None:
                 entry["status"] = status
                 entry["detail"] = detail

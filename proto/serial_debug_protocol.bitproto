@@ -27,9 +27,8 @@ type DebugRpm = int16;
 // Signed PWM duty cycle: -1023..1023
 type DebugDuty = int16;
 
-// Wheel encoder angle: 0.01 degree per unit, wrapped to one encoder-shaft
-// turn (0 to 359.99 degrees). The AS5600 magnet turns with the motor shaft.
-type DebugWheelAngle = uint16;
+// Wheel encoder angle: 0.1 degree per unit, wrapped to one motor-shaft turn.
+type DebugWheelAngle = uint12;
 
 // ---------------------------------------------------------------------------
 // Message type constants (first byte of every frame payload)
@@ -56,6 +55,29 @@ const DBG_MSG_CONTROL = 6;
 // Motor/encoder wiring calibration status (robot -> dashboard)
 const DBG_MSG_CALIBRATION = 7;
 
+const DBG_MSG_SUBSCRIBE = 12;
+const DBG_MSG_LINK = 13;
+
+// Each screen requests the streams it consumes. A zero mask keeps only the
+// link heartbeat active.
+const DBG_STREAM_STATE = 1;
+const DBG_STREAM_IMU = 2;
+const DBG_STREAM_TOF = 4;
+const DBG_STREAM_HEALTH = 8;
+const DBG_STREAM_CALIBRATION = 16;
+const DBG_STREAM_TUNING = 32;
+const DBG_STREAM_POSITION = 64;
+const DBG_STREAM_RAW = 128;
+const DBG_STREAM_TEXT = 256;
+
+message DebugSubscribe {
+    uint16 streams = 1;
+}
+
+message DebugLink {
+    DebugTimestamp uptime_ms = 1;
+}
+
 // ---------------------------------------------------------------------------
 // Control op constants (op field of DebugControl)
 // ---------------------------------------------------------------------------
@@ -63,25 +85,11 @@ const DBG_MSG_CALIBRATION = 7;
 // Stop streaming (dashboard closing)
 const DBG_CONTROL_STOP_STREAM = 0;
 
-// Start streaming; keepalives must follow or the robot stops after ~1.5 s
-const DBG_CONTROL_START_STREAM = 1;
-
-// Keep the stream alive; send at ~1 Hz
-const DBG_CONTROL_KEEPALIVE = 2;
-
 // Set the four wheel targets (0.1 RPM units)
 const DBG_CONTROL_SET_TARGETS = 3;
 
 // Zero every wheel target immediately
 const DBG_CONTROL_STOP_MOTORS = 4;
-
-// Allow dashboard wheel targets while the health monitor inhibits motion, for
-// bring-up on a bare bench (no supply sense or encoder calibration). Cleared
-// when the streaming session ends.
-const DBG_CONTROL_ENABLE_MOTION_OVERRIDE = 5;
-
-// Stop ignoring the safety inhibit and zero the wheel targets.
-const DBG_CONTROL_DISABLE_MOTION_OVERRIDE = 6;
 
 // Run the motor/encoder wiring calibration. The firmware spins one motor at a
 // time in open loop, watches every analog and I2C encoder input, and persists
@@ -97,6 +105,10 @@ const DBG_CALIBRATION_IDLE = 0;
 const DBG_CALIBRATION_RUNNING = 1;
 const DBG_CALIBRATION_DONE = 2;
 const DBG_CALIBRATION_FAILED = 3;
+// The routine visited every wheel but at least one wheel was not matched, so
+// the stored wiring map was left untouched. wheel_error tells which wheel and
+// why.
+const DBG_CALIBRATION_PARTIAL = 4;
 
 // Calibration failure reasons (DebugCalibration.error_code)
 const DBG_CALIBRATION_ERROR_NONE = 0;
@@ -106,6 +118,9 @@ const DBG_CALIBRATION_ERROR_AMBIGUOUS_I2C = 3;
 const DBG_CALIBRATION_ERROR_BAD_MAPPING = 4;
 const DBG_CALIBRATION_ERROR_ABORTED = 5;
 const DBG_CALIBRATION_ERROR_I2C = 6;
+// Non-blocking encoder field warnings (DebugCalibration.magnet_warning)
+const DBG_CALIBRATION_ERROR_MAGNET_TOO_CLOSE = 7;
+const DBG_CALIBRATION_ERROR_MAGNET_TOO_FAR = 8;
 
 // ---------------------------------------------------------------------------
 // DebugWheel - per-wheel control data
@@ -115,24 +130,29 @@ message DebugWheel {
     DebugDuty pwm          = 1;  // Signed PID output duty (-1023..1023)
     DebugRpm velocity      = 2;  // Measured speed (0.1 RPM)
     DebugRpm target        = 3;  // Setpoint speed (0.1 RPM)
-    DebugWheelAngle angle  = 4;  // Encoder-shaft angle (0.01 degree, one turn)
+    DebugWheelAngle angle  = 4;  // Encoder-shaft angle (0.1 degree, one turn)
+    // Digital feedback: wheel-shaft speed from the BL48250 FG pulse window, in
+    // the motor frame (positive = CW). Signed by the commanded direction only;
+    // the pulse wire cannot observe the rotation direction.
+    int12 pulse_velocity = 5;  // 1 RPM, much finer than the pulse window
+    // Cumulative FG edge count since boot (both edges, motor shaft). Never
+    // resets while the robot is powered and does not depend on the analog path.
+    uint32 pulse_count      = 6;
 }
-// DebugWheel size: 3 x 2 + 2 = 8 bytes
+// DebugWheel size: 13 bytes
 
 // ---------------------------------------------------------------------------
-// DebugState - motor/control stream at ~25 Hz
+// DebugState - motor/control stream at up to ~83 Hz while requested
 // ---------------------------------------------------------------------------
 
 message DebugState {
     DebugTimestamp uptime_ms   = 1;  // Milliseconds since boot
     DebugWheel[4] wheels       = 2;  // FL, BL, BR, FR
-    DebugAngle yaw             = 3;  // 0.01 degree
-    DebugAngle pitch           = 4;  // 0.01 degree
-    DebugAngle roll            = 5;  // 0.01 degree
-    uint8 encoder_valid_mask   = 6;  // Bit i: encoder channel i calibrated
-    uint32 sequence            = 7;  // Frame counter
+    uint32 sequence            = 3;  // Frame counter
+    uint4 encoder_valid_mask   = 4;  // Bit i: encoder channel i calibrated
+    uint4 pulse_valid_mask     = 5;  // Bit i: wheel i has a pulse-velocity baseline
 }
-// DebugState size: 4 + 4x8 + 3x2 + 1 + 4 = 47 bytes
+// DebugState size: 4 + 4x13 + 4 + 1 = 61 bytes
 
 // ---------------------------------------------------------------------------
 // DebugImu - raw sensor stream at ~10 Hz
@@ -149,8 +169,11 @@ message DebugImu {
     int16 mag_y     = 8;   // 1 mG per unit
     int16 mag_z     = 9;   // 1 mG per unit
     uint32 sequence = 10;
+    DebugAngle yaw   = 11;
+    DebugAngle pitch = 12;
+    DebugAngle roll  = 13;
 }
-// DebugImu size: 9 x 2 + 4 = 22 bytes
+// DebugImu size: 28 bytes
 
 // ---------------------------------------------------------------------------
 // DebugTof - one VL53L5CX range frame per new measurement (~15 Hz)
@@ -173,7 +196,7 @@ message DebugHealth {
     uint8 lifecycle           = 3;   // SafetySupervisor LifecycleState
     uint16 active_faults      = 4;   // HealthMonitor active fault bitmask
     uint16 latched_faults     = 5;   // HealthMonitor latched fault bitmask
-    uint8 motion_inhibited    = 6;   // 0/1
+    uint8 reserved           = 6;
     uint8 kick_inhibited      = 7;   // 0/1
     uint8 imu_cal_flags       = 8;   // Bit0 accel, bit1 gyro, bit2 mag calibrated
     uint8 tof_available       = 9;   // 0/1
@@ -225,14 +248,29 @@ message DebugCalibration {
     uint8 i2c_ready            = 5;  // Bit i: wheel i matched on the I2C path
     uint8 mapping_valid        = 6;  // 1 when a calibrated mapping is stored in NVS
     uint8[4] analog_map        = 7;  // Wheel -> analog input slot (0..3 = ENC1..4)
-    uint8[4] mux_map           = 8;  // Wheel -> mux channel (0..3 = encoder pair M1..M4)
+    uint8[4] mux_map           = 8;  // Applied wheel -> mux channel (0..3)
     int16[4] analog_level      = 9;  // Movement of each analog input during the current spin (ADC counts/sample)
     int16[4] i2c_level         = 10; // Movement of each mux channel during the current spin (I2C counts/sample)
     uint8 range_mask           = 11; // Bit i: mapped encoder of wheel i has a stored analog range
-    uint8 error_code           = 12; // DBG_CALIBRATION_ERROR_* failure reason
-    uint32 sequence            = 13; // Frame counter
+    uint8 error_code           = 12; // DBG_CALIBRATION_ERROR_* failure reason of the routine
+    uint8 analog_ready         = 13; // Bit i: wheel i matched on the analog path
+    uint8[4] wheel_error       = 14; // Per-wheel failure reason (DBG_CALIBRATION_ERROR_*); 0 when matched
+    uint32 sequence            = 15; // Frame counter
+    // Encoder analog output stage read back from the AS5600 CONF register and
+    // enforced by the firmware: 0 FULL (0..VCC), 1 REDUCED (0.1..0.9 VCC),
+    // 2 DIGITAL_PWM, 3 unknown/not readable. REDUCED is the required mode: it
+    // keeps the analog output inside the ESP32 ADC linear range.
+    uint8[4] encoder_stage     = 16; // Per-wheel AS5600 output stage
+    uint8 stage_mask           = 17; // Bit i: encoder_stage[i] was read/verified
+    // Raw ADC endpoints recorded by the encoder range calibration (full turn):
+    // the angle mapping maps adc_min_raw -> 0 rad and adc_max_raw -> 2*pi rad.
+    // Zero when the wheel has no valid stored range (range_mask bit clear).
+    uint16[4] adc_min_raw      = 18; // Stored raw ADC minimum of the wheel's encoder
+    uint16[4] adc_max_raw      = 19; // Stored raw ADC maximum
+    uint8[4] magnet_warning    = 20; // Last magnetic field warning for each I2C mux input
+    uint8[4] detected_mux_map  = 21; // Wheel -> mux detected by this run, valid per i2c_ready bit
 }
-// DebugCalibration size: 6 + 4 + 4 + 8 + 8 + 1 + 1 + 4 = 36 bytes
+// DebugCalibration size: 70 bytes
 
 // ---------------------------------------------------------------------------
 // Control calibration (per-wheel PID + feedforward auto-tuning)
@@ -250,6 +288,13 @@ const DBG_CONTROL_START_TUNING = 9;
 // Abort the control calibration and stop the motors.
 const DBG_CONTROL_STOP_TUNING = 10;
 
+// Focus the raw-data I2C read on one wheel's encoder. DebugControl.wheel_targets[0]
+// carries the wheel (0..3 = M1..M4); -1 (or any other value) disables the focus.
+// While focused, each DebugRaw frame switches the CD4052B mux to that encoder,
+// reads its single AS5600 raw angle and reports the other wheels as 0xFFFF,
+// because every encoder shares the same I2C pair behind the mux.
+const DBG_CONTROL_SELECT_RAW_ENCODER = 11;
+
 // Tuning routine states (DebugTuning.state)
 const DBG_TUNING_IDLE = 0;
 const DBG_TUNING_RUNNING = 1;
@@ -264,6 +309,9 @@ const DBG_TUNING_PHASE_VALIDATE = 3;  // closed-loop step with candidate gains
 const DBG_TUNING_PHASE_REFINE = 4;    // retry with adjusted gains
 const DBG_TUNING_PHASE_STORE = 5;     // persist the wheel parameters in NVS
 const DBG_TUNING_PHASE_DONE = 6;
+// Measure each wheel's maximum speed at full duty and validate the common
+// calibrated speed limit.
+const DBG_TUNING_PHASE_MAX_SPEED = 7;
 
 // Tuning failure reasons (DebugTuning.error_code)
 const DBG_TUNING_ERROR_NONE = 0;
@@ -271,6 +319,8 @@ const DBG_TUNING_ERROR_NO_MOVEMENT = 1;  // wheel never moved in open loop
 const DBG_TUNING_ERROR_UNSTABLE = 2;     // no candidate met the step criteria
 const DBG_TUNING_ERROR_TIMEOUT = 3;      // routine exceeded its runtime budget
 const DBG_TUNING_ERROR_ABORTED = 4;      // dashboard or safety stopped the run
+const DBG_TUNING_ERROR_SPEED_MISMATCH = 5;  // saved parameters, shared speeds differ
+const DBG_TUNING_ERROR_SAVE_FAILED = 6;     // storage could not be verified
 
 // DebugTuning - wheel control calibration status at ~5 Hz. The gain and
 // feedforward columns always carry the parameters currently in effect: the
@@ -294,12 +344,32 @@ message DebugTuning {
     int16[4] kd              = 9;   // Kd x 10000
     int16[4] feedforward     = 10;  // Static friction feedforward duty (0..1023)
     int16[4] velocity_ff     = 11;  // Velocity feedforward x 100 (duty per rad/s)
-    uint16[4] rise_ms        = 12;  // Validated 10-90 % rise time, milliseconds
-    uint8[4] overshoot_pct   = 13;  // Validated step overshoot, percent
-    uint8[4] ss_error_pct    = 14;  // Validated steady-state error, percent of target
+    uint16[4] rise_ms        = 12;  // Validated forward 10-90 % rise time, milliseconds
+    uint8[4] overshoot_pct   = 13;  // Validated forward step overshoot, percent
+    uint8[4] ss_error_pct    = 14;  // Validated forward steady-state error, percent of target
     uint32 sequence          = 15;  // Frame counter
+
+    // Reverse direction. The calibration identifies and validates both rotation
+    // directions: the fields above describe the forward (positive target) step,
+    // these describe the reverse (negative target) step. feedforward and
+    // velocity_ff hold the parameters currently in effect for the forward
+    // direction, feedforward_rev/velocity_ff_rev the reverse ones.
+    int16[4] feedforward_rev = 16;  // Reverse kinetic-friction intercept duty (signed)
+    int16[4] velocity_ff_rev = 17;  // Reverse velocity feedforward x 100 (duty per rad/s)
+    uint16[4] rise_ms_rev    = 18;  // Validated reverse 10-90 % rise time, milliseconds
+    uint8[4] overshoot_pct_rev = 19;  // Validated reverse step overshoot, percent
+    uint8[4] ss_error_pct_rev = 20;   // Validated reverse steady-state error, percent of target
+
+    // Calibrated maximum wheel speed, in 0.1 RPM units. The routine measures the
+    // maximum speed of every wheel in both directions at full duty and stores a
+    // common limit equal to the smallest measured maximum, after all four
+    // wheels validate together. max_rpm is the limit currently in effect; the
+    // per-wheel array carries the maxima measured by the latest run (0 when not
+    // measured in this session).
+    uint16 max_rpm           = 21;  // Common calibrated speed limit
+    uint16[4] wheel_max_rpm  = 22;  // Measured maximum per wheel (min of both directions)
 }
-// DebugTuning size: 6 + 5 x 4 x 2 + 4 x 2 + 4 + 4 + 4 = 66 bytes
+// DebugTuning size: 98 + 2 + 4 x 2 = 108 bytes
 
 // ---------------------------------------------------------------------------
 // Wheel position control
@@ -354,5 +424,29 @@ message DebugPosition {
     uint32 sequence      = 6;  // Frame counter
 }
 // DebugPosition size: 3 + 4 x 4 + 4 x 4 + 4 = 39 bytes
+
+// ---------------------------------------------------------------------------
+// Raw encoder and motor-feedback stream
+// ---------------------------------------------------------------------------
+
+// Raw encoders and motor feedback for the dashboard raw-data view (robot -> dashboard)
+const DBG_MSG_RAW = 11;
+
+// DebugRaw - one snapshot of the raw sensor and motor-feedback signals at
+// ~10 Hz, for the Motors tab raw view. The analog encoder values are raw ADC
+// block means of the input mapped to each wheel, the I2C values are the AS5600
+// raw angles reached through the CD4052B mux, pulse_delta counts the FG edges
+// since the previous frame, ekf_velocity is the wheel speed from the EKF in the
+// motor frame (before the smoothing used by the control loop) and applied_pwm
+// is the duty actually written to the BL48250 (sign = motor direction).
+message DebugRaw {
+    uint32 sequence       = 1;   // Frame counter
+    uint16[4] analog_raw  = 2;   // ADC block mean per wheel (0..4095)
+    uint16[4] i2c_raw     = 3;   // AS5600 raw angle per wheel (0..4095; 0xFFFF unreadable)
+    uint16[4] pulse_delta = 4;   // FG edges since the previous raw frame
+    int16[4] ekf_velocity = 5;   // EKF wheel speed, 0.1 RPM, motor frame
+    int16[4] applied_pwm  = 6;   // Signed applied duty (-1023..1023)
+}
+// DebugRaw size: 4 + 5 x 4 x 2 = 44 bytes
 
 

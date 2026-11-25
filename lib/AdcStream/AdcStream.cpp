@@ -174,8 +174,16 @@ esp_err_t AdcStream::init(
     ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(m_adc_handle, &cb_config, this));
 
     // 8 KiB: the consumer handlers (EKF update and logging) run on this
-    // task, so leave headroom above their fixed-size working arrays.
-    xTaskCreate(s_task_wrapper, "ADCReaderTask", 8192, this, 5, &m_task_handle);
+    // task, so leave headroom above their fixed-size working arrays. It is
+    // pinned to core 1 so the boot/init task on core 0 cannot be starved when
+    // the acquisition rate is high; the wheel control task shares core 1 and
+    // has the higher priority.
+    if (xTaskCreatePinnedToCore(
+          s_task_wrapper, "ADCReaderTask", 8192, this, 5, &m_task_handle, 1) != pdPASS)
+    {
+        ESP_LOGE(TAG, "ADC dispatch task creation failed.");
+        return ESP_FAIL;
+    }
 
     ESP_ERROR_CHECK(adc_continuous_start(m_adc_handle));
     m_initialized = true;
@@ -301,10 +309,6 @@ void AdcStream::task_loop()
                 }
             }
         } while (ret == ESP_OK && bytes_read > 0);
-
-        // One full tick: pdMS_TO_TICKS(1) evaluates to zero ticks when the
-        // tick rate is 100 Hz, and vTaskDelay(0) never sleeps at all.
-        vTaskDelay(1);
     }
 }
 

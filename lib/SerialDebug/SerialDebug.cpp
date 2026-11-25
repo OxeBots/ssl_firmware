@@ -4,17 +4,21 @@
  *        streams it as binary frames over UART0 while a dashboard client
  *        keeps the connection alive.
  *
- * Stream contents (rates chosen for a 115200 8N1 console):
- *   - DebugState  at 25 Hz: four wheel PWM/velocity/target/angle + attitude.
- *   - DebugImu    at 10 Hz: calibrated accelerometer/gyro/magnetometer.
+ * Subscribed stream contents (115200 8N1):
+ *   - DebugState  at ~83 Hz: four wheel PWM/velocity/target/angle and the
+ *     digital BL48250 pulse speed/count.
+ *   - DebugImu    at 10 Hz: attitude and calibrated inertial readings.
  *   - DebugTof    per new frame: one 8x8 VL53L5CX range frame.
  *   - DebugHealth at 2 Hz: safety lifecycle, faults, radio link, supply, heap.
  *   - DebugCalibration at 5 Hz: motor/encoder wiring calibration progress.
+ *   - DebugTuning at 5 Hz: control calibration status, per-direction
+ *     parameters/metrics and the calibrated maximum speed limit.
+ *   - DebugRaw    at 10 Hz: raw ADC values, the focused wheel's raw I2C angle,
+ *     FG pulse deltas, EKF wheel speed and the applied PWM/direction.
  *   - DebugText   per log line: ESP_LOG output captured by a vprintf hook.
  *
- * The dashboard drives everything with DebugControl frames; without a
- * keepalive every 1.5 s the stream stops, so unplugging or closing the port
- * always ends the debug dump.
+ * DebugSubscribe selects the streams and renews the session. The link
+ * heartbeat is sent even when no data stream is requested.
  */
 
 // Includes stay outside the conditional so the PlatformIO library finder
@@ -23,6 +27,7 @@
 
 #include <driver/uart.h>
 #include <esp_log.h>
+#include <esp_rom_sys.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <sdkconfig.h>
@@ -33,20 +38,29 @@
 #include <cstdio>
 #include <cstring>
 
-#include "MotorCalibration.h"
+#include "AS5600.h"
+#include "BL48250.h"
+#include "CD4052B.h"
 #include "OrientationHandler.h"
 #include "PowerMonitor.h"
 #include "ProtocolHandler.h"
 #include "RobotState.h"
 #include "WheelController.h"
-#include "WheelTuning.h"
 #include "constants.h"
 #include "serial_debug_protocol_bp.h"
 #include "wheel_state_estimator.h"
 
 #if CONFIG_SERIAL_DEBUG
 
+#include "MotorCalibration.h"
+
 static const char * TAG = "SerialDebug";
+
+// The calibration phase enum is streamed as DBG_TUNING_PHASE_*: keep the two in
+// sync, including the maximum-speed phase added for the calibrated limit.
+static_assert(static_cast<uint8_t>(MotorCalibration::ControllerPhase::MAX_SPEED) ==
+                DBG_TUNING_PHASE_MAX_SPEED,
+              "ControllerPhase values must match the DBG_TUNING_PHASE_* constants.");
 
 SerialDebug & SerialDebug::get_instance()
 {
@@ -54,11 +68,12 @@ SerialDebug & SerialDebug::get_instance()
     return instance;
 }
 
-esp_err_t SerialDebug::init(ToFPerceptionService * tof_service)
+esp_err_t SerialDebug::init(ToFPerceptionService * tof_service, CD4052B * cd4052b)
 {
     if (m_tx_mutex != nullptr)
         return ESP_ERR_INVALID_STATE;
     m_tof_service = tof_service;
+    m_cd4052b = cd4052b;
 
     // Recursive: the log hook holds it across line assembly and then sends
     // DebugText frames through the same critical section.
@@ -103,19 +118,11 @@ bool SerialDebug::session_active() const
     return now_us - last_keepalive_us <= KEEPALIVE_TIMEOUT_US;
 }
 
-/**
- * @brief Drop the bench motion override and stop the wheels it was driving.
- *
- * The override only lifts the health gate for the dashboard target path; the
- * health state reported to the rest of the firmware is unchanged.
- */
-void SerialDebug::clear_motion_override()
+void SerialDebug::stop_bench_targets()
 {
-    if (!m_motion_override)
-        return;
-    m_motion_override = false;
-    WheelController::get_instance().set_target_velocities({0.0f, 0.0f, 0.0f, 0.0f});
-    ESP_LOGW(TAG, "Bench motion override cleared; wheel targets zeroed.");
+    if (m_has_bench_targets)
+        ProtocolHandler::get_instance().set_bench_targets({});
+    m_has_bench_targets = false;
 }
 
 void SerialDebug::task_loop()
@@ -137,7 +144,8 @@ void SerialDebug::task_loop()
             rx_bytes_interval += static_cast<uint32_t>(n);
         }
         // Report received bytes only to a subscribed dashboard.
-        if (session_active() && now_us - last_rx_report_us >= RX_REPORT_INTERVAL_US)
+        if ((m_streams.load() & DBG_STREAM_TEXT) && session_active() &&
+            now_us - last_rx_report_us >= RX_REPORT_INTERVAL_US)
         {
             last_rx_report_us = now_us;
             ESP_LOGI(TAG,
@@ -151,7 +159,9 @@ void SerialDebug::task_loop()
             m_decoder.feed(rx[i]);
             if (!m_decoder.has_frame())
                 continue;
-            if (m_decoder.message_type() == DBG_MSG_POSITION_CONTROL)
+            if (m_decoder.message_type() == DBG_MSG_SUBSCRIBE)
+                handle_subscription_frame();
+            else if (m_decoder.message_type() == DBG_MSG_POSITION_CONTROL)
                 handle_position_frame();
             else
                 handle_control_frame();
@@ -163,44 +173,61 @@ void SerialDebug::task_loop()
             if (!session_active())
             {
                 m_streaming.store(false);
-                clear_motion_override();
+                stop_bench_targets();
+                m_raw_encoder_wheel = -1;
                 MotorCalibration::get_instance().abort();
-                WheelTuning::get_instance().abort();
                 WheelController::get_instance().stop_position_moves();
             }
             else
             {
-                if (now_ms - m_last_state_ms >= STATE_PERIOD_MS)
+                const uint16_t streams = m_streams.load();
+                if (now_ms - m_last_link_ms >= LINK_PERIOD_MS)
                 {
-                    m_last_state_ms = now_ms;
+                    m_last_link_ms = now_ms;
+                    send_link(now_ms);
+                    if (streams & DBG_STREAM_TEXT)
+                        WheelController::get_instance().log_diagnostics();
+                }
+                const uint32_t state_elapsed_ms = now_ms - m_last_state_ms;
+                if ((streams & DBG_STREAM_STATE) && state_elapsed_ms >= STATE_PERIOD_MS)
+                {
+                    m_last_state_ms = now_ms - state_elapsed_ms % STATE_PERIOD_MS;
                     send_state(now_ms);
                 }
-                if (now_ms - m_last_imu_ms >= IMU_PERIOD_MS)
+                if ((streams & DBG_STREAM_IMU) && now_ms - m_last_imu_ms >= IMU_PERIOD_MS)
                 {
                     m_last_imu_ms = now_ms;
                     send_imu();
                 }
-                if (now_ms - m_last_health_ms >= HEALTH_PERIOD_MS)
+                if ((streams & DBG_STREAM_HEALTH) && now_ms - m_last_health_ms >= HEALTH_PERIOD_MS)
                 {
                     m_last_health_ms = now_ms;
                     send_health();
                 }
-                if (now_ms - m_last_calibration_ms >= CALIBRATION_PERIOD_MS)
+                if ((streams & DBG_STREAM_CALIBRATION) &&
+                    now_ms - m_last_calibration_ms >= CALIBRATION_PERIOD_MS)
                 {
                     m_last_calibration_ms = now_ms;
                     send_calibration();
                 }
-                if (now_ms - m_last_tuning_ms >= TUNING_PERIOD_MS)
+                if ((streams & DBG_STREAM_TUNING) && now_ms - m_last_tuning_ms >= TUNING_PERIOD_MS)
                 {
                     m_last_tuning_ms = now_ms;
                     send_tuning();
                 }
-                if (now_ms - m_last_position_ms >= POSITION_PERIOD_MS)
+                if ((streams & DBG_STREAM_POSITION) &&
+                    now_ms - m_last_position_ms >= POSITION_PERIOD_MS)
                 {
                     m_last_position_ms = now_ms;
                     send_position();
                 }
-                send_tof();
+                if ((streams & DBG_STREAM_RAW) && now_ms - m_last_raw_ms >= RAW_PERIOD_MS)
+                {
+                    m_last_raw_ms = now_ms;
+                    send_raw();
+                }
+                if (streams & DBG_STREAM_TOF)
+                    send_tof();
             }
         }
 
@@ -212,6 +239,40 @@ void SerialDebug::task_loop()
             delay_ticks = 1;
         vTaskDelay(delay_ticks);
     }
+}
+
+void SerialDebug::handle_subscription_frame()
+{
+    if (m_decoder.message_length() != BYTES_LENGTH_DEBUG_SUBSCRIBE)
+        return;
+    // Decoders use bitwise OR: always decode into a zero-initialized struct.
+    DebugSubscribe subscription;
+    memset(&subscription, 0, sizeof(subscription));
+    DecodeDebugSubscribe(&subscription, const_cast<uint8_t *>(m_decoder.message()));
+
+    const bool new_session = !session_active();
+    if (new_session)
+    {
+        if (xSemaphoreTakeRecursive(m_tx_mutex, 0) != pdTRUE)
+            return;
+        m_last_link_ms = 0;
+        m_last_state_ms = 0;
+        m_last_pulse_velocity_ms = 0;
+        m_state_sequence = 0;
+        m_raw_encoder_wheel = -1;
+        m_log_line_len = 0;
+        m_log_escape_left = 0;
+        xSemaphoreGiveRecursive(m_tx_mutex);
+        stop_bench_targets();
+    }
+
+    const uint16_t old_streams = m_streams.exchange(subscription.streams);
+    if (new_session || ((old_streams ^ subscription.streams) & DBG_STREAM_RAW))
+        m_raw_pulse_seeded = false;
+    if (new_session || ((old_streams ^ subscription.streams) & DBG_STREAM_TOF))
+        m_tof_frame_sent = false;
+    m_last_keepalive_us.store(static_cast<uint64_t>(esp_timer_get_time()));
+    m_streaming.store(true);
 }
 
 void SerialDebug::handle_control_frame()
@@ -226,139 +287,66 @@ void SerialDebug::handle_control_frame()
     memset(&control, 0, sizeof(control));
     DecodeDebugControl(&control, const_cast<uint8_t *>(m_decoder.message()));
 
-    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
-    // Heartbeats do not need a console message for every received packet.
-    if (control.op != DBG_CONTROL_KEEPALIVE && session_active())
+    if (session_active())
         ESP_LOGI(TAG, "Debug control frame received (op=%d).", control.op);
 
+    auto & calibration = MotorCalibration::get_instance();
     switch (control.op)
     {
-        case DBG_CONTROL_START_STREAM:
-            if (xSemaphoreTakeRecursive(m_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE)
-                break;
-            m_last_state_ms = 0;
-            m_last_imu_ms = 0;
-            m_last_health_ms = 0;
-            m_last_calibration_ms = 0;
-            m_last_tuning_ms = 0;
-            m_last_position_ms = 0;
-            m_state_sequence = 0;
-            m_imu_sequence = 0;
-            m_health_sequence = 0;
-            m_calibration_sequence = 0;
-            m_tuning_sequence = 0;
-            m_position_sequence = 0;
-            m_tof_frame_sent = false;
-            m_log_line_len = 0;
-            m_log_escape_left = 0;
-            m_last_keepalive_us.store(now_us);
-            m_streaming.store(true);
-            xSemaphoreGiveRecursive(m_tx_mutex);
-            clear_motion_override();
-            ESP_LOGI(TAG, "Dashboard connected, streaming started.");
-            break;
-
         case DBG_CONTROL_STOP_STREAM:
             m_streaming.store(false);
-            clear_motion_override();
-            MotorCalibration::get_instance().abort();
-            WheelTuning::get_instance().abort();
+            stop_bench_targets();
+            m_raw_encoder_wheel = -1;
+            calibration.abort();
             WheelController::get_instance().stop_position_moves();
             ESP_LOGI(TAG, "Dashboard disconnected, streaming stopped.");
             break;
 
         case DBG_CONTROL_START_CALIBRATION:
-        {
-            if (!session_active())
-                break;
-            MotorCalibration & calibration = MotorCalibration::get_instance();
-            if (calibration.is_running())
-            {
-                ESP_LOGW(TAG, "Motor calibration already running; start ignored.");
-                break;
-            }
-            if (WheelTuning::get_instance().is_running())
-            {
-                ESP_LOGW(TAG, "Wheel control calibration running; wiring calibration ignored.");
-                break;
-            }
-            if (calibration.start() != ESP_OK)
-                ESP_LOGE(TAG, "Failed to start the motor calibration.");
-            else
-                ESP_LOGW(TAG, "Motor calibration started: the wheels spin one at a time.");
-            break;
-        }
-
-        case DBG_CONTROL_STOP_CALIBRATION:
-            MotorCalibration::get_instance().abort();
-            ESP_LOGW(TAG, "Motor calibration abort requested.");
-            break;
-
         case DBG_CONTROL_START_TUNING:
         {
             if (!session_active())
                 break;
-            if (MotorCalibration::get_instance().is_running())
-            {
-                ESP_LOGW(TAG, "Wiring calibration running; control calibration ignored.");
-                break;
-            }
-            WheelTuning & tuning = WheelTuning::get_instance();
-            if (tuning.is_running())
-            {
-                ESP_LOGW(TAG, "Control calibration already running; start ignored.");
-                break;
-            }
-            if (tuning.start() != ESP_OK)
-                ESP_LOGE(TAG, "Failed to start the control calibration.");
+            const bool align_encoders = control.op == DBG_CONTROL_START_CALIBRATION;
+            const char * routine = align_encoders ? "Encoder alignment" : "Controller tuning";
+            const esp_err_t result = align_encoders ? calibration.start_encoder_alignment()
+                                                    : calibration.start_controller_tuning();
+            if (result == ESP_ERR_INVALID_STATE)
+                ESP_LOGW(TAG, "%s start ignored: a motor calibration is running.", routine);
+            else if (result != ESP_OK)
+                ESP_LOGE(TAG, "%s start failed: %s.", routine, esp_err_to_name(result));
             else
-                ESP_LOGW(TAG, "Control calibration started: the wheels spin one at a time.");
+                ESP_LOGW(TAG, "%s started: the wheels spin one at a time.", routine);
             break;
         }
 
+        case DBG_CONTROL_STOP_CALIBRATION:
+            calibration.abort(MotorCalibration::Routine::ENCODER_ALIGNMENT);
+            ESP_LOGW(TAG, "Encoder alignment abort requested.");
+            break;
+
         case DBG_CONTROL_STOP_TUNING:
-            WheelTuning::get_instance().abort();
+            calibration.abort(MotorCalibration::Routine::CONTROLLER_TUNING);
             WheelController::get_instance().stop_position_moves();
             ESP_LOGW(TAG, "Control calibration abort requested.");
             break;
 
-        case DBG_CONTROL_KEEPALIVE:
-            if (session_active())
-                m_last_keepalive_us.store(now_us);
-            break;
-
         case DBG_CONTROL_SET_TARGETS:
         {
-            if (MotorCalibration::get_instance().is_running())
-            {
-                ESP_LOGW(TAG, "Wheel targets rejected: motor calibration is running.");
-                break;
-            }
-            if (WheelTuning::get_instance().is_running())
-            {
-                ESP_LOGW(TAG, "Wheel targets rejected: control calibration is running.");
-                break;
-            }
             if (!session_active())
                 break;
-            // The dashboard writes wheel targets directly, bypassing the
-            // safety supervisor: apply the same motion inhibition the health
-            // monitor classified from the live observations, unless the bench
-            // motion override was enabled explicitly.
-            if (ProtocolHandler::get_instance().get_health_state().motion_inhibited &&
-                !m_motion_override)
-            {
-                ESP_LOGW(TAG, "Wheel targets rejected: motion inhibited by the safety monitor.");
-                WheelController::get_instance().set_target_velocities({0.0f, 0.0f, 0.0f, 0.0f});
-                break;
-            }
             std::array<float, 4> targets = {0.0f, 0.0f, 0.0f, 0.0f};
             for (size_t i = 0; i < 4; ++i)
             {
                 const float rpm = static_cast<float>(control.wheel_targets[i]) / 10.0f;
                 targets[i] = rpm * RPM_TO_RAD_S;
             }
-            WheelController::get_instance().set_target_velocities(targets);
+            if (!ProtocolHandler::get_instance().set_bench_targets(targets))
+            {
+                ESP_LOGW(TAG, "Wheel targets rejected: radio or motor calibration has control.");
+                break;
+            }
+            m_has_bench_targets = targets != std::array<float, 4>{};
             ESP_LOGI(TAG,
                      "Wheel targets: %.1f %.1f %.1f %.1f RPM",
                      static_cast<double>(targets[0] * RAD_S_TO_RPM),
@@ -369,24 +357,32 @@ void SerialDebug::handle_control_frame()
         }
 
         case DBG_CONTROL_STOP_MOTORS:
-            MotorCalibration::get_instance().abort();
-            WheelTuning::get_instance().abort();
+            calibration.abort();
             WheelController::get_instance().stop_position_moves();
             WheelController::get_instance().set_target_velocities({0.0f, 0.0f, 0.0f, 0.0f});
+            m_has_bench_targets = false;
             ESP_LOGI(TAG, "Wheel targets zeroed by dashboard.");
             break;
 
-        case DBG_CONTROL_ENABLE_MOTION_OVERRIDE:
+        case DBG_CONTROL_SELECT_RAW_ENCODER:
+        {
             if (!session_active())
                 break;
-            m_motion_override = true;
-            ESP_LOGW(TAG,
-                     "Bench motion override enabled: wheel targets ignore the health inhibit.");
+            // The selector reuses wheel_targets[0]: 0..3 focuses that wheel's
+            // encoder on the I2C mux, anything else releases the focus.
+            const int wheel = static_cast<int>(control.wheel_targets[0]);
+            if (wheel >= 0 && wheel < 4)
+            {
+                m_raw_encoder_wheel = static_cast<int8_t>(wheel);
+                ESP_LOGI(TAG, "Raw encoder focus: M%d.", wheel + 1);
+            }
+            else
+            {
+                m_raw_encoder_wheel = -1;
+                ESP_LOGI(TAG, "Raw encoder focus cleared.");
+            }
             break;
-
-        case DBG_CONTROL_DISABLE_MOTION_OVERRIDE:
-            clear_motion_override();
-            break;
+        }
 
         default:
             ESP_LOGW(TAG, "Unknown debug control op %d.", control.op);
@@ -396,10 +392,6 @@ void SerialDebug::handle_control_frame()
 
 /**
  * @brief Applies one dashboard position-control frame.
- *
- * Position moves follow the same motion gate as wheel targets: a health
- * inhibit blocks them unless the bench motion override is active, and a
- * running calibration blocks them unconditionally.
  */
 void SerialDebug::handle_position_frame()
 {
@@ -419,28 +411,15 @@ void SerialDebug::handle_position_frame()
     {
         case DBG_POSITION_OP_MOVE:
         {
-            if (MotorCalibration::get_instance().is_running() ||
-                WheelTuning::get_instance().is_running())
-            {
-                ESP_LOGW(TAG, "Position move rejected: a calibration is running.");
-                break;
-            }
-            if (ProtocolHandler::get_instance().get_health_state().motion_inhibited &&
-                !m_motion_override)
-            {
-                ESP_LOGW(TAG, "Position move rejected: motion inhibited by the safety monitor.");
-                break;
-            }
             std::array<float, 4> angles = {0.0f, 0.0f, 0.0f, 0.0f};
             for (size_t i = 0; i < 4; ++i)
                 angles[i] =
                   static_cast<float>(control.angle_mdeg[i]) * static_cast<float>(M_PI) / 180000.0f;
             const float max_velocity =
               (control.max_rpm > 0) ? static_cast<float>(control.max_rpm) * RPM_TO_RAD_S : 0.0f;
-            if (wheels.start_position_move(control.wheel_mask,
-                                           angles,
-                                           control.mode == DBG_POSITION_MODE_RELATIVE,
-                                           max_velocity) != ESP_OK)
+            const bool relative = control.mode == DBG_POSITION_MODE_RELATIVE;
+            if (ProtocolHandler::get_instance().start_bench_position_move(
+                  control.wheel_mask, angles, relative, max_velocity) != ESP_OK)
             {
                 ESP_LOGW(TAG,
                          "Position move rejected (mask=0x%X).",
@@ -465,7 +444,12 @@ void SerialDebug::handle_position_frame()
  *
  * The gains/feedforward columns always report WheelController's live values,
  * so the dashboard shows the stored parameters at idle and the candidate under
- * validation while the routine runs.
+ * validation while the routine runs. Each direction has its own feedforward
+ * branch and validated step metrics: feedforward/velocity_ff and rise/overshoot/
+ * steady-state error describe the forward (positive target) step, the *_rev
+ * fields the reverse one. max_rpm carries the calibrated common speed limit
+ * currently in effect (also while idle) and wheel_max_rpm the maxima measured
+ * by the latest maximum-speed calibration.
  */
 void SerialDebug::send_tuning()
 {
@@ -473,8 +457,13 @@ void SerialDebug::send_tuning()
     DebugTuning tuning;
     memset(&tuning, 0, sizeof(tuning));
 
-    const WheelTuning::Status status = WheelTuning::get_instance().get_status();
+    const auto status = MotorCalibration::get_instance().get_controller_status();
     const auto parameters = WheelController::get_instance().get_parameters();
+    // The limit in effect comes from the controller so the dashboard also sees
+    // the persisted value at idle, before any run in this session.
+    const float max_velocity_rad_s = WheelController::get_instance().get_max_velocity_rad_s();
+    tuning.max_rpm = static_cast<uint16_t>(std::clamp<long>(
+      std::lround(static_cast<double>(max_velocity_rad_s * RAD_S_TO_RPM * 10.0f)), 0L, 65535L));
 
     tuning.state = static_cast<uint8_t>(status.state);
     tuning.wheel = status.wheel;
@@ -495,9 +484,19 @@ void SerialDebug::send_tuning()
           std::lround(static_cast<double>(parameters[i].feedforward)), -32768L, 32767L));
         tuning.velocity_ff[i] = static_cast<int16_t>(std::clamp<long>(
           std::lround(static_cast<double>(parameters[i].velocity_ff) * 100.0), -32768L, 32767L));
+        tuning.feedforward_rev[i] = static_cast<int16_t>(std::clamp<long>(
+          std::lround(static_cast<double>(parameters[i].feedforward_rev)), -32768L, 32767L));
+        tuning.velocity_ff_rev[i] = static_cast<int16_t>(
+          std::clamp<long>(std::lround(static_cast<double>(parameters[i].velocity_ff_rev) * 100.0),
+                           -32768L,
+                           32767L));
         tuning.rise_ms[i] = status.rise_ms[i];
         tuning.overshoot_pct[i] = status.overshoot_pct[i];
         tuning.ss_error_pct[i] = status.ss_error_pct[i];
+        tuning.rise_ms_rev[i] = status.rise_ms_rev[i];
+        tuning.overshoot_pct_rev[i] = status.overshoot_pct_rev[i];
+        tuning.ss_error_pct_rev[i] = status.ss_error_pct_rev[i];
+        tuning.wheel_max_rpm[i] = status.wheel_max_rpm[i];
     }
     tuning.sequence = ++m_tuning_sequence;
 
@@ -553,16 +552,23 @@ bool SerialDebug::send_frame(uint8_t msg_type, const void * message, size_t mess
     if (frame_len == 0)
         return false;
 
-    if (xSemaphoreTakeRecursive(m_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE)
+    if (xSemaphoreTakeRecursive(m_tx_mutex, 0) != pdTRUE)
         return false;
     if (!session_active())
     {
         xSemaphoreGiveRecursive(m_tx_mutex);
         return false;
     }
-    uart_write_bytes(UART_NUM_0, frame, frame_len);
+    size_t tx_free = 0;
+    // Leave room for the driver's ring-buffer metadata. A complete frame is
+    // either queued immediately or dropped, even when a control task logs.
+    constexpr size_t TX_QUEUE_HEADROOM = 64;
+    const bool queued =
+      uart_get_tx_buffer_free_size(UART_NUM_0, &tx_free) == ESP_OK &&
+      tx_free >= frame_len + TX_QUEUE_HEADROOM &&
+      uart_write_bytes(UART_NUM_0, frame, frame_len) == static_cast<int>(frame_len);
     xSemaphoreGiveRecursive(m_tx_mutex);
-    return true;
+    return queued;
 }
 
 bool SerialDebug::send_text_line(const char * line, size_t length)
@@ -585,7 +591,7 @@ bool SerialDebug::send_text_line(const char * line, size_t length)
 int SerialDebug::log_hook(const char * format, va_list args)
 {
     SerialDebug & self = get_instance();
-    if (!self.session_active())
+    if (!(self.m_streams.load() & DBG_STREAM_TEXT) || !self.session_active())
         return 0;
 
     // Format only when a dashboard is receiving diagnostics.
@@ -601,9 +607,9 @@ int SerialDebug::log_hook(const char * format, va_list args)
 
     // Append to the pending line, stripping ANSI colors, and emit a frame
     // for every completed line.
-    if (xSemaphoreTakeRecursive(self.m_tx_mutex, pdMS_TO_TICKS(20)) != pdTRUE)
+    if (xSemaphoreTakeRecursive(self.m_tx_mutex, 0) != pdTRUE)
         return written;
-    if (!self.session_active())
+    if (!(self.m_streams.load() & DBG_STREAM_TEXT) || !self.session_active())
     {
         xSemaphoreGiveRecursive(self.m_tx_mutex);
         return 0;
@@ -645,6 +651,15 @@ int SerialDebug::log_hook(const char * format, va_list args)
     return written;
 }
 
+void SerialDebug::send_link(uint32_t now_ms)
+{
+    DebugLink link = {};
+    link.uptime_ms = now_ms;
+    uint8_t payload[BYTES_LENGTH_DEBUG_LINK];
+    EncodeDebugLink(&link, payload);
+    send_frame(DBG_MSG_LINK, payload, sizeof(payload));
+}
+
 void SerialDebug::send_state(uint32_t now_ms)
 {
     // Zero-init before encode (bitproto uses bitwise OR).
@@ -657,38 +672,127 @@ void SerialDebug::send_state(uint32_t now_ms)
     auto & estimator = WheelStateEstimator::get_instance();
     // The estimator is the source of truth: the control loop may be paused
     // (open-loop calibration), so its cached velocity would be stale.
-    const auto encoder_velocity = estimator.get_smoothed_velocity_rad_s();
-    const auto angle = estimator.get_measured_angle_rad();
+    WheelStateEstimator::ControlSnapshot encoder;
+    ++m_state_sequence;
+    if (!estimator.get_control_snapshot(&encoder))
+        return;
+    // In the low-speed pulse/chopper mode the smoothed estimator is biased by
+    // the stick-slip bursts. Report the closed-loop window mean that the law
+    // actually controls, so the dashboard shows the speed the controller is
+    // regulating.
+    std::array<float, 4> low_speed_velocity = {};
+    const uint8_t low_speed_mask = wheel_ctrl.get_low_speed_velocities_rad_s(low_speed_velocity);
+    // Digital feedback: the FG pulse window and the cumulative edge count.
+    auto & motors = BL48250::get_instance();
+    const auto pulse_counts = motors.pulse_counts();
+    if (now_ms - m_last_pulse_velocity_ms >= PULSE_VELOCITY_PERIOD_MS)
+    {
+        m_last_pulse_velocity_ms = now_ms;
+        m_pulse_valid_mask = 0;
+        for (size_t i = 0; i < 4; ++i)
+        {
+            float velocity = 0.0f;
+            if (motors.pulse_velocity_rad_s(i, &velocity))
+                m_pulse_valid_mask |= static_cast<uint8_t>(1U << i);
+            m_pulse_velocity_rpm[i] =
+              static_cast<int16_t>(std::clamp(std::lround(velocity * RAD_S_TO_RPM), -2048L, 2047L));
+        }
+    }
 
     for (size_t i = 0; i < 4; ++i)
     {
         state.wheels[i].pwm = static_cast<int16_t>(std::lround(duty[i]));
         // Negate into the motor frame, matching the wheel targets.
+        const float velocity = (low_speed_mask & (1U << i)) ? low_speed_velocity[i]
+                                                            : -encoder.smoothed_velocity_rad_s[i];
         state.wheels[i].velocity =
-          static_cast<int16_t>(std::lround(-encoder_velocity[i] * RAD_S_TO_RPM * 10.0f));
+          static_cast<int16_t>(std::lround(velocity * RAD_S_TO_RPM * 10.0f));
         state.wheels[i].target =
           static_cast<int16_t>(std::lround(target[i] * RAD_S_TO_RPM * 10.0f));
-        // Wrap the encoder-shaft angle into one turn and scale to hundredths
-        // of a degree, the DebugWheelAngle wire unit.
-        double angle_deg = std::fmod(static_cast<double>(angle[i]) * (180.0 / M_PI), 360.0);
-        if (angle_deg < 0.0)
-            angle_deg += 360.0;
-        state.wheels[i].angle = static_cast<uint16_t>(std::lround(angle_deg * 100.0)) % 36000;
+        // The encoder already reports one turn. Round to tenths of a degree.
+        state.wheels[i].angle = static_cast<uint16_t>(
+          std::lround(encoder.measured_angle_rad[i] * (1800.0f / static_cast<float>(M_PI))) % 3600);
         if (estimator.is_channel_calibrated(i))
             state.encoder_valid_mask |= static_cast<uint8_t>(1u << i);
+        state.wheels[i].pulse_velocity = m_pulse_velocity_rpm[i];
+        state.wheels[i].pulse_count = static_cast<uint32_t>(pulse_counts[i]);
     }
 
-    auto & orientation = OrientationHandler::get_instance();
-    state.yaw = static_cast<int16_t>(std::lround(orientation.get_yaw() * 100.0));
-    state.pitch = static_cast<int16_t>(std::lround(orientation.get_pitch() * 100.0));
-    state.roll = static_cast<int16_t>(std::lround(orientation.get_roll() * 100.0));
-
+    state.pulse_valid_mask = m_pulse_valid_mask;
     state.uptime_ms = now_ms;
-    state.sequence = ++m_state_sequence;
+    state.sequence = m_state_sequence;
 
-    uint8_t payload[BYTES_LENGTH_DEBUG_STATE];
+    // Packed fields share bytes and the encoder ORs partial writes.
+    uint8_t payload[BYTES_LENGTH_DEBUG_STATE] = {};
     EncodeDebugState(&state, payload);
     send_frame(DBG_MSG_STATE, payload, BYTES_LENGTH_DEBUG_STATE);
+}
+
+void SerialDebug::send_raw()
+{
+    // Zero-init before encode (bitproto uses bitwise OR).
+    DebugRaw raw;
+    memset(&raw, 0, sizeof(raw));
+
+    auto & estimator = WheelStateEstimator::get_instance();
+    auto & motors = BL48250::get_instance();
+
+    // The CD4052B mux reaches one encoder at a time: read only the focused
+    // wheel's raw angle and report the unreadable sentinel for the others. The
+    // encoder-alignment and control calibrations own the mux while they run.
+    std::array<uint16_t, NUM_ENC_CHANNELS> i2c_angles = {};
+    i2c_angles.fill(0xFFFF);
+    const bool mux_free = !MotorCalibration::get_instance().is_running();
+    if (mux_free && m_raw_encoder_wheel >= 0)
+    {
+        const uint8_t wheel = static_cast<uint8_t>(m_raw_encoder_wheel);
+        uint16_t angle = 0;
+        if (estimator.read_wheel_i2c_raw_angle(wheel, &angle) == ESP_OK)
+            i2c_angles[wheel] = angle;
+    }
+
+    // Sample the ADC block means immediately after the I2C read: the ADC stream
+    // publishes a fresh block roughly every millisecond, so fetching the
+    // snapshot right after the mux read keeps both paths close in time and
+    // removes most of the phase offset visible while the wheel spins.
+    const auto analog_values = estimator.get_raw_values();
+    const auto analog_map = estimator.get_analog_mapping();
+
+    const auto pulse_counts = motors.pulse_counts();
+    const auto ekf_velocity = estimator.get_filtered_velocity_rad_s();
+    const auto duty_cycles = motors.get_duty_cycles();
+    const auto directions = motors.get_directions();
+
+    for (size_t i = 0; i < 4; ++i)
+    {
+        raw.analog_raw[i] = analog_values[analog_map[i]];
+        raw.i2c_raw[i] = i2c_angles[i];
+        // FG edges since the previous raw frame; the first frame only seeds.
+        if (m_raw_pulse_seeded)
+        {
+            const int32_t delta = pulse_counts[i] - m_last_pulse_counts[i];
+            raw.pulse_delta[i] = static_cast<uint16_t>(std::clamp<int32_t>(delta, 0, 65535));
+        }
+        m_last_pulse_counts[i] = pulse_counts[i];
+        // Same motor frame and sign as DebugState.velocity, but before the extra
+        // smoothing of the control loop.
+        raw.ekf_velocity[i] = static_cast<int16_t>(
+          std::clamp<long>(std::lround(-static_cast<double>(ekf_velocity[i]) * RAD_S_TO_RPM * 10.0),
+                           -32768L,
+                           32767L));
+        // The driver stores the duty as a magnitude: apply the direction sign
+        // so a positive value means MOTOR_CW.
+        const int32_t signed_duty = (directions[i] == config::driver::MOTOR_CW)
+                                      ? static_cast<int32_t>(duty_cycles[i])
+                                      : -static_cast<int32_t>(duty_cycles[i]);
+        raw.applied_pwm[i] = static_cast<int16_t>(std::clamp<int32_t>(signed_duty, -1023, 1023));
+    }
+    m_raw_pulse_seeded = true;
+    raw.sequence = ++m_raw_sequence;
+
+    uint8_t payload[BYTES_LENGTH_DEBUG_RAW];
+    EncodeDebugRaw(&raw, payload);
+    send_frame(DBG_MSG_RAW, payload, BYTES_LENGTH_DEBUG_RAW);
 }
 
 void SerialDebug::send_imu()
@@ -705,6 +809,9 @@ void SerialDebug::send_imu()
     orientation.get_gyro(&gx, &gy, &gz);
     orientation.get_magnetometer(&mx, &my, &mz);
 
+    imu.yaw = static_cast<int16_t>(std::lround(orientation.get_yaw() * 100.0));
+    imu.pitch = static_cast<int16_t>(std::lround(orientation.get_pitch() * 100.0));
+    imu.roll = static_cast<int16_t>(std::lround(orientation.get_roll() * 100.0));
     imu.accel_x = static_cast<int16_t>(std::lround(ax * 1000.0));
     imu.accel_y = static_cast<int16_t>(std::lround(ay * 1000.0));
     imu.accel_z = static_cast<int16_t>(std::lround(az * 1000.0));
@@ -762,7 +869,6 @@ void SerialDebug::send_health()
     const HealthState safety = protocol.get_health_state();
     health.active_faults = safety.active_faults;
     health.latched_faults = safety.latched_faults;
-    health.motion_inhibited = safety.motion_inhibited ? 1 : 0;
     health.kick_inhibited = safety.kick_inhibited ? 1 : 0;
 
     auto & orientation = OrientationHandler::get_instance();
@@ -809,7 +915,7 @@ void SerialDebug::send_calibration()
     DebugCalibration calibration;
     memset(&calibration, 0, sizeof(calibration));
 
-    const MotorCalibration::Status status = MotorCalibration::get_instance().get_status();
+    const auto status = MotorCalibration::get_instance().get_encoder_status();
     auto & estimator = WheelStateEstimator::get_instance();
 
     calibration.state = static_cast<uint8_t>(status.state);
@@ -817,22 +923,61 @@ void SerialDebug::send_calibration()
     calibration.progress = status.progress;
     calibration.result_mask = status.result_mask;
     calibration.i2c_ready = status.i2c_ready;
-    calibration.mapping_valid = estimator.has_calibrated_mapping() ? 1 : 0;
-
+    calibration.analog_ready = status.analog_ready;
+    bool mapping_valid = false;
     const auto analog_map = estimator.get_analog_mapping();
-    const auto mux_map = estimator.get_mux_mapping();
+    const auto mux_map = estimator.get_mux_mapping(&mapping_valid);
+    calibration.mapping_valid = mapping_valid ? 1 : 0;
     uint8_t range_mask = 0;
     for (size_t i = 0; i < 4; ++i)
     {
         calibration.analog_map[i] = analog_map[i];
         calibration.mux_map[i] = mux_map[i];
+        calibration.detected_mux_map[i] = status.mux_map[i];
         calibration.analog_level[i] = status.analog_level[i];
         calibration.i2c_level[i] = status.i2c_level[i];
+        calibration.wheel_error[i] = static_cast<uint8_t>(status.wheel_error[i]);
+        calibration.magnet_warning[i] = static_cast<uint8_t>(status.magnet_warning[i]);
         if (estimator.is_channel_calibrated(i))
             range_mask |= static_cast<uint8_t>(1U << i);
     }
     calibration.range_mask = range_mask;
     calibration.error_code = static_cast<uint8_t>(status.error);
+
+    // Encoder analog output stage: read the AS5600 CONF register of every wheel
+    // through the mux so the calibration screen sees the stage actually in
+    // effect. The calibration routine owns the mux while it runs; the values
+    // read before it started stay published meanwhile.
+    if (m_cd4052b != nullptr && !MotorCalibration::get_instance().is_running())
+    {
+        m_encoder_stage_mask = 0;
+        for (size_t i = 0; i < 4; ++i)
+        {
+            if (m_cd4052b->select(mux_map[i]) != ESP_OK)
+                continue;
+            // Analog switch settling before the I2C transfer.
+            esp_rom_delay_us(50);
+            AS5600::OutputStage stage = AS5600::OutputStage::ANALOG_FULL;
+            if (AS5600::read_output_stage(&stage) != ESP_OK)
+                continue;
+            m_encoder_stages[i] = static_cast<uint8_t>(stage);
+            m_encoder_stage_mask |= static_cast<uint8_t>(1U << i);
+        }
+        m_cd4052b->disable();
+    }
+    for (size_t i = 0; i < 4; ++i) calibration.encoder_stage[i] = m_encoder_stages[i];
+    calibration.stage_mask = m_encoder_stage_mask;
+
+    // Raw ADC endpoints recorded by the encoder range calibration: min maps to
+    // 0 rad and max to 2*pi rad. Zero when the wheel has no valid stored range.
+    const auto adc_min_raw = estimator.get_range_raw_min();
+    const auto adc_max_raw = estimator.get_range_raw_max();
+    for (size_t i = 0; i < 4; ++i)
+    {
+        calibration.adc_min_raw[i] = adc_min_raw[i];
+        calibration.adc_max_raw[i] = adc_max_raw[i];
+    }
+
     calibration.sequence = ++m_calibration_sequence;
 
     uint8_t payload[BYTES_LENGTH_DEBUG_CALIBRATION];

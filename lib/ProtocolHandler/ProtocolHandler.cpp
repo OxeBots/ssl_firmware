@@ -1,21 +1,30 @@
 #include "ProtocolHandler.h"
 
+#include <esp_log.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 
 #include <cstring>
 
-#include "BL48250.h"
+#include "MotorCalibration.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
 #include "PowerMonitor.h"
 #include "RobotState.h"
 #include "Telemetry.h"
-#include "WheelTuning.h"
+#include "kicker_controller.h"
 #include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
 
 static const char * TAG = "ProtocolHandler";
+
+// An all-zero pose and velocity is a radio stop command.
+static bool command_has_motion(const RobotCommand & command)
+{
+    const Pose & pose = command.target_pose;
+    return pose.x != 0 || pose.y != 0 || pose.angle != 0 || pose.x_v != 0 || pose.y_v != 0 ||
+           pose.angular_vel != 0;
+}
 
 ProtocolHandler & ProtocolHandler::get_instance()
 {
@@ -47,19 +56,7 @@ void ProtocolHandler::init(NRF24L01 * radio,
     configASSERT(m_command_inbox.init());
     m_velocity_controller.init(*kinematics);
     m_safety_supervisor.mark_self_test_complete(true);
-    m_health_state = {};
-    m_health_state.severity = HealthSeverity::HEALTHY;
-    m_health_state.kick_inhibited = true;
-
     ESP_LOGI(TAG, "ProtocolHandler initialized.");
-}
-
-void ProtocolHandler::force_safe_stop()
-{
-    xSemaphoreTake(m_mutex, portMAX_DELAY);
-    m_safety_supervisor.enter_safe_stop();
-    xSemaphoreGive(m_mutex);
-    ESP_LOGE(TAG, "SAFE_STOP latched until reboot.");
 }
 
 LifecycleState ProtocolHandler::get_lifecycle() const
@@ -94,7 +91,7 @@ bool ProtocolHandler::is_radio_ready() const
 /**
  * @brief Report whether the base station link is currently up.
  *
- * The link counts as up while a COMMAND or CONFIG packet arrived within the
+ * The link counts as up while a base station packet arrived within the
  * link timeout window; a null radio or a silent base station reports false.
  *
  * @return true while base station packets are fresh.
@@ -105,6 +102,32 @@ bool ProtocolHandler::is_base_station_connected() const
     const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
     return m_radio != nullptr && last_rx_us != 0 &&
            (now_us - last_rx_us) <= BASE_STATION_LINK_TIMEOUT_US;
+}
+
+bool ProtocolHandler::set_bench_targets(const std::array<float, 4> & targets)
+{
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    const bool accepted = !m_radio_owns_wheels &&
+                          !SafetySupervisor::health_inhibits_motion(m_health_state) &&
+                          !MotorCalibration::get_instance().is_running();
+    if (accepted)
+        m_wheel_ctrl->set_target_velocities(targets);
+    xSemaphoreGive(m_mutex);
+    return accepted;
+}
+
+esp_err_t ProtocolHandler::start_bench_position_move(uint8_t wheel_mask,
+                                                     const std::array<float, 4> & angles,
+                                                     bool relative,
+                                                     float max_velocity)
+{
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    if (!m_radio_owns_wheels && !SafetySupervisor::health_inhibits_motion(m_health_state) &&
+        !MotorCalibration::get_instance().is_running())
+        result = m_wheel_ctrl->start_position_move(wheel_mask, angles, relative, max_velocity);
+    xSemaphoreGive(m_mutex);
+    return result;
 }
 
 /**
@@ -146,9 +169,8 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
     memset(&hdr, 0, sizeof(Header));
     DecodeHeader(&hdr, const_cast<uint8_t *>(payload));
 
-    // COMMAND, CONFIG and TELEMETRY_REQ messages only originate from the base
-    // station, so a decoded header of any of these types proves the base
-    // station is transmitting, even when the packet targets another robot.
+    // These message types originate from the base station. The header confirms
+    // the link even when the packet targets another robot.
     // Clearing ERROR_COMM_LOSS here (not just in update()) means a telemetry
     // reply reports the live link instead of the stale pre-packet state;
     // update() re-arms the flag when the link goes quiet.
@@ -185,7 +207,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             memset(&cmd, 0, sizeof(RobotCommand));
             DecodeRobotCommand(&cmd, const_cast<uint8_t *>(payload));
             handle_command(cmd);
-            update(static_cast<uint64_t>(esp_timer_get_time()));
+            update();
             break;
         }
 
@@ -272,7 +294,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
                     memset(&t_comand, 0, sizeof(SingleRobotVelCmd));
                     DecodeSingleRobotVelCmd(&t_comand, const_cast<uint8_t *>(slot_atual));
                     handle_TeamCommand(t_comand, hdr);
-                    update(static_cast<uint64_t>(esp_timer_get_time()));
+                    update();
                     break;
                 }
             }
@@ -346,77 +368,90 @@ void ProtocolHandler::handle_TeamCommand(const SingleRobotVelCmd & r_comand, con
 /**
  * @brief Consume queued commands and publish the current safe wheel target.
  */
-void ProtocolHandler::update(uint64_t now_us)
+void ProtocolHandler::update()
 {
     if (m_wheel_ctrl == nullptr)
         return;
 
     xSemaphoreTake(m_mutex, portMAX_DELAY);
 
-    // Classify the live observations into the health state the supervisor
-    // and the status consumers act on. The supply status comes from the
-    // continuously sampled VMON channel; its electrical faults are critical
-    // and therefore latch SAFE_STOP below.
     HealthObservationFrame observation = {};
     PowerMonitor::get_instance().fill_observation(&observation);
-    const uint16_t error_flags = RobotState::get_instance().get_error_flags();
+    RobotState & robot_state = RobotState::get_instance();
+    const uint16_t error_flags = robot_state.get_error_flags();
     observation.imu_available = (error_flags & ERROR_IMU_FAIL) == 0U;
     observation.tof_available = (error_flags & ERROR_TOF_FAIL) == 0U;
-    // Kicker sensing does not exist on this robot yet: treat the kicker as
-    // ready so only real observations inhibit.
+    observation.temperature_warning = (error_flags & ERROR_TEMPERATURE_WARN) != 0U;
     auto & kicker = KickerController::get_instance();
     observation.kicker_ready = kicker.is_ready();
     observation.kicker_fault = kicker.has_fault();
     auto & estimator = WheelStateEstimator::get_instance();
     for (size_t wheel = 0; wheel < ROBOT_WHEEL_COUNT; ++wheel)
     {
+        const uint8_t bit = static_cast<uint8_t>(1U << wheel);
         if (estimator.is_channel_calibrated(wheel))
-            observation.wheel_valid_mask |= static_cast<uint8_t>(1U << wheel);
+            observation.wheel_valid_mask |= bit;
+        if ((error_flags & (ERROR_MOTOR0_FAULT << wheel)) != 0U)
+            observation.motor_fault_mask |= bit;
     }
     m_health_state = m_health_monitor.update(observation);
 
-    // Mirror the battery faults into the robot error flags so the telemetry
-    // frame and the dashboard error list report them.
-    RobotState & robot_state = RobotState::get_instance();
-    if ((m_health_state.active_faults & ERROR_BATT_UNDERVOLT) != 0U)
-        robot_state.set_error(ERROR_BATT_UNDERVOLT);
-    else
-        robot_state.clear_error(ERROR_BATT_UNDERVOLT);
-    if ((m_health_state.active_faults & ERROR_BATT_OVERVOLT) != 0U)
-        robot_state.set_error(ERROR_BATT_OVERVOLT);
-    else
-        robot_state.clear_error(ERROR_BATT_OVERVOLT);
+    // Publish the warnings detected here through the radio telemetry as well.
+    constexpr uint16_t MONITORED_FLAGS =
+      ERROR_BATT_UNDERVOLT | ERROR_BATT_OVERVOLT | ERROR_ENCODER_INVALID;
+    robot_state.set_error(MONITORED_FLAGS & m_health_state.active_faults);
+    robot_state.clear_error(MONITORED_FLAGS & ~m_health_state.active_faults);
 
     // Keep ERROR_COMM_LOSS in step with the live link so telemetry carries
     // the protocol meaning of bit 0: communication loss with the base station.
     if (is_base_station_connected())
-        RobotState::get_instance().clear_error(ERROR_COMM_LOSS);
+        robot_state.clear_error(ERROR_COMM_LOSS);
     else
-        RobotState::get_instance().set_error(ERROR_COMM_LOSS);
+        robot_state.set_error(ERROR_COMM_LOSS);
 
+    const bool calibrating_motors = MotorCalibration::get_instance().is_running();
+    const bool health_stop = SafetySupervisor::health_inhibits_motion(m_health_state);
+    m_safety_supervisor.set_calibration_active(calibrating_motors);
     CommandEnvelope envelope = {};
     while (m_command_inbox.pop(&envelope))
     {
-        m_latest_command = envelope;
-        m_has_latest_command = true;
+        if (!calibrating_motors && !health_stop)
+        {
+            m_latest_command = envelope;
+            m_has_latest_command = true;
+        }
     }
+    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+    if (calibrating_motors)
+    {
+        // Calibration owns the wheel targets until it leaves the motors stopped.
+        // A radio command received during a run must not start them afterward.
+        m_has_latest_command = false;
+        m_radio_owns_wheels = false;
+        m_safety_supervisor.update(now_us, nullptr, m_health_state, {});
+        xSemaphoreGive(m_mutex);
+        return;
+    }
+
+    // Recovery needs a new command instead of resuming a target from before the fault.
+    if (health_stop)
+        m_has_latest_command = false;
 
     const CommandEnvelope * command = m_has_latest_command ? &m_latest_command : nullptr;
     const SafetyDecision decision = m_safety_supervisor.update(now_us, command, m_health_state, {});
-    RobotStateEstimate state = {};
-    state.health = m_health_state;
-    const BodyVelocity body_target = m_position_controller.compute(state, decision.goal);
-    const ActuationSetpoint setpoint =
-      m_velocity_controller.compute(body_target, decision.goal, state.health);
-    // Until the first radio command arrives the wheel targets belong to the
-    // bench dashboard (SerialDebug); publishing the zero setpoint here would
-    // overwrite the dashboard targets every cycle. Once the radio path has
-    // delivered a command, this loop owns the targets, including the zero
-    // setpoint after a command timeout.
-    if (m_has_latest_command)
+    const bool radio_owns_wheels =
+      decision.command_fresh && command_has_motion(m_latest_command.command);
+    const bool kick_requested = decision.goal.kick_velocity > 0U;
+    if (health_stop || (!radio_owns_wheels && m_radio_owns_wheels))
+        m_wheel_ctrl->set_target_velocities({});
+    if (!health_stop && (radio_owns_wheels || kick_requested))
     {
-        m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
-        if (m_latest_command.command.kick_velocity > 0U)
+        const BodyVelocity body_target = m_position_controller.compute({}, decision.goal);
+        const ActuationSetpoint setpoint =
+          m_velocity_controller.compute(body_target, decision.goal, m_health_state);
+        if (radio_owns_wheels)
+            m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
+        if (kick_requested)
         {
             ESP_LOGI(TAG,
                      "[KICK-FLOW] cmd_kick=%u seq=%lu | ready=%d fault=%d V=%u | "
@@ -435,6 +470,8 @@ void ProtocolHandler::update(uint64_t now_us)
         if (!setpoint.kick_inhibited && setpoint.kick_velocity > 0U)
             kicker.request_kick(setpoint.kick_velocity, setpoint.command_sequence);
     }
+    m_radio_owns_wheels = radio_owns_wheels;
+
     xSemaphoreGive(m_mutex);
 }
 
@@ -443,7 +480,7 @@ void ProtocolHandler::update(uint64_t now_us)
  *
  * Validates target robot ID (filters if not for us or broadcast). Processes:
  * - CONFIG_FLAG_SET_ID: Set robot ID (validates against ROBOT_ID_MAX)
- * - CONFIG_FLAG_RUN_CALIBRATION: Run interactive sensor calibration routines
+ * - CONFIG_FLAG_RUN_CALIBRATION: Start wheel controller tuning
  * - CONFIG_FLAG_RESET_NVS: Reset robot ID to 0 (TODO: full NVS erase)
  *
  * @param cfg Decoded RobotConfig message
@@ -481,21 +518,13 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         }
     }
 
-    // RUN calibration routines
     if (cfg.config_flags & CONFIG_FLAG_RUN_CALIBRATION)
     {
-        ESP_LOGI(TAG,
-                 "CONFIG_FLAG_RUN_CALIBRATION: triggering sensor + wheel control calibration.");
-
-        WheelTuning & tuning = WheelTuning::get_instance();
-        if (tuning.is_running())
-        {
-            ESP_LOGW(TAG, "Wheel control calibration already active — ignoring request.");
-        }
-        else if (tuning.start() != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to start the wheel control calibration.");
-        }
+        const esp_err_t result = MotorCalibration::get_instance().start_controller_tuning();
+        if (result == ESP_ERR_INVALID_STATE)
+            ESP_LOGW(TAG, "Controller tuning start ignored: a motor calibration is running.");
+        else if (result != ESP_OK)
+            ESP_LOGE(TAG, "Controller tuning start failed: %s.", esp_err_to_name(result));
     }
 
     // CALIBRATE magnetometer only

@@ -48,6 +48,7 @@ Test environments (`platformio.ini`): `test_logic` (kinematics, IMU orientation)
 
 - Read files in full before wide-ranging changes, before editing files you have not fully inspected, and when asked to investigate or audit. Do not rely on search snippets for broad changes.
 - Implement only what the code needs now - no speculative abstractions, enums, constants, or methods. If a method/enum/parameter has zero callers, delete it. Favor flat code (a single-file driver beats an unasked-for class hierarchy); avoid inheritance, factories, and interfaces unless they serve a concrete, present need. When in doubt, write the simplest thing that works.
+- Keep debug-only logic out of the core classes. A class holds only the state its own logic needs; when the serial dashboard needs a hardware value, read it through the driver API in the debug code (for example the AS5600 output stage or configuration register) instead of adding a cached accessor that duplicates the driver's state to the estimator or another owner.
 - Inline single-line helpers that have only one call site.
 - Check modules for external API types; don't guess.
 - No inline imports (dynamic type imports). Top-level includes/imports only.

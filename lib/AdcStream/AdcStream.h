@@ -3,6 +3,7 @@
 
 #include <esp_adc/adc_cali_scheme.h>
 #include <esp_adc/adc_continuous.h>
+#include <esp_attr.h>
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -80,8 +81,9 @@ class AdcStream
     AdcStream();
     ~AdcStream();
 
-    void task_loop();
-    void dispatch_sample(adc_channel_t channel, uint16_t raw);
+    // Acquisition hot path: IRAM-resident to avoid flash cache misses.
+    void IRAM_ATTR task_loop();
+    void IRAM_ATTR dispatch_sample(adc_channel_t channel, uint16_t raw);
     static void s_task_wrapper(void * param);
     static bool IRAM_ATTR s_conv_done_callback(adc_continuous_handle_t handle,
                                                const adc_continuous_evt_data_t * edata,

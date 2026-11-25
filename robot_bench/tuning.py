@@ -1,4 +1,7 @@
-"""Wheel control calibration tab (PID auto-tuning) and wheel position control."""
+"""Wheel control calibration content: PID auto-tuning controls, results and step plot.
+
+Built by calibration.py inside the Calibração tab's Controlador sub-tab.
+"""
 
 import dearpygui.dearpygui as dpg
 
@@ -6,24 +9,21 @@ from . import config, rendering
 from . import protocol as proto
 
 GAP = 8
-RIGHT_WIDTH = 330
+RIGHT_WIDTH = 450
 PANEL_MARGIN = 34
 BUTTON_HEIGHT = 32
-# Share of the tab height taken by the calibration row, the rest goes to position.
-TUNING_ROW_RATIO = 50
+# Vertical space the controls panel spends before the step plot; the plot
+# takes the rest of the panel, between the minimum and maximum heights.
+PLOT_RESERVED_HEIGHT = 356
 MIN_PLOT_HEIGHT = 80
-POSITION_INPUT_WIDTH = 100
-POSITION_BUTTON_WIDTH = 64
-POSITION_ROW_HEIGHT = 24
+MAX_PLOT_HEIGHT = 200
 
 CONFIRM_LABEL = "Robô levantado · rodas livres"
 START_LABEL = "Calibrar controle"
 STOP_LABEL = "Parar calibração"
-STOP_POSITION_LABEL = "Parar posição"
 
 PANEL = "tuning_panel"
 PARAMS_PANEL = "tuning_params_panel"
-POSITION_PANEL = "tuning_position_panel"
 CONFIRM_CHECK = "tuning_confirm"
 START_BUTTON = "tuning_start"
 STOP_BUTTON = "tuning_stop"
@@ -33,44 +33,38 @@ PHASE_TEXT = "tuning_phase"
 PLOT = "tuning_plot"
 RESULTS_TABLE = "tuning_results_table"
 PARAMS_TABLE = "tuning_params_table"
-RESULT_STATUS = tuple(f"tuning_result_status_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-RESULT_RISE = tuple(f"tuning_result_rise_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-RESULT_OVERSHOOT = tuple(f"tuning_result_overshoot_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-RESULT_SS_ERROR = tuple(f"tuning_result_ss_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-PARAM_KP = tuple(f"tuning_param_kp_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-PARAM_KI = tuple(f"tuning_param_ki_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-PARAM_KD = tuple(f"tuning_param_kd_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-PARAM_FEEDFORWARD = tuple(f"tuning_param_ff_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-PARAM_VELOCITY_FF = tuple(f"tuning_param_vff_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-POSITION_ABSOLUTE_CHECK = "position_absolute"
-POSITION_MAX_RPM_INPUT = "position_max_rpm"
-POSITION_STOP_BUTTON = "position_stop"
-POSITION_STATUS = "position_status"
-POSITION_ANGLE_INPUTS = tuple(f"position_angle_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-POSITION_MOVE_BUTTONS = tuple(f"position_move_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-POSITION_READ_ANGLE = tuple(f"position_read_angle_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-POSITION_READ_ERROR = tuple(f"position_read_error_{wheel}" for wheel in range(proto.WHEEL_COUNT))
-POSITION_READ_STATUS = tuple(f"position_read_status_{wheel}" for wheel in range(proto.WHEEL_COUNT))
+MAX_MEASURED_TEXT = "tuning_max_measured"
+MAX_LIMIT_TEXT = "tuning_max_limit"
+# One display row per wheel and rotation direction: forward (+) then reverse (-).
+DIRECTION_LABELS = tuple(
+    f"M{wheel + 1} {side}" for wheel in range(proto.WHEEL_COUNT) for side in ("+", "−")
+)
+DIRECTION_ROWS = len(DIRECTION_LABELS)
+RESULT_STATUS = tuple(f"tuning_result_status_{row}" for row in range(DIRECTION_ROWS))
+RESULT_RISE = tuple(f"tuning_result_rise_{row}" for row in range(DIRECTION_ROWS))
+RESULT_OVERSHOOT = tuple(f"tuning_result_overshoot_{row}" for row in range(DIRECTION_ROWS))
+RESULT_SS_ERROR = tuple(f"tuning_result_ss_{row}" for row in range(DIRECTION_ROWS))
+PARAM_KP = tuple(f"tuning_param_kp_{row}" for row in range(DIRECTION_ROWS))
+PARAM_KI = tuple(f"tuning_param_ki_{row}" for row in range(DIRECTION_ROWS))
+PARAM_KD = tuple(f"tuning_param_kd_{row}" for row in range(DIRECTION_ROWS))
+PARAM_FEEDFORWARD = tuple(f"tuning_param_ff_{row}" for row in range(DIRECTION_ROWS))
+PARAM_VELOCITY_FF = tuple(f"tuning_param_vff_{row}" for row in range(DIRECTION_ROWS))
 
 STATUS_WAITING = "Aguardando quadro da calibração do controle"
 STATUS_STALE = "Dados da calibração desatualizados"
-STATUS_RUNNING = "Calibrando · {}% concluído"
-STATUS_DONE = "Calibração concluída · parâmetros salvos na NVS"
+STATUS_RUNNING = "Calibrando os dois sentidos · {}% concluído"
+STATUS_DONE = "Calibração concluída nos dois sentidos · limite de {:.0f} RPM salvo na NVS"
 STATUS_FAILED = "Falha · {}"
-STATUS_IDLE = "Ociosa · confirme o aviso de segurança para calibrar"
+STATUS_PARTIAL = "Calibração parcial · {}/{} rodas salvas · {}"
+STATUS_SPEED_MISMATCH = "Parâmetros salvos · velocidades médias divergentes"
+STATUS_IDLE = "Ociosa · confirme o aviso de segurança para calibrar os dois sentidos"
 SPINNING_IDLE = "Nenhuma roda girando"
 SPINNING_DONE = "Rotina concluída · motores parados"
-SPINNING_FAILED = "Rotina interrompida · motores parados"
-POSITION_IDLE = "Posição ociosa · motores livres"
-POSITION_ACTIVE = "Movimento de posição em andamento"
-POSITION_DONE = "Alvo(s) atingido(s) · segurando posição"
-POSITION_STALE = "Dados de posição desatualizados"
 
-RESULT_OK = "OK"
+RESULT_OK = "Salvo"
 RESULT_RUNNING = "Em curso"
 RESULT_FAILED = "Falhou"
 RESULT_PENDING = "Pendente"
-RESULT_STORED = "Salvo na NVS"
 
 PHASE_NAMES = {
     proto.TUNING_PHASE_IDLE: "—",
@@ -80,6 +74,7 @@ PHASE_NAMES = {
     proto.TUNING_PHASE_REFINE: "Refino",
     proto.TUNING_PHASE_STORE: "Gravação",
     proto.TUNING_PHASE_DONE: "Concluída",
+    proto.TUNING_PHASE_MAX_SPEED: "Velocidade máxima",
 }
 
 TUNING_ERROR_NAMES = {
@@ -88,13 +83,8 @@ TUNING_ERROR_NAMES = {
     proto.TUNING_ERROR_UNSTABLE: "Sem resposta válida no passo",
     proto.TUNING_ERROR_TIMEOUT: "Tempo esgotado",
     proto.TUNING_ERROR_ABORTED: "Cancelada",
-}
-
-POSITION_ERROR_NAMES = {
-    proto.POSITION_ERROR_NONE: "Sem erro",
-    proto.POSITION_ERROR_TIMEOUT: "Tempo esgotado",
-    proto.POSITION_ERROR_ABORTED: "Cancelada",
-    proto.POSITION_ERROR_ENCODER: "Encoder não calibrado",
+    proto.TUNING_ERROR_SPEED_MISMATCH: "Velocidades médias divergentes",
+    proto.TUNING_ERROR_SAVE_FAILED: "Falha ao salvar os parâmetros",
 }
 
 _TABLE_THEME = None
@@ -131,14 +121,7 @@ def tuning_start_enabled(state, now):
         return False
     if state.calibration_running():
         return False
-    if state.demo:
-        return True
-    return bool(
-        state.connected
-        and state.streaming
-        and state.last_state_t
-        and now - state.last_state_t <= config.SENSOR_STALE_S
-    )
+    return state._live_link(now)
 
 
 def tuning_stop_enabled(state, now):
@@ -171,9 +154,16 @@ def tuning_status_text(state, now):
     if tuning["state"] == proto.TUNING_RUNNING:
         return STATUS_RUNNING.format(tuning["progress"]), config.ACCENT
     if tuning["state"] == proto.TUNING_DONE:
-        return STATUS_DONE, config.OK_COLOR
+        if tuning["error_code"] == proto.TUNING_ERROR_SPEED_MISMATCH:
+            return STATUS_SPEED_MISMATCH, config.PWM_COLOR
+        limit = tuning["max_rpm"] if tuning["max_rpm"] > 0 else state.max_rpm
+        return STATUS_DONE.format(limit), config.OK_COLOR
     if tuning["state"] == proto.TUNING_FAILED:
-        return STATUS_FAILED.format(tuning_error_text(tuning["error_code"])), config.BAD_COLOR
+        error = tuning_error_text(tuning["error_code"])
+        saved = tuning["result_mask"].bit_count()
+        if saved:
+            return STATUS_PARTIAL.format(saved, proto.WHEEL_COUNT, error), config.PWM_COLOR
+        return STATUS_FAILED.format(error), config.BAD_COLOR
     return STATUS_IDLE, config.TEXT_DIM
 
 
@@ -183,10 +173,8 @@ def spinning_text(tuning):
         return SPINNING_IDLE
     if tuning["state"] == proto.TUNING_RUNNING:
         return phase_text(tuning)
-    if tuning["state"] == proto.TUNING_DONE:
+    if tuning["state"] in (proto.TUNING_DONE, proto.TUNING_FAILED):
         return SPINNING_DONE
-    if tuning["state"] == proto.TUNING_FAILED:
-        return SPINNING_FAILED
     return SPINNING_IDLE
 
 
@@ -199,9 +187,7 @@ def result_state_text(tuning, wheel):
         return RESULT_OK
     if tuning["state"] == proto.TUNING_RUNNING and tuning["wheel"] == wheel:
         return RESULT_RUNNING
-    if tuning["state"] == proto.TUNING_DONE:
-        return RESULT_FAILED
-    if tuning["state"] == proto.TUNING_FAILED:
+    if tuning["state"] in (proto.TUNING_DONE, proto.TUNING_FAILED):
         return RESULT_FAILED
     return RESULT_PENDING
 
@@ -245,11 +231,14 @@ def gain_text(value, digits=2):
     return f"{value:.{digits}f}"
 
 
-def rise_text(tuning, wheel):
-    """Validated step rise time of one wheel."""
-    if tuning is None or tuning["rise_ms"][wheel] <= 0:
+def rise_text(tuning, wheel, reverse=False):
+    """Validated step rise time of one wheel in one rotation direction."""
+    if tuning is None:
         return "—"
-    return f"{tuning['rise_ms'][wheel]} ms"
+    values = tuning["rise_ms_rev"] if reverse else tuning["rise_ms"]
+    if values[wheel] <= 0:
+        return "—"
+    return f"{values[wheel]} ms"
 
 
 def percent_text(values, wheel):
@@ -259,85 +248,72 @@ def percent_text(values, wheel):
     return f"{values[wheel]:.0f} %"
 
 
-def position_error_text(code):
-    """Portuguese description of a position-control failure reason."""
-    return POSITION_ERROR_NAMES.get(code, f"Código {code}")
+def result_rows(tuning):
+    """Per-direction result rows: forward (+) then reverse (-) for each wheel."""
+    rows = []
+    for wheel in range(proto.WHEEL_COUNT):
+        status = result_state_text(tuning, wheel)
+        color = result_state_color(tuning, wheel)
+        for reverse, suffix in ((False, ""), (True, "_rev")):
+            rows.append(
+                {
+                    "label": DIRECTION_LABELS[2 * wheel + reverse],
+                    "status": status,
+                    "color": color,
+                    "rise": rise_text(tuning, wheel, reverse),
+                    "overshoot": percent_text(tuning[f"overshoot_pct{suffix}"] if tuning else None, wheel),
+                    "ss_error": percent_text(tuning[f"ss_error_pct{suffix}"] if tuning else None, wheel),
+                }
+            )
+    return rows
 
 
-def position_live(state, now):
-    """True while the latest position frame is recent enough to use."""
-    return bool(state.last_position_t) and now - state.last_position_t <= config.POSITION_STALE_S
-
-
-def demo_position_active(state):
-    """True while a demo position move is in progress."""
-    return bool(state.demo and state.demo_position is not None)
-
-
-def position_status_text(state, now):
-    """Status line and color for the position control panel."""
-    if state.demo and state.demo_position is not None:
-        pose = state.position if position_live(state, now) else None
-        if pose is not None and pose["active_mask"] and pose["done_mask"] == pose["active_mask"]:
-            return POSITION_DONE, config.OK_COLOR
-        return POSITION_ACTIVE, config.ACCENT
-    if not state.last_position_t:
-        return POSITION_IDLE, config.TEXT_DIM
-    if not position_live(state, now):
-        return POSITION_STALE, config.BAD_COLOR
-    pose = state.position
-    if pose is None:
-        return POSITION_IDLE, config.TEXT_DIM
-    if pose["active_mask"] and pose["done_mask"] == pose["active_mask"]:
-        return POSITION_DONE, config.OK_COLOR
-    if pose["active_mask"]:
-        return POSITION_ACTIVE, config.ACCENT
-    if pose["error_code"] != proto.POSITION_ERROR_NONE:
-        return f"Falha · {position_error_text(pose['error_code'])}", config.BAD_COLOR
-    return POSITION_IDLE, config.TEXT_DIM
-
-
-def position_row(pose, wheel):
-    """Measured angle, error and status of one wheel inside the position panel."""
-    if pose is None:
-        return {"angle": "—", "error": "—", "status": "Parado", "color": config.TEXT_DIM}
-    angle = pose["angle_deg"][wheel]
-    target = pose["target_deg"][wheel]
-    bit = 1 << wheel
-    if not pose["active_mask"] & bit:
-        return {"angle": f"{angle:.1f}°", "error": "—", "status": "Parado", "color": config.TEXT_DIM}
-    error = target - angle
-    status = "Alvo atingido" if pose["done_mask"] & bit else "Movendo"
-    color = config.OK_COLOR if pose["done_mask"] & bit else config.ACCENT
-    return {"angle": f"{angle:.1f}°", "error": f"{error:+.1f}°", "status": status, "color": color}
-
-
-def move_enabled(state, now, wheel):
-    """Girar button: live link, idle routines and a calibrated encoder."""
-    if state.calibration_running() or tuning_running(state, now):
-        return False
-    if state.demo:
-        return True
-    if not wheel_live_link(state, now):
-        return False
-    return bool(state.valid_mask & (1 << wheel))
-
-
-def wheel_live_link(state, now):
-    """True when telemetry is fresh enough to command motion."""
-    return bool(
-        state.connected
-        and state.streaming
-        and state.last_state_t
-        and now - state.last_state_t <= config.SENSOR_STALE_S
+def max_speed_texts(tuning):
+    """Per-wheel measured maxima and the common calibrated limit for the panel."""
+    if tuning is None:
+        return "Máx. medido: M1 — · M2 — · M3 — · M4 —", "Limite comum: —"
+    measured = " · ".join(
+        f"M{wheel + 1} {tuning['wheel_max_rpm'][wheel]:.1f}"
+        if tuning["wheel_max_rpm"][wheel] > 0
+        else f"M{wheel + 1} —"
+        for wheel in range(proto.WHEEL_COUNT)
     )
+    rpm = tuning["max_rpm"]
+    limit = (
+        f"{rpm:.1f} RPM"
+        if rpm > 0 and (rpm < proto.WHEEL_RPM_MAX - 0.05 or tuning["state"] == proto.TUNING_DONE)
+        else "—"
+    )
+    return f"Máx. medido: {measured} RPM", f"Limite comum: {limit}"
 
 
-def position_stop_enabled(state, now):
-    """Parar posição button: any active move (or demo move)."""
-    if demo_position_active(state):
-        return True
-    return position_live(state, now) and bool(state.position and state.position["active_mask"])
+def param_rows(tuning):
+    """Per-direction NVS parameter rows: Kp/Ki/Kd repeat, feedforward is per sense."""
+    rows = []
+    for wheel in range(proto.WHEEL_COUNT):
+        if tuning is None:
+            rows.append({"label": f"M{wheel + 1} +", "values": ["—"] * 5})
+            rows.append({"label": f"M{wheel + 1} −", "values": ["—"] * 5})
+            continue
+        common = [
+            gain_text(tuning["kp"][wheel]),
+            gain_text(tuning["ki"][wheel]),
+            gain_text(tuning["kd"][wheel], 3),
+        ]
+        rows.append(
+            {
+                "label": f"M{wheel + 1} +",
+                "values": common + [f"{tuning['feedforward'][wheel]:.0f}", gain_text(tuning["velocity_ff"][wheel])],
+            }
+        )
+        rows.append(
+            {
+                "label": f"M{wheel + 1} −",
+                "values": common
+                + [f"{tuning['feedforward_rev'][wheel]:.0f}", gain_text(tuning["velocity_ff_rev"][wheel])],
+            }
+        )
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +324,7 @@ def position_stop_enabled(state, now):
 def _create_themes():
     global _TABLE_THEME, _PROGRESS_THEME, _START_THEME, _STOP_THEME
     _TABLE_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 1.0)},
+        styles={dpg.mvStyleVar_CellPadding: (2.0, 0.0)},
         component=dpg.mvTable,
     )
     _PROGRESS_THEME = rendering.create_theme(
@@ -385,7 +361,12 @@ def _build_tuning_panel(state):
 
     with rendering.panel("Calibração do controle", PANEL, width=1, height=1):
         rendering.add_text(
-            "Mede atrito/ganho de cada roda, calcula PID + avanço e valida o passo; salva na NVS.",
+            "Mede cada roda nos dois sentidos e salva os ajustes que passam no teste.",
+            "small",
+            config.TEXT_DIM,
+        )
+        rendering.add_text(
+            "Compara as velocidades médias com as quatro rodas em movimento.",
             "small",
             config.TEXT_DIM,
         )
@@ -417,54 +398,6 @@ def _build_tuning_panel(state):
         dpg.add_progress_bar(tag=PROGRESS_BAR, default_value=0.0, width=200, height=8)
         dpg.bind_item_theme(PROGRESS_BAR, _PROGRESS_THEME)
         rendering.add_text(SPINNING_IDLE, "small", config.TEXT_DIM, tag=PHASE_TEXT)
-
-
-def _build_results(state):
-    with rendering.panel("Resultado por roda", PARAMS_PANEL, width=RIGHT_WIDTH, height=1):
-        with dpg.table(tag=RESULTS_TABLE + "_grid", header_row=False, policy=dpg.mvTable_SizingStretchProp):
-            dpg.add_table_column(init_width_or_weight=0.12)
-            dpg.add_table_column(init_width_or_weight=0.28)
-            dpg.add_table_column(init_width_or_weight=0.20)
-            dpg.add_table_column(init_width_or_weight=0.20)
-            dpg.add_table_column(init_width_or_weight=0.20)
-            with dpg.table_row():
-                for label in ("Roda", "Estado", "Subida", "Over", "Regime"):
-                    rendering.add_text(label, "micro", config.TEXT_DIM)
-            for wheel in range(proto.WHEEL_COUNT):
-                with dpg.table_row():
-                    rendering.add_text(f"M{wheel + 1}", "tiny", config.TEXT)
-                    rendering.add_text(RESULT_PENDING, "tiny", config.TEXT_DIM, tag=RESULT_STATUS[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=RESULT_RISE[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=RESULT_OVERSHOOT[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=RESULT_SS_ERROR[wheel])
-        dpg.bind_item_theme(RESULTS_TABLE + "_grid", _TABLE_THEME)
-        dpg.add_separator()
-        rendering.add_text("Parâmetros atuais (NVS)", "small", config.TEXT_DIM)
-        with dpg.table(tag=PARAMS_TABLE, header_row=False, policy=dpg.mvTable_SizingStretchProp):
-            dpg.add_table_column(init_width_or_weight=0.12)
-            dpg.add_table_column(init_width_or_weight=0.17)
-            dpg.add_table_column(init_width_or_weight=0.17)
-            dpg.add_table_column(init_width_or_weight=0.17)
-            dpg.add_table_column(init_width_or_weight=0.19)
-            dpg.add_table_column(init_width_or_weight=0.18)
-            with dpg.table_row():
-                for label in ("Roda", "Kp", "Ki", "Kd", "Avanço", "v_ff"):
-                    rendering.add_text(label, "micro", config.TEXT_DIM)
-            for wheel in range(proto.WHEEL_COUNT):
-                with dpg.table_row():
-                    rendering.add_text(f"M{wheel + 1}", "tiny", config.TEXT)
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=PARAM_KP[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=PARAM_KI[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=PARAM_KD[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=PARAM_FEEDFORWARD[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=PARAM_VELOCITY_FF[wheel])
-        dpg.bind_item_theme(PARAMS_TABLE, _TABLE_THEME)
-        dpg.add_separator()
-        rendering.add_text(
-            "Avanço: duty de atrito · v_ff: duty por rad/s · gravados na NVS.",
-            "micro",
-            config.TEXT_DIM,
-        )
         dpg.add_separator()
         rendering.add_text("Resposta do passo · 12 s · média 200 ms", "small", config.TEXT_DIM)
         rendering.add_plot(PLOT, height=120, width=1)
@@ -479,90 +412,71 @@ def _build_results(state):
         )
 
 
-def _build_position_panel(state):
-    def on_move(wheel):
-        def callback(_sender, _app_data, _user_data=None):
-            angle = float(dpg.get_value(POSITION_ANGLE_INPUTS[wheel]))
-            absolute = bool(dpg.get_value(POSITION_ABSOLUTE_CHECK))
-            max_rpm = float(dpg.get_value(POSITION_MAX_RPM_INPUT))
-            angles = [0.0] * proto.WHEEL_COUNT
-            angles[wheel] = angle
-            state.start_position_move(angles, 1 << wheel, absolute, max(int(max_rpm), 0))
-
-        return callback
-
-    def on_stop(_sender, _app_data, _user_data=None):
-        state.stop_position()
-
-    with rendering.panel("Posição das rodas", POSITION_PANEL, width=1, height=1):
-        rendering.add_text(
-            "Gira a roda até o ângulo e mantém. Relativo = delta; absoluto = ângulo desde o boot.",
-            "small",
-            config.TEXT_DIM,
-        )
+def _build_results():
+    with rendering.panel("Resultado e parâmetros", PARAMS_PANEL, width=RIGHT_WIDTH, height=1):
         with dpg.group(horizontal=True):
-            dpg.add_checkbox(
-                tag=POSITION_ABSOLUTE_CHECK,
-                label="Ângulo absoluto (senão relativo)",
-                default_value=False,
-            )
-            dpg.add_input_float(
-                tag=POSITION_MAX_RPM_INPUT,
-                default_value=config.POSITION_MAX_RPM,
-                width=POSITION_INPUT_WIDTH,
-                step=10.0,
-                format="%.0f",
-            )
-            rendering.add_text("RPM máx (0 = padrão)", "tiny", config.TEXT_DIM)
-            dpg.add_button(
-                tag=POSITION_STOP_BUTTON,
-                label=STOP_POSITION_LABEL,
-                width=140,
-                height=BUTTON_HEIGHT,
-                callback=on_stop,
-            )
-            dpg.bind_item_theme(POSITION_STOP_BUTTON, _STOP_THEME)
-            rendering.add_text(POSITION_IDLE, "small", config.TEXT_DIM, tag=POSITION_STATUS)
-        with dpg.table(tag=POSITION_PANEL + "_grid", header_row=False, policy=dpg.mvTable_SizingStretchProp):
-            dpg.add_table_column(init_width_or_weight=0.07)
-            dpg.add_table_column(init_width_or_weight=0.17)
-            dpg.add_table_column(init_width_or_weight=0.11)
-            dpg.add_table_column(init_width_or_weight=0.13)
-            dpg.add_table_column(init_width_or_weight=0.13)
-            dpg.add_table_column(init_width_or_weight=0.39)
-            with dpg.table_row():
-                for label in ("Roda", "Alvo (°)", "", "Atual", "Erro", "Estado"):
-                    rendering.add_text(label, "micro", config.TEXT_DIM)
-            for wheel in range(proto.WHEEL_COUNT):
-                with dpg.table_row():
-                    rendering.add_text(f"M{wheel + 1}", "tiny", config.TEXT)
-                    dpg.add_input_float(
-                        tag=POSITION_ANGLE_INPUTS[wheel],
-                        default_value=90.0,
-                        width=POSITION_INPUT_WIDTH,
-                        step=1.0,
-                        format="%.1f",
-                    )
-                    dpg.add_button(
-                        tag=POSITION_MOVE_BUTTONS[wheel],
-                        label="Girar",
-                        width=POSITION_BUTTON_WIDTH,
-                        callback=on_move(wheel),
-                    )
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=POSITION_READ_ANGLE[wheel])
-                    rendering.add_text("—", "tiny", config.TEXT_DIM, tag=POSITION_READ_ERROR[wheel])
-                    rendering.add_text("Parado", "tiny", config.TEXT_DIM, tag=POSITION_READ_STATUS[wheel])
-        dpg.bind_item_theme(POSITION_PANEL + "_grid", _TABLE_THEME)
+            with dpg.group():
+                rendering.add_text("Resultado por sentido", "small", config.TEXT_DIM)
+                with dpg.table(tag=RESULTS_TABLE, header_row=False, policy=dpg.mvTable_SizingStretchProp):
+                    dpg.add_table_column(init_width_or_weight=0.14)
+                    dpg.add_table_column(init_width_or_weight=0.26)
+                    dpg.add_table_column(init_width_or_weight=0.22)
+                    dpg.add_table_column(init_width_or_weight=0.19)
+                    dpg.add_table_column(init_width_or_weight=0.19)
+                    with dpg.table_row():
+                        for label in ("Roda", "Estado", "Subida", "Over", "Regime"):
+                            rendering.add_text(label, "micro", config.TEXT_DIM)
+                    for index, label in enumerate(DIRECTION_LABELS):
+                        with dpg.table_row():
+                            rendering.add_text(label, "tiny", config.TEXT)
+                            rendering.add_text(
+                                RESULT_PENDING, "tiny", config.TEXT_DIM, tag=RESULT_STATUS[index]
+                            )
+                            rendering.add_text("—", "tiny", config.TEXT_DIM, tag=RESULT_RISE[index])
+                            rendering.add_text("—", "tiny", config.TEXT_DIM, tag=RESULT_OVERSHOOT[index])
+                            rendering.add_text("—", "tiny", config.TEXT_DIM, tag=RESULT_SS_ERROR[index])
+                dpg.bind_item_theme(RESULTS_TABLE, _TABLE_THEME)
+                rendering.add_text("+ horário · − anti-horário", "micro", config.TEXT_DIM)
+            with dpg.group():
+                rendering.add_text("Parâmetros atuais", "small", config.TEXT_DIM)
+                with dpg.table(tag=PARAMS_TABLE, header_row=False, policy=dpg.mvTable_SizingStretchProp):
+                    dpg.add_table_column(init_width_or_weight=0.13)
+                    dpg.add_table_column(init_width_or_weight=0.17)
+                    dpg.add_table_column(init_width_or_weight=0.16)
+                    dpg.add_table_column(init_width_or_weight=0.17)
+                    dpg.add_table_column(init_width_or_weight=0.18)
+                    dpg.add_table_column(init_width_or_weight=0.19)
+                    with dpg.table_row():
+                        for label in ("Roda", "Kp", "Ki", "Kd", "Avanço", "v_ff"):
+                            rendering.add_text(label, "micro", config.TEXT_DIM)
+                    for index, label in enumerate(DIRECTION_LABELS):
+                        with dpg.table_row():
+                            rendering.add_text(label, "tiny", config.TEXT)
+                            for tag in (
+                                PARAM_KP[index],
+                                PARAM_KI[index],
+                                PARAM_KD[index],
+                                PARAM_FEEDFORWARD[index],
+                                PARAM_VELOCITY_FF[index],
+                            ):
+                                rendering.add_text("—", "tiny", config.TEXT_DIM, tag=tag)
+                dpg.bind_item_theme(PARAMS_TABLE, _TABLE_THEME)
+                rendering.add_text(
+                    "Avanço: atrito do sentido · v_ff: duty por rad/s · NVS.",
+                    "micro",
+                    config.TEXT_DIM,
+                )
+        dpg.add_separator()
+        rendering.add_text("", "micro", config.TEXT_DIM, tag=MAX_MEASURED_TEXT)
+        rendering.add_text("", "small", config.TEXT_DIM, tag=MAX_LIMIT_TEXT)
 
 
 def build(state):
-    """Create the Controle tab contents once."""
+    """Create the Controlador sub-tab contents once."""
     _create_themes()
     with dpg.group(horizontal=True):
-        with dpg.group():
-            _build_tuning_panel(state)
-            _build_position_panel(state)
-        _build_results(state)
+        _build_tuning_panel(state)
+        _build_results()
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +484,7 @@ def build(state):
 # ---------------------------------------------------------------------------
 
 
-def _update_tuning_controls(state, now, inner_w):
+def _update_tuning_controls(state, now, inner_w, body_h):
     dpg.configure_item(
         START_BUTTON,
         width=(inner_w - GAP) // 2,
@@ -613,83 +527,46 @@ def _update_tuning_controls(state, now, inner_w):
         rendering.history_peak(display, 2, now, config.CHART_WINDOW_S, 100.0),
     )
     rendering.set_y_limits(PLOT, -peak, peak)
-    dpg.configure_item(PLOT, width=RIGHT_WIDTH - PANEL_MARGIN)
+    plot_h = min(MAX_PLOT_HEIGHT, max(MIN_PLOT_HEIGHT, int(body_h) - PLOT_RESERVED_HEIGHT))
+    dpg.configure_item(PLOT, width=inner_w, height=plot_h)
     dpg.configure_item(PLOT + "_placeholder", show=not xs_velocity)
 
 
 def _update_results(state, now):
     tuning = state.tuning if tuning_fresh(state, now) else None
-    for wheel in range(proto.WHEEL_COUNT):
-        rendering.set_text(
-            RESULT_STATUS[wheel],
-            result_state_text(tuning, wheel),
-            result_state_color(tuning, wheel),
-        )
-        rendering.set_text(RESULT_RISE[wheel], rise_text(tuning, wheel), config.TEXT if tuning else config.TEXT_DIM)
-        rendering.set_text(
-            RESULT_OVERSHOOT[wheel],
-            percent_text(tuning["overshoot_pct"] if tuning else None, wheel),
-            config.TEXT if tuning else config.TEXT_DIM,
-        )
-        rendering.set_text(
-            RESULT_SS_ERROR[wheel],
-            percent_text(tuning["ss_error_pct"] if tuning else None, wheel),
-            config.TEXT if tuning else config.TEXT_DIM,
-        )
-        if tuning is None:
-            values = ["—"] * 5
-        else:
-            values = [
-                gain_text(tuning["kp"][wheel]),
-                gain_text(tuning["ki"][wheel]),
-                gain_text(tuning["kd"][wheel], 3),
-                f"{tuning['feedforward'][wheel]:.0f}",
-                gain_text(tuning["velocity_ff"][wheel]),
-            ]
-        tags = (PARAM_KP[wheel], PARAM_KI[wheel], PARAM_KD[wheel], PARAM_FEEDFORWARD[wheel], PARAM_VELOCITY_FF[wheel])
-        for tag, value in zip(tags, values):
-            rendering.set_text(tag, value, config.TEXT if tuning else config.TEXT_DIM)
-
-
-def _update_position(state, now, inner_w):
-    pose = state.position if position_live(state, now) else None
-    if state.demo and state.demo_position is not None and pose is not None:
-        pose = dict(pose)
-    status, color = position_status_text(state, now)
-    rendering.set_text(POSITION_STATUS, status, color)
-    for wheel in range(proto.WHEEL_COUNT):
-        row = position_row(pose, wheel)
-        rendering.set_text(POSITION_READ_ANGLE[wheel], row["angle"], config.TEXT if pose else config.TEXT_DIM)
-        rendering.set_text(POSITION_READ_ERROR[wheel], row["error"], row["color"])
-        rendering.set_text(POSITION_READ_STATUS[wheel], row["status"], row["color"])
-        dpg.configure_item(POSITION_MOVE_BUTTONS[wheel], enabled=move_enabled(state, now, wheel))
-    dpg.configure_item(
-        POSITION_ABSOLUTE_CHECK,
-        enabled=not (tuning_running(state, now) or state.calibration_running()),
+    tone = config.TEXT if tuning else config.TEXT_DIM
+    results_w = (RIGHT_WIDTH - PANEL_MARGIN - GAP) * 48 // 100
+    params_w = RIGHT_WIDTH - PANEL_MARGIN - GAP - results_w
+    dpg.configure_item(RESULTS_TABLE, width=results_w)
+    dpg.configure_item(PARAMS_TABLE, width=params_w)
+    for row, status_tag, rise_tag, overshoot_tag, ss_tag in zip(
+        result_rows(tuning), RESULT_STATUS, RESULT_RISE, RESULT_OVERSHOOT, RESULT_SS_ERROR
+    ):
+        rendering.set_text(status_tag, row["status"], row["color"])
+        rendering.set_text(rise_tag, row["rise"], tone)
+        rendering.set_text(overshoot_tag, row["overshoot"], tone)
+        rendering.set_text(ss_tag, row["ss_error"], tone)
+    for row, kp_tag, ki_tag, kd_tag, ff_tag, vff_tag in zip(
+        param_rows(tuning), PARAM_KP, PARAM_KI, PARAM_KD, PARAM_FEEDFORWARD, PARAM_VELOCITY_FF
+    ):
+        for tag, value in zip((kp_tag, ki_tag, kd_tag, ff_tag, vff_tag), row["values"]):
+            rendering.set_text(tag, value, tone)
+    measured, limit = max_speed_texts(tuning)
+    rendering.set_text(MAX_MEASURED_TEXT, measured, tone)
+    rendering.set_text(
+        MAX_LIMIT_TEXT,
+        limit,
+        config.OK_COLOR if limit != "Limite comum: —" else config.TEXT_DIM,
     )
-    dpg.configure_item(
-        POSITION_MAX_RPM_INPUT,
-        width=POSITION_INPUT_WIDTH,
-        enabled=not (tuning_running(state, now) or state.calibration_running()),
-    )
-    dpg.configure_item(
-        POSITION_STOP_BUTTON,
-        enabled=position_stop_enabled(state, now),
-    )
-    dpg.configure_item(POSITION_PANEL + "_grid", width=inner_w)
 
 
 def update(state, layout, now):
-    """Refresh the Controle tab contents."""
+    """Refresh the Controlador sub-tab contents."""
     body_w = int(layout["body_w"])
     body_h = int(layout["body_h"])
     main_w = max(320, body_w - RIGHT_WIDTH - GAP)
-    tuning_h = max(240, body_h * TUNING_ROW_RATIO // 100)
-    position_h = max(200, body_h - tuning_h - GAP)
-    dpg.configure_item(PANEL, width=main_w, height=tuning_h)
-    dpg.configure_item(POSITION_PANEL, width=main_w, height=position_h)
+    dpg.configure_item(PANEL, width=main_w, height=body_h)
     dpg.configure_item(PARAMS_PANEL, width=RIGHT_WIDTH, height=body_h)
     inner_w = main_w - PANEL_MARGIN
-    _update_tuning_controls(state, now, inner_w)
+    _update_tuning_controls(state, now, inner_w, body_h)
     _update_results(state, now)
-    _update_position(state, now, inner_w)

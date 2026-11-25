@@ -3,6 +3,9 @@
 #
 CONFIG_GPIO_MAX_INDEX=39
 
+# Critical-fault lockout
+CONFIG_DISABLE_SAFE_STOP=y
+
 #
 # I2C
 #
@@ -76,10 +79,21 @@ CONFIG_VMON_SUPPLY_RATIO_MILLI=26455
 # 6S2P 18650 lithium ion pack: 25.2 V full, 19.8 V low (3.3 V/cell)
 CONFIG_VMON_UNDERVOLTAGE_MV=19800
 CONFIG_VMON_OVERVOLTAGE_MV=26500
-# Aggregate conversions per second shared by the scan table slots
-CONFIG_ADC_SAMPLE_FREQ_HZ=80000
+# Aggregate conversions per second shared by the scan table slots. OVERSAMPLE
+# 16 doubles the publication rate to ~2.3 kHz per wheel; the hot path was
+# optimized (incremental least-squares sums, decimated FG queries, acquisition
+# task pinned to core 1) so the dispatch task keeps up without starving the
+# boot/init tasks.
+CONFIG_ADC_SAMPLE_FREQ_HZ=160000
 # Block mean of N conversions per sampled channel
-CONFIG_ADC_OVERSAMPLE=32
+CONFIG_ADC_OVERSAMPLE=12
+
+#
+# Control loop rate
+#
+# The wheel control task runs at the FreeRTOS tick (1 ms) so the low-speed
+# pulse/velocity loop can commutate fast enough for the ripple requirement.
+CONFIG_FREERTOS_HZ=1000
 
 #
 # GY-85 interrupts
@@ -116,6 +130,14 @@ CONFIG_NRF24_SPI_DEVICE_KEY=253
 
 CONFIG_SPI2_HOST=y
 # CONFIG_SPI3_HOST is not set
+
+#
+# Encoder acquisition performance
+#
+# -O2 and 240 MHz for the ADC dispatch/EKF hot path, with assertions kept enabled.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 CONFIG_ADVANCED=y
 CONFIG_RF_RATIO_2M=y

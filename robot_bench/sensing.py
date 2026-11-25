@@ -144,7 +144,7 @@ def tof_zone_quality(distance, status):
 
 
 def tof_status_label(distance, status):
-    """Human readable status for one zone, including the no-range special case."""
+    """Label a zone reading, including valid status with no measured range."""
     if distance <= 0 and status == TOF_VALID_STATUS:
         return TOF_NO_RANGE_LABEL
     return TOF_STATUS_LABELS.get(status, TOF_UNKNOWN_LABEL)
@@ -269,8 +269,8 @@ def tof_legend_geometry(legend_h):
 
 
 def imu_attitude_fresh(state, now):
-    """True while the latest state frame with attitude data is recent."""
-    return bool(state.last_state_t) and now - state.last_state_t <= config.SENSOR_STALE_S
+    """True while the latest IMU frame with attitude data is recent."""
+    return imu_sensor_fresh(state, now)
 
 
 def imu_sensor_fresh(state, now):
@@ -280,9 +280,9 @@ def imu_sensor_fresh(state, now):
 
 def imu_attitude_status(state, now):
     """Status label for the attitude panel and its cube."""
-    if not state.last_state_t:
+    if not state.last_imu_t:
         return "Aguardando atitude"
-    if now - state.last_state_t > config.SENSOR_STALE_S:
+    if now - state.last_imu_t > config.SENSOR_STALE_S:
         return "Atitude desatualizada"
     return "Atitude atual"
 

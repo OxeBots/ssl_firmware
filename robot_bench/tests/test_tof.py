@@ -50,7 +50,7 @@ class RawTofTests(unittest.TestCase):
         frame["distances"][0], frame["statuses"][0] = 0, 5
         self.assertEqual((state.tof[0], state.tof_status[0]), (815, 255))
         state.last_state_t = state.last_imu_t = state.last_health_t = time.monotonic()
-        state.health = {"motion_inhibited": 0}
+        state.health = {"error_flags": 0}
         state.connected, state.streaming = "test", True
         reader = BenchReader(state, "test", 115200)
         reader.ser = Mock()
@@ -70,10 +70,11 @@ class RawTofTests(unittest.TestCase):
         state = BenchState()
         state.streaming = True
         state.last_state_t = state.last_imu_t = state.last_tof_t = state.last_health_t = time.monotonic()
-        state.health = {"motion_inhibited": 0}
+        state.health = {"error_flags": 0}
         reader = BenchReader(state, "test", 115200)
         reader._session_start = time.monotonic()
         reader.ser = Mock()
+        reader.ser.in_waiting = 0
 
         def reboot(_size):
             state.quit = True
@@ -196,7 +197,7 @@ class ImuModelTests(unittest.TestCase):
         self.assertFalse(sensing.imu_attitude_fresh(state, now))
         self.assertFalse(sensing.imu_sensor_fresh(state, now))
         self.assertEqual(sensing.imu_attitude_status(state, now), "Aguardando atitude")
-        state.last_state_t = state.last_imu_t = now
+        state.last_imu_t = now
         self.assertTrue(sensing.imu_attitude_fresh(state, now))
         self.assertTrue(sensing.imu_sensor_fresh(state, now))
         self.assertEqual(sensing.imu_attitude_status(state, now), "Atitude atual")

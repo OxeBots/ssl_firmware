@@ -1,19 +1,13 @@
-"""Regression checks for the control-calibration and wheel-position tab."""
+"""Regression checks for the control-calibration content (Calibração > Controlador)."""
 
 import struct
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-import dearpygui.dearpygui as dpg
-
-from robot_bench import app, config, demo, protocol, tuning
+from robot_bench import app, calibration, config, demo, protocol, tuning
 from robot_bench.state import BenchState
-from scripts.serial_debug_protocol_bp import (
-    DebugPosition,
-    DebugPositionControl,
-    DebugTuning,
-)
+from scripts.serial_debug_protocol_bp import DebugPosition, DebugPositionControl
 
 
 def live_state(*, confirm=False, demo_mode=False):
@@ -30,87 +24,7 @@ def live_state(*, confirm=False, demo_mode=False):
     return state
 
 
-class TuningWireFormatTests(unittest.TestCase):
-    def test_tuning_parser_matches_generated_bitproto_layout(self):
-        generated = DebugTuning(
-            state=protocol.TUNING_RUNNING,
-            wheel=2,
-            phase=protocol.TUNING_PHASE_VALIDATE,
-            progress=57,
-            result_mask=0b0011,
-            error_code=protocol.TUNING_ERROR_NONE,
-            kp=[1500, 0, 250, -100],
-            ki=[50, 0, 0, 0],
-            kd=[25, 0, 0, 0],
-            feedforward=[176, 0, 200, 1023],
-            velocity_ff=[5400, 0, 0, 100],
-            rise_ms=[200, 210, 220, 230],
-            overshoot_pct=[0, 1, 2, 3],
-            ss_error_pct=[0, 2, 4, 6],
-            sequence=999,
-        )
-        message = bytes(generated.encode())
-        self.assertEqual(len(message), protocol.TUNING_SIZE)
-        expected = struct.pack(
-            "<6B20h4H4B4BI",
-            1,
-            2,
-            3,
-            57,
-            0b0011,
-            0,
-            1500,
-            0,
-            250,
-            -100,
-            50,
-            0,
-            0,
-            0,
-            25,
-            0,
-            0,
-            0,
-            176,
-            0,
-            200,
-            1023,
-            5400,
-            0,
-            0,
-            100,
-            200,
-            210,
-            220,
-            230,
-            0,
-            1,
-            2,
-            3,
-            0,
-            2,
-            4,
-            6,
-            999,
-        )
-        self.assertEqual(message, expected)
-        parsed = protocol.parse_tuning(message)
-        self.assertEqual(parsed["state"], protocol.TUNING_RUNNING)
-        self.assertEqual(parsed["wheel"], 2)
-        self.assertEqual(parsed["phase"], protocol.TUNING_PHASE_VALIDATE)
-        self.assertEqual(parsed["progress"], 57)
-        self.assertEqual(parsed["result_mask"], 0b0011)
-        self.assertEqual(parsed["kp"], [15.0, 0.0, 2.5, -1.0])
-        self.assertEqual(parsed["ki"], [0.5, 0.0, 0.0, 0.0])
-        self.assertEqual(parsed["kd"], [0.0025, 0.0, 0.0, 0.0])
-        self.assertEqual(parsed["feedforward"], [176.0, 0.0, 200.0, 1023.0])
-        self.assertEqual(parsed["velocity_ff"], [54.0, 0.0, 0.0, 1.0])
-        self.assertEqual(parsed["rise_ms"], [200, 210, 220, 230])
-        self.assertEqual(parsed["overshoot_pct"], [0, 1, 2, 3])
-        self.assertEqual(parsed["ss_error_pct"], [0, 2, 4, 6])
-        self.assertEqual(parsed["sequence"], 999)
-        self.assertIsNone(protocol.parse_tuning(message[:-1]))
-
+class PositionWireFormatTests(unittest.TestCase):
     def test_position_parser_matches_generated_bitproto_layout(self):
         generated = DebugPosition(
             active_mask=0b0101,
@@ -175,6 +89,25 @@ class TuningWireFormatTests(unittest.TestCase):
 
 
 class TuningHelperTests(unittest.TestCase):
+    def test_control_calibration_subscribes_to_wheel_history_and_tuning(self):
+        state = live_state()
+        state.active_tab = config.TAB_CALIBRATION
+        layout = app.compute_layout(1200, 800)
+        with (
+            patch.object(app.dpg, "configure_item"),
+            patch.object(app.rendering, "set_text"),
+            patch.object(app, "header_spacer_width", return_value=20),
+            patch.object(app.motors, "leave"),
+            patch.object(calibration, "update"),
+            patch.object(calibration, "active_subtab", return_value=calibration.SUBTAB_CONTROL),
+        ):
+            app.refresh_dashboard(state, layout, time.monotonic(), 0, 0, 60)
+
+        self.assertEqual(
+            state.stream_mask,
+            protocol.STREAM_CALIBRATION | protocol.STREAM_STATE | protocol.STREAM_TUNING,
+        )
+
     def test_freshness_and_running_track_the_stale_window(self):
         state = BenchState()
         now = 100.0
@@ -251,7 +184,11 @@ class TuningHelperTests(unittest.TestCase):
             tuning.tuning_status_text(state, now), (tuning.STATUS_RUNNING.format(40), config.ACCENT)
         )
         state.tuning = demo.done_tuning_frame(3)
-        self.assertEqual(tuning.tuning_status_text(state, now), (tuning.STATUS_DONE, config.OK_COLOR))
+        self.assertEqual(
+            tuning.tuning_status_text(state, now),
+            (tuning.STATUS_DONE.format(demo.DEMO_MAX_RPM), config.OK_COLOR),
+        )
+        self.assertIn("138 RPM", tuning.STATUS_DONE.format(demo.DEMO_MAX_RPM))
         state.tuning = demo.tuning_frame(
             4, state=protocol.TUNING_FAILED, error_code=protocol.TUNING_ERROR_NO_MOVEMENT
         )
@@ -259,6 +196,9 @@ class TuningHelperTests(unittest.TestCase):
             tuning.tuning_status_text(state, now),
             (tuning.STATUS_FAILED.format(tuning.TUNING_ERROR_NAMES[1]), config.BAD_COLOR),
         )
+        self.assertIn("dois sentidos", tuning.STATUS_DONE)
+        self.assertIn("dois sentidos", tuning.STATUS_RUNNING)
+        self.assertIn("dois sentidos", tuning.STATUS_IDLE)
         state.last_tuning_t = now - config.TUNING_STALE_S - 1.0
         self.assertEqual(tuning.tuning_status_text(state, now), (tuning.STATUS_STALE, config.BAD_COLOR))
 
@@ -268,6 +208,11 @@ class TuningHelperTests(unittest.TestCase):
             1, state=protocol.TUNING_RUNNING, wheel=2, phase=protocol.TUNING_PHASE_VALIDATE
         )
         self.assertEqual(tuning.phase_text(frame), "Roda M3 · Validação")
+        max_speed = demo.tuning_frame(
+            1, state=protocol.TUNING_RUNNING, wheel=2, phase=protocol.TUNING_PHASE_MAX_SPEED
+        )
+        self.assertEqual(tuning.PHASE_NAMES[protocol.TUNING_PHASE_MAX_SPEED], "Velocidade máxima")
+        self.assertEqual(tuning.phase_text(max_speed), "Roda M3 · Velocidade máxima")
         self.assertEqual(tuning.result_state_text(None, 0), tuning.RESULT_PENDING)
         self.assertEqual(tuning.result_state_text(frame, 2), tuning.RESULT_RUNNING)
         self.assertEqual(tuning.result_state_text(frame, 0), tuning.RESULT_PENDING)
@@ -280,21 +225,99 @@ class TuningHelperTests(unittest.TestCase):
         self.assertEqual(tuning.result_state_text(failed, 0), tuning.RESULT_FAILED)
         self.assertEqual(tuning.result_state_color(failed, 0), config.BAD_COLOR)
 
+    def test_partial_results_distinguish_saved_wheels_from_failures(self):
+        now = 100.0
+        state = BenchState()
+        state.last_tuning_t = now
+        state.tuning = demo.tuning_frame(
+            1, state=protocol.TUNING_FAILED, error_code=protocol.TUNING_ERROR_UNSTABLE,
+            result_mask=0b0101, max_rpm=479.8,
+        )
+        summary, color = tuning.tuning_status_text(state, now)
+        self.assertIn("2/4 rodas salvas", summary)
+        self.assertEqual(color, config.PWM_COLOR)
+        self.assertEqual(tuning.result_state_text(state.tuning, 0), tuning.RESULT_OK)
+        self.assertEqual(tuning.result_state_text(state.tuning, 1), tuning.RESULT_FAILED)
+        self.assertEqual(tuning.max_speed_texts(state.tuning)[1], "Limite comum: 479.8 RPM")
+
+    def test_speed_warning_preserves_saved_status(self):
+        now = 100.0
+        state = BenchState()
+        state.last_tuning_t = now
+        state.tuning = demo.done_tuning_frame(1)
+        state.tuning["error_code"] = protocol.TUNING_ERROR_SPEED_MISMATCH
+        self.assertEqual(
+            tuning.tuning_status_text(state, now),
+            (tuning.STATUS_SPEED_MISMATCH, config.PWM_COLOR),
+        )
+        self.assertEqual(tuning.result_state_text(state.tuning, 3), tuning.RESULT_OK)
+
     def test_metric_text_formats(self):
         frame = demo.tuning_frame(
             1,
             rise_ms=[300, 0, 0, 0],
             overshoot_pct=[3, 0, 0, 0],
             ss_error_pct=[2, 0, 0, 0],
+            rise_ms_rev=[350, 0, 0, 0],
+            overshoot_pct_rev=[4, 0, 0, 0],
+            ss_error_pct_rev=[3, 0, 0, 0],
         )
         self.assertEqual(tuning.gain_text(58.0), "58.00")
         self.assertEqual(tuning.gain_text(0.0, 3), "0.000")
         self.assertEqual(tuning.rise_text(frame, 0), "300 ms")
         self.assertEqual(tuning.rise_text(frame, 1), "—")
         self.assertEqual(tuning.rise_text(None, 0), "—")
+        self.assertEqual(tuning.rise_text(frame, 0, reverse=True), "350 ms")
+        self.assertEqual(tuning.rise_text(frame, 1, reverse=True), "—")
         self.assertEqual(tuning.percent_text(frame["overshoot_pct"], 0), "3 %")
         self.assertEqual(tuning.percent_text(frame["overshoot_pct"], 1), "—")
+        self.assertEqual(tuning.percent_text(frame["overshoot_pct_rev"], 0), "4 %")
         self.assertEqual(tuning.percent_text(None, 0), "—")
+
+    def test_result_rows_split_forward_and_reverse(self):
+        rows = tuning.result_rows(demo.done_tuning_frame(1))
+        self.assertEqual(len(rows), 2 * protocol.WHEEL_COUNT)
+        self.assertEqual([row["label"] for row in rows], list(tuning.DIRECTION_LABELS))
+        self.assertEqual(rows[0]["label"], "M1 +")
+        self.assertEqual(rows[1]["label"], "M1 −")
+        self.assertEqual(rows[0]["status"], tuning.RESULT_OK)
+        self.assertEqual(rows[0]["color"], config.OK_COLOR)
+        self.assertEqual(rows[0]["rise"], "280 ms")
+        self.assertEqual(rows[0]["overshoot"], "2 %")
+        self.assertEqual(rows[0]["ss_error"], "1 %")
+        self.assertEqual(rows[1]["rise"], "310 ms")
+        self.assertEqual(rows[1]["overshoot"], "3 %")
+        self.assertEqual(rows[1]["ss_error"], "2 %")
+        pending = tuning.result_rows(None)
+        self.assertEqual(pending[0]["status"], tuning.RESULT_PENDING)
+        self.assertEqual((pending[0]["rise"], pending[1]["rise"]), ("—", "—"))
+
+    def test_param_rows_repeat_gains_and_split_feedforward(self):
+        rows = tuning.param_rows(demo.done_tuning_frame(1))
+        self.assertEqual(len(rows), 2 * protocol.WHEEL_COUNT)
+        self.assertEqual([row["label"] for row in rows], list(tuning.DIRECTION_LABELS))
+        forward, reverse = rows[0], rows[1]
+        self.assertEqual(forward["values"][:3], reverse["values"][:3])
+        self.assertEqual(forward["values"][3], "176")
+        self.assertEqual(reverse["values"][3], "-198")
+        self.assertEqual(forward["values"][4], "54.00")
+        self.assertEqual(reverse["values"][4], "57.00")
+        self.assertEqual(tuning.param_rows(None)[0]["values"], ["—"] * 5)
+
+    def test_max_speed_texts_show_measured_maxima_and_limit(self):
+        self.assertEqual(
+            tuning.max_speed_texts(None),
+            ("Máx. medido: M1 — · M2 — · M3 — · M4 —", "Limite comum: —"),
+        )
+        measured, limit = tuning.max_speed_texts(demo.done_tuning_frame(1))
+        self.assertIn("M1 175", measured)
+        self.assertIn("M4 138", measured)
+        self.assertEqual(limit, "Limite comum: 138.0 RPM")
+        running = demo.running_tuning_frame(demo.DEMO_TUNING_WHEEL_S * 2.2, 2)
+        measured, limit = tuning.max_speed_texts(running)
+        self.assertIn("M1 175", measured)
+        self.assertIn("M3 —", measured)
+        self.assertEqual(limit, "Limite comum: —")
 
     def test_display_smoothing_suppresses_single_spikes(self):
         samples = [(0.0, 100.0, 100.0), (0.1, 100.0, 100.0), (0.2, 140.0, 100.0), (0.3, 100.0, 100.0)]
@@ -309,82 +332,6 @@ class TuningHelperTests(unittest.TestCase):
         for code, text in tuning.TUNING_ERROR_NAMES.items():
             self.assertEqual(tuning.tuning_error_text(code), text)
         self.assertEqual(tuning.tuning_error_text(99), "Código 99")
-
-
-class PositionHelperTests(unittest.TestCase):
-    def test_status_text_covers_position_states(self):
-        now = 100.0
-        state = BenchState()
-        self.assertEqual(tuning.position_status_text(state, now), (tuning.POSITION_IDLE, config.TEXT_DIM))
-        state.last_position_t = now
-        state.position = demo.position_frame(
-            1, active_mask=0b0011, done_mask=0b0001, angle_deg=[0, 90, 0, 0], target_deg=[0, 90, 0, 0]
-        )
-        self.assertEqual(tuning.position_status_text(state, now), (tuning.POSITION_ACTIVE, config.ACCENT))
-        state.position = demo.position_frame(
-            2, active_mask=0b0011, done_mask=0b0011, angle_deg=[0, 90, 0, 0], target_deg=[0, 90, 0, 0]
-        )
-        self.assertEqual(tuning.position_status_text(state, now), (tuning.POSITION_DONE, config.OK_COLOR))
-        state.position = demo.position_frame(3, error_code=protocol.POSITION_ERROR_TIMEOUT)
-        self.assertEqual(
-            tuning.position_status_text(state, now),
-            (f"Falha · {tuning.POSITION_ERROR_NAMES[1]}", config.BAD_COLOR),
-        )
-        state.last_position_t = now - config.POSITION_STALE_S - 1.0
-        self.assertEqual(tuning.position_status_text(state, now), (tuning.POSITION_STALE, config.BAD_COLOR))
-
-    def test_position_rows_show_angles_errors_and_status(self):
-        pose = demo.position_frame(
-            1,
-            active_mask=0b0101,
-            done_mask=0b0001,
-            angle_deg=[10.0, 0.0, -45.0, 0.0],
-            target_deg=[10.0, 0.0, -40.0, 0.0],
-        )
-        first = tuning.position_row(pose, 0)
-        self.assertEqual(first["angle"], "10.0°")
-        self.assertEqual(first["status"], "Alvo atingido")
-        self.assertEqual(first["color"], config.OK_COLOR)
-        third = tuning.position_row(pose, 2)
-        self.assertEqual(third["error"], "+5.0°")
-        self.assertEqual(third["status"], "Movendo")
-        self.assertEqual(third["color"], config.ACCENT)
-        second = tuning.position_row(pose, 1)
-        self.assertEqual(second["status"], "Parado")
-        self.assertEqual(second["color"], config.TEXT_DIM)
-        idle = tuning.position_row(None, 0)
-        self.assertEqual(idle["angle"], "—")
-
-    def test_move_buttons_need_link_routines_and_calibrated_encoder(self):
-        now = 100.0
-        state = BenchState()
-        self.assertFalse(tuning.move_enabled(state, now, 0))
-        state.demo = True
-        self.assertTrue(tuning.move_enabled(state, now, 0))
-        state.demo = False
-        state.reader = Mock()
-        state.connected = "/dev/ttyUSB0"
-        state.streaming = True
-        state.last_state_t = now
-        state.valid_mask = 0b0011
-        self.assertTrue(tuning.move_enabled(state, now, 1))
-        self.assertFalse(tuning.move_enabled(state, now, 2))
-        state.calibration = demo.calibration_frame(1, state=protocol.CALIBRATION_RUNNING)
-        state.last_calibration_t = time.monotonic()
-        self.assertFalse(tuning.move_enabled(state, now, 1))
-
-    def test_stop_position_enabled_only_with_active_move(self):
-        now = 100.0
-        state = BenchState()
-        self.assertFalse(tuning.position_stop_enabled(state, now))
-        state.last_position_t = now
-        state.position = demo.position_frame(1, active_mask=0b0001)
-        self.assertTrue(tuning.position_stop_enabled(state, now))
-        state.position = demo.position_frame(2)
-        self.assertFalse(tuning.position_stop_enabled(state, now))
-        state.demo = True
-        state.demo_position = {"wheel_mask": 1}
-        self.assertTrue(tuning.position_stop_enabled(state, now))
 
 
 class CommandTests(unittest.TestCase):
@@ -416,100 +363,56 @@ class CommandTests(unittest.TestCase):
         state.stop_tuning()
         self.assertIsNone(state.demo_tuning_start)
 
-    def test_position_move_sends_relative_or_absolute_frame(self):
-        state = live_state()
-        angles = [0.0, 0.0, 45.0, 0.0]
-        self.assertTrue(state.start_position_move(angles, 1 << 2, False, 250))
-        state.reader.send_frame.assert_called_once_with(
-            protocol.MSG_POSITION_CONTROL,
-            protocol.encode_position_control(
-                protocol.POSITION_OP_MOVE, protocol.POSITION_MODE_RELATIVE, 0b0100, angles, 250, 1
-            ),
-        )
-        self.assertEqual(state.position_request["wheel_mask"], 0b0100)
-        state.stop_position()
-        self.assertEqual(state.control_sequence, 2)
-        state.reader.send_frame.assert_called_with(
-            protocol.MSG_POSITION_CONTROL,
-            protocol.encode_position_control(
-                protocol.POSITION_OP_STOP, protocol.POSITION_MODE_RELATIVE, 0, [0.0] * 4, 0, 2
-            ),
-        )
-
-    def test_position_move_requires_calibrated_encoders(self):
-        state = live_state()
-        state.valid_mask = 0b0011
-        self.assertFalse(state.start_position_move([10.0] * 4, 1 << 3, False, 0))
-        state.reader.send_frame.assert_not_called()
-        self.assertTrue(state.start_position_move([10.0] * 4, 1 << 1, False, 0))
-
-    def test_position_move_cancelled_by_velocity_targets_and_stop(self):
-        state = live_state(confirm=True, demo_mode=True)
-        self.assertTrue(state.start_position_move([90.0, 0.0, 0.0, 0.0], 0b0001, False))
-        self.assertIsNotNone(state.demo_position)
-        state.set_targets([100.0, 0.0, 0.0, 0.0])
-        self.assertIsNone(state.demo_position)
-        self.assertTrue(state.start_position_move([90.0, 0.0, 0.0, 0.0], 0b0001, True))
-        state.stop_motors()
-        self.assertIsNone(state.demo_position)
-
-    def test_position_move_refused_during_calibration(self):
-        state = live_state()
-        state.calibration = demo.calibration_frame(1, state=protocol.CALIBRATION_RUNNING)
-        state.last_calibration_t = time.monotonic()
-        self.assertFalse(state.start_position_move([90.0, 0.0, 0.0, 0.0], 0b0001, False))
-        state.calibration = None
-        state.last_calibration_t = 0.0
-        state.update_tuning(demo.tuning_frame(2, state=protocol.TUNING_RUNNING))
-        self.assertFalse(state.start_position_move([90.0, 0.0, 0.0, 0.0], 0b0001, False))
-
-
 class DemoFrameTests(unittest.TestCase):
     def test_tuning_frames_progress_and_finish(self):
         idle = demo.idle_tuning_frame(1)
         self.assertEqual(idle["state"], protocol.TUNING_IDLE)
         self.assertEqual(idle["feedforward"], [0.0] * 4)
+        self.assertEqual(idle["feedforward_rev"], [0.0] * 4)
+        self.assertEqual(demo.DEMO_TUNING_TOTAL_S, 20.0)
+        self.assertEqual(demo.DEMO_MAX_RPM, 138)
+        self.assertIn(protocol.TUNING_PHASE_MAX_SPEED, demo.DEMO_TUNING_PHASES)
         start = demo.running_tuning_frame(0.0, 1)
         self.assertEqual(start["state"], protocol.TUNING_RUNNING)
         self.assertEqual(start["wheel"], 0)
         self.assertEqual(start["progress"], 0)
+        self.assertEqual(start["max_rpm"], 0.0)
         middle = demo.running_tuning_frame(demo.DEMO_TUNING_WHEEL_S * 2.5, 2)
         self.assertEqual(middle["wheel"], 2)
         self.assertEqual(middle["result_mask"], 0b0011)
         self.assertGreater(middle["progress"], 50)
         self.assertGreater(middle["kp"][2], 0.0)
+        self.assertLess(middle["feedforward_rev"][2], 0.0)
+        self.assertEqual(middle["wheel_max_rpm"][0], 175.0)
+        self.assertEqual(middle["wheel_max_rpm"][3], 0.0)
+        self.assertEqual(middle["max_rpm"], 0.0)
         end = demo.running_tuning_frame(demo.DEMO_TUNING_TOTAL_S, 3)
         self.assertEqual(end["state"], protocol.TUNING_DONE)
         self.assertEqual(end["progress"], 100)
         self.assertEqual(end["result_mask"], 0xF)
         self.assertEqual(len(end["kp"]), 4)
         self.assertTrue(all(value > 0 for value in end["feedforward"]))
+        self.assertTrue(all(value < 0 for value in end["feedforward_rev"]))
+        self.assertTrue(all(value > 0 for value in end["velocity_ff_rev"]))
+        self.assertTrue(all(value > 0 for value in end["rise_ms_rev"]))
+        self.assertEqual(end["max_rpm"], 138.0)
+        self.assertEqual(end["wheel_max_rpm"], list(demo.DEMO_WHEEL_MAX_RPM))
 
     def test_idle_frame_keeps_stored_parameters(self):
         tuned = demo.idle_tuning_frame(1, tuned=True)
         self.assertEqual(tuned["state"], protocol.TUNING_IDLE)
         self.assertEqual(tuned["result_mask"], 0xF)
         self.assertTrue(all(value > 0 for value in tuned["kp"]))
+        self.assertTrue(all(value < 0 for value in tuned["feedforward_rev"]))
+        self.assertTrue(all(value > 0 for value in tuned["velocity_ff_rev"]))
+        self.assertEqual(tuned["max_rpm"], 138.0)
+        self.assertEqual(tuned["wheel_max_rpm"], list(demo.DEMO_WHEEL_MAX_RPM))
         untuned = demo.idle_tuning_frame(2, tuned=False)
         self.assertEqual(untuned["result_mask"], 0)
         self.assertTrue(all(value == 0 for value in untuned["kp"]))
-
-    def test_position_frame_defaults_are_idle(self):
-        frame = demo.position_frame(1)
-        self.assertEqual(frame["active_mask"], 0)
-        self.assertEqual(frame["done_mask"], 0)
-        self.assertEqual(frame["error_code"], protocol.POSITION_ERROR_NONE)
-        self.assertEqual(frame["angle_deg"], [0.0] * 4)
-        self.assertEqual(frame["target_deg"], [0.0] * 4)
-
-
-class TabLayoutTests(unittest.TestCase):
-    def test_tuning_tab_is_appended_and_bound_to_f7(self):
-        self.assertEqual(config.TAB_TITLES[config.TAB_TUNING], "Controle")
-        self.assertEqual(len(app.TAB_TAGS), len(config.TAB_TITLES))
-        self.assertEqual(app.KEY_ACTIONS[dpg.mvKey_F7], ("tab", config.TAB_TUNING))
-        self.assertEqual(app.TAB_TAGS[config.TAB_TUNING], "tab_tuning")
-
+        self.assertTrue(all(value == 0 for value in untuned["feedforward_rev"]))
+        self.assertEqual(untuned["max_rpm"], 0.0)
+        self.assertEqual(untuned["wheel_max_rpm"], [0.0] * 4)
 
 if __name__ == "__main__":
     unittest.main()

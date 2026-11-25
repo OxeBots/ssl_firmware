@@ -14,7 +14,7 @@ ERROR_FLAG_NAMES = (
     "Falha do sensor de distância",
     "Subtensão da bateria",
     "Sobretensão da bateria",
-    "Chutador sem carga",
+    "Kicker sem carga",
     "Encoder inválido",
     "Aviso de temperatura",
     "Falha do motor 0",
@@ -47,8 +47,7 @@ SYSTEM_ROWS = (
 )
 SAFETY_ROWS = (
     ("Ciclo de vida", "lifecycle"),
-    ("Movimento", "motion"),
-    ("Chutador", "kicker"),
+    ("Kicker", "kicker"),
 )
 POWER_ROWS = (
     ("Calibração da IMU", "imu_cal"),
@@ -115,7 +114,7 @@ def supply_color(flags):
     if flags is None:
         return config.TEXT_DIM
     if flags & 6:
-        return config.BAD_COLOR
+        return config.DEMO_COLOR
     if flags & 1:
         return config.OK_COLOR
     return config.TEXT_DIM
@@ -125,9 +124,9 @@ def supply_status(state, flags):
     if flags is None:
         return missing_health_text(state), config.TEXT_DIM
     if flags & 2:
-        return "Subtensão", config.BAD_COLOR
+        return "Subtensão", config.DEMO_COLOR
     if flags & 4:
-        return "Sobretensão", config.BAD_COLOR
+        return "Sobretensão", config.DEMO_COLOR
     if flags & 1:
         return "Alimentação normal", config.OK_COLOR
     return "Monitor de tensão indisponível", config.TEXT_DIM
@@ -152,7 +151,7 @@ def connection_text(value):
 def connection_color(value):
     if value is None:
         return config.TEXT_DIM
-    return config.OK_COLOR if value else config.BAD_COLOR
+    return config.OK_COLOR if value else config.DEMO_COLOR
 
 
 def _add_rows(panel, rows):
@@ -178,7 +177,7 @@ def build(state):
             _add_rows(SAFETY_PANEL, SAFETY_ROWS)
             dpg.add_spacer(height=6)
             dpg.add_separator()
-            rendering.add_text("Erros ativos", "title", config.TEXT)
+            rendering.add_text("Avisos ativos", "title", config.TEXT)
             rendering.add_text("Aguardando dados de saúde", "small", config.TEXT_DIM, tag=ERROR_LIST)
         with rendering.panel("Alimentação e sensores", POWER_PANEL, width=1, height=1):
             rendering.add_text("Alimentação", "small", config.TEXT_DIM)
@@ -195,7 +194,7 @@ def _update_system(state, health, now):
     robot_id = health.get("robot_id")
     robot_text = "—" if robot_id is None else str(robot_id)
     _set(SYSTEM_PANEL, "robot_id", robot_text, config.TEXT if robot_id is not None else config.TEXT_DIM)
-    uptime_live = bool(state.last_state_t) and now - state.last_state_t <= config.SENSOR_STALE_S
+    uptime_live = state.link_fresh(now)
     _set(
         SYSTEM_PANEL,
         "uptime",
@@ -213,17 +212,17 @@ def _update_system(state, health, now):
 def _update_safety(state, health):
     lifecycle = health.get("lifecycle")
     _set(SAFETY_PANEL, "lifecycle", lifecycle_text(lifecycle), lifecycle_color(lifecycle))
-    motion = health.get("motion_inhibited")
-    _set(SAFETY_PANEL, "motion", inhibit_text(motion), inhibit_color(motion))
     kicker = health.get("kick_inhibited")
     _set(SAFETY_PANEL, "kicker", inhibit_text(kicker), inhibit_color(kicker))
     flags = health.get("error_flags")
+    if flags is not None:
+        flags |= health.get("active_faults", 0)
     if flags is None:
         text, color = missing_health_text(state), config.TEXT_DIM
     elif flags == 0:
-        text, color = "Nenhum erro ativo", config.OK_COLOR
+        text, color = "Nenhum aviso ativo", config.OK_COLOR
     else:
-        text, color = "\n".join(error_flag_names(flags)), config.BAD_COLOR
+        text, color = "\n".join(error_flag_names(flags)), config.DEMO_COLOR
     rendering.set_text(ERROR_LIST, text, color)
 
 
