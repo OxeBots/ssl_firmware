@@ -8,16 +8,17 @@ using namespace config::kinematic;
  * @param r Wheel radius in meters (must be > 0)
  * @param d Distance from center to wheels in meters (must be > 0)
  */
-OmnidirectionalRobot::OmnidirectionalRobot(double const r = OMNI_WHEEL_RADIUS,
-                                           double const d = OMNI_WHEEL_DISTANCE)
+OmnidirectionalRobot::OmnidirectionalRobot(double const r, double const d)
 : m_wheel_radius(abs(r)), m_wheel_distance(abs(d))
 {
-    // Construct H matrix
+    // Construct H matrix. Body frame: x forward, y left. Each wheel is mounted
+    // at its angle offset and rolls along the tangent, so its speed is the body
+    // velocity projected on (-sin angle, cos angle).
     for (size_t i = 0; i < 4; ++i)
     {
         m_h(i, 0) = -m_wheel_distance;
-        m_h(i, 1) = std::cos(WHEELS_ANGLE_OFFSET[i]);
-        m_h(i, 2) = std::sin(WHEELS_ANGLE_OFFSET[i]);
+        m_h(i, 1) = -std::sin(WHEELS_ANGLE_OFFSET[i]);
+        m_h(i, 2) = std::cos(WHEELS_ANGLE_OFFSET[i]);
     }
 
     // Compute pseudoinverse: H⁺ = (HᵀH)⁻¹Hᵀ

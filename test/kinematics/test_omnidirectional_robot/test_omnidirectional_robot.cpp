@@ -52,15 +52,15 @@ void test_pure_translation_x()
     OmnidirectionalRobot robot(config::test::RADIUS, config::test::WHEEL_DISTANCE);
 
     const vt::numeric_vector<4> expected =
-      vt::make_numeric_vector<4>({config::test::TRANSLATION_FACTOR,
+      vt::make_numeric_vector<4>({-config::test::TRANSLATION_FACTOR,
                                   -config::test::TRANSLATION_FACTOR,
-                                  -config::test::TRANSLATION_FACTOR,
+                                  config::test::TRANSLATION_FACTOR,
                                   config::test::TRANSLATION_FACTOR});
 
     const vt::numeric_vector<4> actual =
       robot.compute_wheel_velocities(vt::make_numeric_vector({0.0, 1.0, 0.0}));
 
-    assert_vector_equal(expected, actual, "X translation");
+    assert_vector_equal(expected, actual, "Forward translation");
 }
 
 void test_pure_translation_y()
@@ -69,14 +69,14 @@ void test_pure_translation_y()
 
     const vt::numeric_vector<4> expected =
       vt::make_numeric_vector<4>({config::test::TRANSLATION_FACTOR,
-                                  config::test::TRANSLATION_FACTOR,
                                   -config::test::TRANSLATION_FACTOR,
-                                  -config::test::TRANSLATION_FACTOR});
+                                  -config::test::TRANSLATION_FACTOR,
+                                  config::test::TRANSLATION_FACTOR});
 
     const vt::numeric_vector<4> actual =
       robot.compute_wheel_velocities(vt::make_numeric_vector({0.0, 0.0, 1.0}));
 
-    assert_vector_equal(expected, actual, "Y translation");
+    assert_vector_equal(expected, actual, "Left translation");
 }
 
 void test_kinematics_round_trip()
