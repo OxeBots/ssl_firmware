@@ -135,6 +135,73 @@ class WindowChromeTests(unittest.TestCase):
                 self.assertEqual(layout, compute_layout(width, height))
         self.assertLessEqual(compute_layout(400, 300)["body_w"], 400)
 
+    def test_resolve_viewport_adapts_to_hidpi_fhd_and_small_screens(self):
+        hidpi = {
+            "screen_w": 2880,
+            "screen_h": 1800,
+            "work_x": 0,
+            "work_y": 0,
+            "work_w": 2880,
+            "work_h": 1800,
+            "content_scale": 1.0,
+        }
+        vp = app.resolve_viewport(monitor=hidpi)
+        self.assertAlmostEqual(vp["scale"], 1.75)
+        self.assertGreater(vp["width"], 2200)
+        self.assertGreater(vp["height"], 1400)
+        self.assertLessEqual(vp["width"], hidpi["work_w"])
+        self.assertLessEqual(vp["height"], hidpi["work_h"])
+        self.assertEqual(vp["x_pos"], (hidpi["work_w"] - vp["width"]) // 2)
+        self.assertLessEqual(vp["min_width"], hidpi["work_w"] // 2)
+
+        fhd = {
+            "screen_w": 1920,
+            "screen_h": 1080,
+            "work_x": 0,
+            "work_y": 0,
+            "work_w": 1920,
+            "work_h": 1080,
+            "content_scale": 1.0,
+        }
+        vp_fhd = app.resolve_viewport(monitor=fhd)
+        self.assertEqual(vp_fhd["scale"], 1.0)
+        self.assertLessEqual(vp_fhd["width"], fhd["work_w"])
+        self.assertLessEqual(vp_fhd["height"], fhd["work_h"])
+
+        small = {
+            "screen_w": 1366,
+            "screen_h": 768,
+            "work_x": 0,
+            "work_y": 0,
+            "work_w": 1366,
+            "work_h": 740,
+            "content_scale": 1.0,
+        }
+        vp_small = app.resolve_viewport(monitor=small)
+        self.assertEqual(vp_small["scale"], 1.0)
+        self.assertLessEqual(vp_small["height"], small["work_h"])
+        self.assertLessEqual(vp_small["min_height"], vp_small["height"])
+
+        override = app.resolve_viewport(width=1600, height=900, scale=1.5, monitor=hidpi)
+        self.assertEqual((override["width"], override["height"], override["scale"]), (1600, 900, 1.5))
+
+        env_override = app.resolve_viewport(monitor=fhd, env_scale="1.25")
+        self.assertAlmostEqual(env_override["scale"], 1.25)
+
+        headless = app.resolve_viewport(monitor=None)
+        self.assertEqual(headless["scale"], 1.0)
+        self.assertEqual((headless["width"], headless["height"]), config.DEFAULT_WINDOW)
+
+    def test_scaled_layout_keeps_proportional_chrome_and_restores_default(self):
+        try:
+            rendering.set_ui_scale(1.75)
+            self.assertEqual(rendering.font_size("label"), int(round(rendering.FONT_SIZES["label"] * 1.75)))
+            layout = compute_layout(2476, 1548)
+            self.assertGreater(layout["body_w"], 2300)
+            self.assertGreater(layout["body_h"], 1200)
+        finally:
+            rendering.set_ui_scale(1.0)
+
     def test_connection_status_reports_demo_live_stale_and_disconnected(self):
         state = BenchState()
         state.demo = True

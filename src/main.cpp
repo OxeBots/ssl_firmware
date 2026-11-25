@@ -63,7 +63,7 @@ static const char * TAG = "MAIN";
 static constexpr ledc_timer_t MOTOR_LEDC_TIMER = LEDC_TIMER_0;
 static constexpr ledc_mode_t MOTOR_LEDC_SPEED_MODE = LEDC_LOW_SPEED_MODE;
 static constexpr ledc_timer_bit_t MOTOR_DUTY_RESOLUTION = LEDC_TIMER_10_BIT;
-static constexpr uint32_t MOTOR_PWM_FREQ_HZ = 20000;
+static constexpr uint32_t MOTOR_PWM_FREQ_HZ = CONFIG_MOTOR_PWM_FREQ_HZ;
 
 extern "C" void app_main(void)
 {

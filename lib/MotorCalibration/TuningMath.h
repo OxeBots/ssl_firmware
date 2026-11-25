@@ -107,7 +107,7 @@ constexpr float FEEDFORWARD_MAX = 600.0f;
 // initial candidate derives it from the P gain (large: the low-speed integral
 // must build the missing friction duty quickly) and the low-speed validation
 // adjusts it within these bounds.
-constexpr float KI_RATIO = 10.0f;
+constexpr float KI_RATIO = 5.0f;
 constexpr float KI_MIN_CAL = 20.0f;
 constexpr float KI_MAX_CAL = 60.0f;
 

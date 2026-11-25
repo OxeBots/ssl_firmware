@@ -65,10 +65,10 @@ def _panel_theme():
                 dpg.mvThemeCol_Text: config.TEXT,
             },
             styles={
-                dpg.mvStyleVar_WindowPadding: (16.0, 10.0),
-                dpg.mvStyleVar_ItemSpacing: (8.0, 6.0),
+                dpg.mvStyleVar_WindowPadding: (float(rendering.px(16)), float(rendering.px(10))),
+                dpg.mvStyleVar_ItemSpacing: (float(rendering.px(8)), float(rendering.px(6))),
                 dpg.mvStyleVar_ChildBorderSize: (1.0,),
-                dpg.mvStyleVar_ChildRounding: (8.0,),
+                dpg.mvStyleVar_ChildRounding: (float(rendering.px(8)),),
             },
         )
     return _PANEL_THEME
@@ -86,8 +86,9 @@ def selector_label(index, selected):
 
 def selector_widths(inner_w, selected):
     """Selector button widths: the selected wheel widens to fill the row."""
-    compact = COMPACT_BUTTON_WIDTH
-    wide = max(compact, int(inner_w) - (proto.WHEEL_COUNT - 1) * compact - 3 * GAP)
+    compact = rendering.px(COMPACT_BUTTON_WIDTH)
+    gap = rendering.px(GAP)
+    wide = max(compact, int(inner_w) - (proto.WHEEL_COUNT - 1) * compact - 3 * gap)
     return [wide if index == selected else compact for index in range(proto.WHEEL_COUNT)]
 
 
@@ -109,9 +110,9 @@ def _create_selector_themes():
                     dpg.mvThemeCol_Text: text,
                 },
                 styles={
-                    dpg.mvStyleVar_FramePadding: (8.0, 4.0),
+                    dpg.mvStyleVar_FramePadding: (float(rendering.px(8)), float(rendering.px(4))),
                     dpg.mvStyleVar_FrameBorderSize: (1.0,),
-                    dpg.mvStyleVar_FrameRounding: (4.0,),
+                    dpg.mvStyleVar_FrameRounding: (float(rendering.px(4)),),
                 },
                 component=dpg.mvButton,
             )
@@ -239,7 +240,7 @@ def raw_values(state, index, now):
 
 def plot_height(body_h):
     """Height of each of the three raw plots for the given content height."""
-    return max(MIN_PLOT_HEIGHT, (int(body_h) - PLOT_RESERVED_HEIGHT) // 3)
+    return max(rendering.px(MIN_PLOT_HEIGHT), (int(body_h) - rendering.px(PLOT_RESERVED_HEIGHT)) // 3)
 
 
 def _build_value_table():
@@ -286,7 +287,7 @@ def build(state):
                 button = dpg.add_button(
                     tag=SELECTOR_TAGS[index],
                     label=selector_label(index, index == 0),
-                    width=COMPACT_BUTTON_WIDTH,
+                    width=rendering.px(COMPACT_BUTTON_WIDTH),
                     callback=on_select,
                     user_data=index,
                 )
@@ -297,7 +298,7 @@ def build(state):
                 adc_plot_label(state.calibration, 0), "micro", PLOT_ADC_COLOR, tag=ADC_LEGEND
             )
             rendering.add_text("/ I2C (ângulo)", "micro", PLOT_I2C_COLOR)
-        rendering.add_plot(PLOT_ADC, height=80, width=1)
+        rendering.add_plot(PLOT_ADC, height=rendering.px(80), width=1)
         rendering.add_series(PLOT_ADC, 0, PLOT_ADC_COLOR)
         rendering.add_series(PLOT_ADC, 1, PLOT_I2C_COLOR)
         dpg.add_plot_annotation(
@@ -308,7 +309,7 @@ def build(state):
             tag=PLOT_ADC + "_placeholder",
         )
         rendering.add_text("Δ FG · contagens/100 ms", "micro", PLOT_FG_COLOR)
-        rendering.add_plot(PLOT_FG, height=80, width=1)
+        rendering.add_plot(PLOT_FG, height=rendering.px(80), width=1)
         rendering.add_series(PLOT_FG, 0, PLOT_FG_COLOR)
         dpg.add_plot_annotation(
             label="Aguardando dados",
@@ -321,7 +322,7 @@ def build(state):
             rendering.add_text("Velocidade · EKF", "micro", PLOT_EKF_COLOR)
             rendering.add_text("/ pulso", "micro", PLOT_PULSE_COLOR)
             rendering.add_text("/ controle", "micro", PLOT_CONTROL_COLOR)
-        rendering.add_plot(PLOT_SPEED, height=80, width=1)
+        rendering.add_plot(PLOT_SPEED, height=rendering.px(80), width=1)
         rendering.add_series(PLOT_SPEED, 0, PLOT_EKF_COLOR)
         rendering.add_series(PLOT_SPEED, 1, PLOT_PULSE_COLOR)
         rendering.add_series(PLOT_SPEED, 2, PLOT_CONTROL_COLOR)
@@ -339,7 +340,7 @@ def update(state, layout, now):
     sync_selection(state)
     body_w = int(layout["body_w"])
     body_h = int(layout["body_h"])
-    inner_w = body_w - PANEL_MARGIN
+    inner_w = body_w - rendering.px(PANEL_MARGIN)
     dpg.configure_item(PANEL, width=body_w, height=body_h)
     _apply_selector(state, inner_w)
     index = state.selected_wheel

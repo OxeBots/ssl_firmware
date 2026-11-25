@@ -48,18 +48,14 @@ static WheelController::Parameters to_parameters(const tuning::Gains & gains,
     parameters.static_friction_rev = gains.static_friction_rev;
     parameters.angle_sign = angle_sign;
     parameters.continuous_min_rad_s = {forward.continuous_min_rad_s, reverse.continuous_min_rad_s};
-    if (parameters.pulse_duty[0] == 0.0f)
-    {
-        parameters.pulse_duty[0] = forward.continuous_min_duty;
-        parameters.pulse_interleaved[0] = true;
-        parameters.pulse_coast_delay_s[0] = forward.dead_time_s;
-    }
-    if (parameters.pulse_duty[1] == 0.0f)
-    {
-        parameters.pulse_duty[1] = reverse.continuous_min_duty;
-        parameters.pulse_interleaved[1] = true;
-        parameters.pulse_coast_delay_s[1] = reverse.dead_time_s;
-    }
+    // Pulse amplitude must at least clear measured breakaway so the chopper
+    // does not stall after an off-slot on wheels with low continuous minima.
+    parameters.pulse_duty[0] = std::max(forward.continuous_min_duty, forward.breakaway_duty);
+    parameters.pulse_interleaved[0] = true;
+    parameters.pulse_coast_delay_s[0] = forward.dead_time_s;
+    parameters.pulse_duty[1] = std::max(reverse.continuous_min_duty, reverse.breakaway_duty);
+    parameters.pulse_interleaved[1] = true;
+    parameters.pulse_coast_delay_s[1] = reverse.dead_time_s;
     parameters.pulse_response_s = {forward.tau_s + forward.dead_time_s,
                                    reverse.tau_s + reverse.dead_time_s};
     return parameters;
@@ -587,6 +583,7 @@ std::array<tuning::SettledSpeed, 4> MotorCalibration::measure_tracking(
     std::array<tuning::SettledSpeed, 4> results = {};
     const float duration = times[count - 1] - times[0];
     const float speed_per_count = config::driver::BL48250_FB_RAD_S_PER_COUNT / duration;
+    const auto params = controller.get_parameters();
     for (size_t i = 0; i < results.size(); ++i)
     {
         if (targets[i] == 0.0f)
@@ -594,10 +591,21 @@ std::array<tuning::SettledSpeed, 4> MotorCalibration::measure_tracking(
         auto & speed = results[i];
         speed = tuning::measure_settled_travel(
           times.data(), angles[i].data(), count, SPEED_OBSERVATION_S);
+        const size_t branch = targets[i] >= 0.0f ? 0 : 1;
+        const bool zero_off_chopper =
+          std::fabs(targets[i]) <= params[i].continuous_min_rad_s[branch] &&
+          params[i].pulse_off_duty[branch] <= 0.0f;
         const int64_t edges = static_cast<int64_t>(final_counts[i]) - first_counts[i];
-        if (edges > 0 &&
-            std::fabs(static_cast<float>(edges) * speed_per_count - std::fabs(speed.mean_rad_s)) >
-              tuning::MATCHED_SPEED_FRACTION * std::fabs(targets[i]) + speed_per_count)
+        const float pulse_speed = static_cast<float>(edges) * speed_per_count;
+        const float speed_tolerance =
+          tuning::MATCHED_SPEED_FRACTION * std::fabs(targets[i]) + speed_per_count;
+        // Motor feedback pulses drop out during zero-duty chopping slots, so
+        // only reject over-counting when the pulse off-duty is zero.
+        const bool mismatch =
+          zero_off_chopper
+            ? (pulse_speed - std::fabs(speed.mean_rad_s) > speed_tolerance)
+            : (std::fabs(pulse_speed - std::fabs(speed.mean_rad_s)) > speed_tolerance);
+        if (edges > 0 && mismatch)
             speed.valid = false;
         ESP_LOGI(TAG,
                  "%s %+.1f: mean %.1f [%.1f, %.1f], rms %.1f RPM%s",
@@ -718,12 +726,14 @@ MotorCalibration::ControllerError MotorCalibration::tune_wheel(
                                            std::min(tuning::choose_validation_target(forward),
                                                     tuning::choose_validation_target(reverse))));
     const auto gains = tuning::synthesize(forward, reverse, target);
-    const auto previous_pulse_duty = parameters.pulse_duty;
     parameters = to_parameters(gains, angle_sign, forward, reverse, parameters);
-    for (size_t branch = 0; branch < previous_pulse_duty.size(); ++branch)
-        if (previous_pulse_duty[branch] == 0.0f)
-            parameters.pulse_floor_duty[branch] =
-              std::max(0.0f, parameters.pulse_duty[branch] - RAMP_STEP_DUTY);
+    for (size_t branch = 0; branch < parameters.pulse_duty.size(); ++branch)
+    {
+        parameters.pulse_floor_duty[branch] =
+          std::max(0.0f, parameters.pulse_duty[branch] - RAMP_STEP_DUTY);
+        parameters.pulse_off_duty[branch] =
+          std::min(parameters.pulse_off_duty[branch], parameters.pulse_floor_duty[branch]);
+    }
     controller.set_open_loop(false);
     if (!validate_gains(wheel, target, start_us, gains, parameters))
         return ControllerError::UNSTABLE;

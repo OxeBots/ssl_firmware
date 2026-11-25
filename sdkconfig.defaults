@@ -69,6 +69,9 @@ CONFIG_MOTOR_FR_PWM_GPIO=12
 # FBM4: GPIO2
 CONFIG_MOTOR_FR_FB_GPIO=2
 
+# Motor PWM carrier frequency (Hz)
+CONFIG_MOTOR_PWM_FREQ_HZ=5000
+
 #
 # Supply-voltage monitoring
 #

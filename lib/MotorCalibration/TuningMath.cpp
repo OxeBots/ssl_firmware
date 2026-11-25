@@ -27,14 +27,15 @@ constexpr float VALIDATION_MIN_RAD_S = 5.0f;
 // is faded out at those targets and the steady-state error grows; the step is
 // therefore placed close to the identified operating point instead.
 constexpr float VALIDATION_DUTY_FRACTION = 0.90f;
-// The P gain is capped so the first step keeps u_ff plus the initial P term
-// close to the duty the feedforward already needs: a small kick, no saturation.
-constexpr float PROPORTIONAL_DUTY_FRACTION = 0.72f;
+// The P gain is capped so u_ff plus the initial P term stays inside the
+// validation duty budget (0.90 * DUTY_MAX) without starting saturated.
+constexpr float PROPORTIONAL_DUTY_FRACTION = 0.90f;
 // At the step start the P term lifts the equilibrium speed by a*Kp (relative
-// overshoot). Keeping a*Kp below this bound keeps that anticipation small.
-constexpr float LOOP_GAIN_NOMINAL = 0.06f;
+// overshoot). With the lower-lag angle estimator the loop supports stronger
+// proportional rejection before overshooting.
+constexpr float LOOP_GAIN_NOMINAL = 0.14f;
 constexpr float LOOP_GAIN_MIN = 0.02f;
-constexpr float LOOP_GAIN_REFINE_MAX = 0.15f;
+constexpr float LOOP_GAIN_REFINE_MAX = 0.35f;
 // The measured step response first goes through a 3-sample median filter
 // (encoder spikes) and then a 50 ms moving average (quantization ripple).
 constexpr size_t SMOOTHING_HALF_WINDOW = 2;

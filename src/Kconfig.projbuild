@@ -266,6 +266,15 @@ menu "Oxebots Robot Configuration"
 
         menu "Pulse Feedback"
 
+            config MOTOR_PWM_FREQ_HZ
+                int "Motor PWM frequency (Hz)"
+                range 500 40000
+                default 5000
+                help
+                    PWM carrier frequency sent to the four BL48250 motor
+                    drivers. Lowering from 20 kHz to 5 kHz can be tested on
+                    the bench to check deadzone and low-speed linearity.
+
             config MOTOR_FB_COUNTS_PER_REV
                 int "Counts per motor revolution"
                 range 1 10000

@@ -1,10 +1,12 @@
 """Window lifecycle, main loop and input routing for Robot Bench."""
 
+import ctypes
 import os
 import threading
 import time
 
 import dearpygui.dearpygui as dpg
+import dearpygui._dearpygui as dpg_core
 
 from . import calibration, config, console, health, motors, picker, radio, radio_panel, rendering, sensing
 from . import protocol as proto
@@ -105,36 +107,217 @@ def stop_and_exit(state):
 
 def compute_layout(width, height):
     """Window space left for the active tab after header, tabs and status bar."""
-    body_width = max(200, width - 2 * MARGIN)
-    body_height = max(120, height - 2 * MARGIN - HEADER_HEIGHT - GAP - TAB_STRIP_HEIGHT - GAP - STATUS_HEIGHT)
+    margin = rendering.px(MARGIN)
+    gap = rendering.px(GAP)
+    chrome_h = (
+        2 * margin
+        + rendering.px(HEADER_HEIGHT)
+        + gap
+        + rendering.px(TAB_STRIP_HEIGHT)
+        + gap
+        + rendering.px(STATUS_HEIGHT)
+    )
+    body_width = max(rendering.px(200), width - 2 * margin)
+    body_height = max(rendering.px(120), height - chrome_h)
     return {"body_w": body_width, "body_h": body_height}
 
 
 def text_width(text, font_name):
-    """Rendered width of one fixed interface text, measured once."""
-    key = (text, font_name)
+    """Rendered width of one fixed interface text, measured once per scale."""
+    key = (text, font_name, rendering.ui_scale())
     width = _TEXT_WIDTHS.get(key)
     if width is not None:
         return width
     font = rendering.font(font_name)
     measured = dpg.get_text_size(text, font=font) if font is not None else dpg.get_text_size(text)
     if not measured:
-        return len(text) * 7.0
+        return len(text) * rendering.pxf(7.0)
     _TEXT_WIDTHS[key] = width = float(measured[0])
     return width
 
 
 def header_spacer_width(status, body_w):
     """Spacer that keeps the connection badge and buttons flush with the right edge."""
-    # Five item gaps sit between the title and the badge; the 14 px spacer
+    # Five item gaps sit between the title and the badge; the scaled 14 px spacer
     # separates the title from the subtitle.
     prefix = (
         text_width(config.APP_NAME, "big")
-        + 14.0
+        + rendering.px(14)
         + text_width(HEADER_SUBTITLE, "small")
-        + 5 * HEADER_ITEM_GAP
+        + 5 * rendering.px(HEADER_ITEM_GAP)
     )
-    return max(20, int(body_w - prefix - text_width(status, "small") - CONNECTIONS_BUTTON_WIDTH - 2))
+    button_w = rendering.px(CONNECTIONS_BUTTON_WIDTH)
+    return max(rendering.px(20), int(body_w - prefix - text_width(status, "small") - button_w - 2))
+
+
+def detect_monitor():
+    """Query the primary monitor workarea and content scale, or None when headless."""
+    class _VidMode(ctypes.Structure):
+        _fields_ = [
+            ("width", ctypes.c_int),
+            ("height", ctypes.c_int),
+            ("redBits", ctypes.c_int),
+            ("greenBits", ctypes.c_int),
+            ("blueBits", ctypes.c_int),
+            ("refreshRate", ctypes.c_int),
+        ]
+
+    try:
+        lib = ctypes.CDLL(dpg_core.__file__)
+        lib.glfwInit.restype = ctypes.c_int
+        lib.glfwGetPrimaryMonitor.restype = ctypes.c_void_p
+        lib.glfwGetVideoMode.argtypes = [ctypes.c_void_p]
+        lib.glfwGetVideoMode.restype = ctypes.POINTER(_VidMode)
+        lib.glfwGetMonitorWorkarea.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        lib.glfwGetMonitorContentScale.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+        ]
+        if lib.glfwInit():
+            try:
+                monitor = lib.glfwGetPrimaryMonitor()
+                if monitor:
+                    mode_ptr = lib.glfwGetVideoMode(monitor)
+                    wx, wy, ww, wh = ctypes.c_int(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+                    lib.glfwGetMonitorWorkarea(
+                        monitor, ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(ww), ctypes.byref(wh)
+                    )
+                    sx, sy = ctypes.c_float(1.0), ctypes.c_float(1.0)
+                    lib.glfwGetMonitorContentScale(monitor, ctypes.byref(sx), ctypes.byref(sy))
+                    screen_w = mode_ptr.contents.width if mode_ptr else ww.value
+                    screen_h = mode_ptr.contents.height if mode_ptr else wh.value
+                    work_w = ww.value or screen_w
+                    work_h = wh.value or screen_h
+                    if screen_w > 0 and screen_h > 0:
+                        return {
+                            "screen_w": int(screen_w),
+                            "screen_h": int(screen_h),
+                            "work_x": int(wx.value),
+                            "work_y": int(wy.value),
+                            "work_w": int(work_w),
+                            "work_h": int(work_h),
+                            "content_scale": float(max(sx.value, sy.value, 1.0)),
+                        }
+            finally:
+                lib.glfwTerminate()
+    except (AttributeError, OSError):
+        pass
+
+    try:
+        x11 = ctypes.CDLL("libX11.so.6")
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
+        x11.XDefaultScreen.restype = ctypes.c_int
+        x11.XDisplayWidth.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XDisplayWidth.restype = ctypes.c_int
+        x11.XDisplayHeight.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XDisplayHeight.restype = ctypes.c_int
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.restype = ctypes.c_int
+        display = x11.XOpenDisplay(None)
+        if display:
+            try:
+                screen = x11.XDefaultScreen(display)
+                width = int(x11.XDisplayWidth(display, screen))
+                height = int(x11.XDisplayHeight(display, screen))
+                if width > 0 and height > 0:
+                    return {
+                        "screen_w": width,
+                        "screen_h": height,
+                        "work_x": 0,
+                        "work_y": 0,
+                        "work_w": width,
+                        "work_h": height,
+                        "content_scale": 1.0,
+                    }
+            finally:
+                x11.XCloseDisplay(display)
+    except (AttributeError, OSError):
+        pass
+    return None
+
+
+def infer_ui_scale(monitor, explicit_scale=None, env_scale=None):
+    """Pick the UI scale factor from explicit override, OS DPI scale or HiDPI resolution."""
+    for candidate in (explicit_scale, env_scale):
+        if candidate is None or candidate == "":
+            continue
+        try:
+            value = float(candidate)
+        except (TypeError, ValueError):
+            continue
+        if value > 0.0:
+            return max(config.UI_SCALE_MIN, min(config.UI_SCALE_MAX, value))
+    if not monitor:
+        return 1.0
+    os_scale = float(monitor.get("content_scale", 1.0))
+    screen_w = int(monitor.get("screen_w", 0))
+    screen_h = int(monitor.get("screen_h", 0))
+    inferred = 1.0
+    if screen_w >= 2200 and screen_h >= 1350:
+        raw = min(screen_w / float(config.HIDPI_REF_SIZE[0]), screen_h / float(config.HIDPI_REF_SIZE[1]))
+        # Round to quarter steps so fonts and borders stay crisp.
+        inferred = max(1.25, min(2.5, round(raw * 4.0) / 4.0))
+    return max(config.UI_SCALE_MIN, min(config.UI_SCALE_MAX, max(os_scale, inferred)))
+
+
+def resolve_viewport(width=None, height=None, scale=None, monitor=None, env_scale=None):
+    """Compute initial window geometry and UI scale adapted to the display."""
+    ui_scale = infer_ui_scale(monitor, explicit_scale=scale, env_scale=env_scale)
+    if monitor is None:
+        min_w = int(round(config.MIN_WINDOW[0] * ui_scale))
+        min_h = int(round(config.MIN_WINDOW[1] * ui_scale))
+        default_w = int(round(config.DEFAULT_WINDOW[0] * ui_scale))
+        default_h = int(round(config.DEFAULT_WINDOW[1] * ui_scale))
+        final_w = max(width if width is not None else default_w, min_w)
+        final_h = max(height if height is not None else default_h, min_h)
+        return {
+            "width": final_w,
+            "height": final_h,
+            "min_width": min_w,
+            "min_height": min_h,
+            "x_pos": None,
+            "y_pos": None,
+            "scale": ui_scale,
+        }
+
+    work_x = int(monitor["work_x"])
+    work_y = int(monitor["work_y"])
+    work_w = max(640, int(monitor["work_w"]))
+    work_h = max(480, int(monitor["work_h"]))
+
+    target_h = int(round(work_h * config.WINDOW_WORKAREA_RATIO))
+    target_w = min(int(round(work_w * config.WINDOW_WORKAREA_RATIO)), int(round(target_h * 1.85)))
+    target_w = max(target_w, min(work_w, int(round(config.DEFAULT_WINDOW[0] * ui_scale))))
+    target_h = max(target_h, min(work_h, int(round(config.DEFAULT_WINDOW[1] * ui_scale))))
+
+    final_w = min(work_w, max(640, int(width))) if width is not None else min(work_w, target_w)
+    final_h = min(work_h, max(480, int(height))) if height is not None else min(work_h, target_h)
+
+    # Allow tiling to half-width on large HiDPI screens while preventing tiny collapses.
+    scaled_min_w = int(round(config.MIN_WINDOW[0] * ui_scale))
+    scaled_min_h = int(round(config.MIN_WINDOW[1] * ui_scale))
+    min_w = min(final_w, max(config.MIN_WINDOW[0], min(work_w // 2, scaled_min_w)))
+    min_h = min(final_h, scaled_min_h)
+    x_pos = work_x + max(0, (work_w - final_w) // 2)
+    y_pos = work_y + max(0, (work_h - final_h) // 2)
+    return {
+        "width": final_w,
+        "height": final_h,
+        "min_width": min_w,
+        "min_height": min_h,
+        "x_pos": x_pos,
+        "y_pos": y_pos,
+        "scale": ui_scale,
+    }
 
 
 def usb_connection_status(state):
@@ -261,14 +444,14 @@ def build_dashboard(state, on_open_connections, on_disconnect_radio):
     ):
         with dpg.group(horizontal=True):
             rendering.add_text(config.APP_NAME, "big", tag="header_title")
-            dpg.add_spacer(width=14)
+            dpg.add_spacer(width=rendering.px(14))
             rendering.add_text(HEADER_SUBTITLE, "small", config.TEXT_DIM)
-            dpg.add_spacer(tag=HEADER_SPACER, width=200)
+            dpg.add_spacer(tag=HEADER_SPACER, width=rendering.px(200))
             rendering.add_text("", "small", config.TEXT_DIM, tag=CONNECTION_STATUS)
             dpg.add_button(
                 tag=CONNECTIONS_BUTTON,
                 label=CONNECTIONS_BUTTON_LABEL,
-                width=CONNECTIONS_BUTTON_WIDTH,
+                width=rendering.px(CONNECTIONS_BUTTON_WIDTH),
                 callback=on_open_connections,
             )
         with dpg.tab_bar(tag=TAB_BAR):
@@ -337,6 +520,15 @@ def refresh_dashboard(state, radio_session, layout, now, hz_state, hz_tof, fps):
 
 
 def run_gui(state, args):
+    monitor = detect_monitor()
+    viewport = resolve_viewport(
+        width=args.width,
+        height=args.height,
+        scale=getattr(args, "scale", None),
+        monitor=monitor,
+        env_scale=os.environ.get("ROBOT_BENCH_SCALE"),
+    )
+    rendering.set_ui_scale(viewport["scale"])
     dpg.create_context()
     rendering.load_fonts()
     rendering.apply_theme()
@@ -356,8 +548,6 @@ def run_gui(state, args):
         "discovered_device": None,
         "discovery_retry_at": 0.0,
     }
-    width = max(args.width, config.MIN_WINDOW[0])
-    height = max(args.height, config.MIN_WINDOW[1])
 
     def start_session(device):
         nonlocal picking_port
@@ -525,14 +715,18 @@ def run_gui(state, args):
     picker.build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, on_back)
     with dpg.handler_registry():
         dpg.add_mouse_wheel_handler(callback=on_wheel)
-    dpg.create_viewport(
-        title=config.APP_NAME,
-        width=width,
-        height=height,
-        min_width=config.MIN_WINDOW[0],
-        min_height=config.MIN_WINDOW[1],
-        clear_color=rendering.rgba(config.BACKGROUND),
-    )
+    viewport_kwargs = {
+        "title": config.APP_NAME,
+        "width": viewport["width"],
+        "height": viewport["height"],
+        "min_width": viewport["min_width"],
+        "min_height": viewport["min_height"],
+        "clear_color": rendering.rgba(config.BACKGROUND),
+    }
+    if viewport["x_pos"] is not None and viewport["y_pos"] is not None:
+        viewport_kwargs["x_pos"] = viewport["x_pos"]
+        viewport_kwargs["y_pos"] = viewport["y_pos"]
+    dpg.create_viewport(**viewport_kwargs)
     dpg.setup_dearpygui()
     dpg.set_primary_window(MAIN_WINDOW, True)
     dpg.show_viewport()
@@ -685,12 +879,14 @@ def run_gui(state, args):
                     usb_connected=usb_active,
                     radio_connected=radio_active,
                 )
-                picker_width, picker_height = dpg.get_item_rect_size(picker.WINDOW)
-                if picker_width and picker_height:
-                    dpg.configure_item(
-                        picker.WINDOW,
-                        pos=[(view_width - picker_width) // 2, (view_height - picker_height) // 2],
-                    )
+                picker_w = min(rendering.px(picker.WIDTH), max(rendering.px(360), view_width - rendering.px(32)))
+                picker_h = min(rendering.px(picker.HEIGHT), max(rendering.px(320), view_height - rendering.px(32)))
+                dpg.configure_item(
+                    picker.WINDOW,
+                    width=picker_w,
+                    height=picker_h,
+                    pos=[(view_width - picker_w) // 2, (view_height - picker_h) // 2],
+                )
 
             if args.screenshot_dir and now >= next_screenshot:
                 next_screenshot = now + args.screenshot_period

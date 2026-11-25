@@ -68,13 +68,11 @@ void EncoderChannel::bind(adc_channel_t channel, adc_cali_handle_t calibration, 
     m_raw = 0;
     m_smoothed_velocity_rad_s = 0.0f;
     m_smoothed_velocity_started = false;
-    m_fast_head = 0;
-    m_fast_count = 0;
-    m_fast_velocity_rad_s = 0.0f;
-    m_fast_valid = false;
     m_last_fused_us = 0;
     m_last_pulse_us = 0;
-    m_fast_filter.reset();
+    m_raw_stuck_since_us = 0;
+    m_raw_stuck_warned = false;
+    reset_fast_velocity();
 }
 
 /** @brief Updates the raw angle and both velocity estimates from one sample. */
@@ -131,13 +129,17 @@ bool EncoderChannel::update_clamp_status(size_t wheel, uint16_t sample, int64_t 
 // A clamped angle would corrupt the slope across the entire sample window.
 void EncoderChannel::reset_fast_velocity()
 {
+    m_fast_head = 0;
     m_fast_count = 0;
     m_fast_valid = false;
     m_fast_velocity_rad_s = 0.0f;
+    m_fast_last_us = 0;
     m_fast_sum_t = 0.0;
     m_fast_sum_tt = 0.0;
     m_fast_sum_a = 0.0;
     m_fast_sum_ta = 0.0;
+    m_fast_continuous_angle_rad = 0.0;
+    m_fast_last_raw_angle_rad = 0.0f;
     m_fast_filter.reset();
 }
 
@@ -205,6 +207,29 @@ void EncoderChannel::update_fast_velocity(float wheel_angle_rad, int64_t now_us)
     if (m_fast_count < FAST_WINDOW)
         return;
 
+    // Refresh the rolling sums once per ring revolution so floating-point
+    // rounding cannot accumulate into a velocity bias over long runs.
+    if (m_fast_head == 0)
+    {
+        double sum_t = 0.0;
+        double sum_tt = 0.0;
+        double sum_a = 0.0;
+        double sum_ta = 0.0;
+        for (size_t i = 0; i < FAST_WINDOW; ++i)
+        {
+            const double time_s = static_cast<double>(m_fast_times_us[i] - now_us) * 1e-6;
+            const double angle = static_cast<double>(m_fast_angles[i]);
+            sum_t += time_s;
+            sum_tt += time_s * time_s;
+            sum_a += angle;
+            sum_ta += time_s * angle;
+        }
+        m_fast_sum_t = sum_t;
+        m_fast_sum_tt = sum_tt;
+        m_fast_sum_a = sum_a;
+        m_fast_sum_ta = sum_ta;
+    }
+
     constexpr double count = static_cast<double>(FAST_WINDOW);
     const double denominator = count * m_fast_sum_tt - m_fast_sum_t * m_fast_sum_t;
     if (denominator > 1e-12)
@@ -220,22 +245,28 @@ void EncoderChannel::update_fused_velocity(size_t wheel, float wheel_angle_rad, 
 {
     constexpr int64_t FUSED_PERIOD_US = 1200;
     constexpr int64_t PULSE_PERIOD_US = 3500;
-    constexpr float VELOCITY_SMOOTHING_US = 21250.0f;
+    constexpr float VELOCITY_SMOOTHING_US = 8000.0f;
     const int64_t fused_elapsed_us = now_us - m_last_fused_us;
     if (fused_elapsed_us < FUSED_PERIOD_US)
         return;
 
     m_last_fused_us = now_us;
     float motor_velocity = 0.0f;
+    bool have_pulse_velocity = false;
     if (now_us - m_last_pulse_us >= PULSE_PERIOD_US)
     {
         m_last_pulse_us = now_us;
-        BL48250::get_instance().pulse_velocity_rad_s(wheel, &motor_velocity, 0);
+        have_pulse_velocity = BL48250::get_instance().pulse_velocity_rad_s(wheel, &motor_velocity, 0);
     }
 
-    // Without a pulse count change, use the angle measurement alone.
-    if (motor_velocity != 0.0f)
-        m_filter.update(wheel_angle_rad, -motor_velocity);
+    // Only fuse motor pulse velocity when it agrees with the encoder's physical
+    // direction; an unsigned pulse counter during coasting or back-driving must
+    // not fight the magnetic encoder.
+    const float signed_pulse_velocity = -motor_velocity;
+    const bool pulse_agrees = !m_fast_valid || std::fabs(m_fast_velocity_rad_s) < 1.5f ||
+                              (signed_pulse_velocity * m_fast_velocity_rad_s) > 0.0f;
+    if (have_pulse_velocity && motor_velocity != 0.0f && pulse_agrees)
+        m_filter.update(wheel_angle_rad, signed_pulse_velocity);
     else
         m_filter.update(wheel_angle_rad);
 

@@ -227,15 +227,19 @@ def tof_hover_text(row, column, distance, status):
 
 def tof_layout(body_w, body_h, header_h):
     """Grid and legend sizes for the ToF tab."""
-    grid_side = int(max(TOF_MIN_GRID, min(body_h - header_h, body_w - TOF_LEGEND_W - TOF_GRID_GAP)))
-    legend_h = int(max(120, min(TOF_LEGEND_MAX_H, grid_side - 52)))
+    min_grid = rendering.px(TOF_MIN_GRID)
+    legend_w = rendering.px(TOF_LEGEND_W)
+    grid_gap = rendering.px(TOF_GRID_GAP)
+    stack_gap = rendering.px(STACK_GAP)
+    grid_side = int(max(min_grid, min(body_h - header_h, body_w - legend_w - grid_gap)))
+    legend_h = int(max(rendering.px(120), min(rendering.px(TOF_LEGEND_MAX_H), grid_side - rendering.px(52))))
     return {
         "grid_side": grid_side,
         "cell_side": grid_side / float(config.TOF_SIDE),
         "legend_h": legend_h,
-        "legend_pad": max(0, (grid_side - TOF_LEGEND_OVERHEAD - legend_h) // 2),
+        "legend_pad": max(0, (grid_side - rendering.px(TOF_LEGEND_OVERHEAD) - legend_h) // 2),
         "left_pad": max(
-            0, (body_w - (grid_side + TOF_GRID_GAP + 2 * STACK_GAP + TOF_LEGEND_W)) // 2 - STACK_GAP
+            0, (body_w - (grid_side + grid_gap + 2 * stack_gap + legend_w)) // 2 - stack_gap
         ),
     }
 
@@ -253,12 +257,14 @@ def tof_legend_colors():
 
 def tof_legend_geometry(legend_h):
     """Bar rectangle and tick positions inside the vertical legend drawlist."""
-    top = TOF_BAR_MARGIN
-    bar_height = max(20.0, legend_h - 2.0 * TOF_BAR_MARGIN)
+    top = rendering.pxf(TOF_BAR_MARGIN)
+    bar_x = rendering.pxf(TOF_BAR_X)
+    bar_w = rendering.pxf(TOF_BAR_W)
+    bar_height = max(rendering.pxf(20.0), legend_h - 2.0 * top)
     step = bar_height / (len(TOF_LEGEND_TICKS) - 1)
     ticks = tuple(top + step * index for index in range(len(TOF_LEGEND_TICKS)))
     return {
-        "bar": (TOF_BAR_X, top, TOF_BAR_X + TOF_BAR_W, top + bar_height),
+        "bar": (bar_x, top, bar_x + bar_w, top + bar_height),
         "ticks": ticks,
     }
 
@@ -330,16 +336,17 @@ def sensor_samples(samples, sensor_index, axis):
 
 def imu_layout(body_w, body_h, header_h, label_w):
     """Panel, row and plot sizes for the IMU tab."""
-    attitude_w = int(max(260, min(360, body_w * 0.27)))
-    right_w = body_w - attitude_w - STACK_GAP
-    row_h = (body_h - 3 * STACK_GAP) // len(IMU_ROWS_MODEL)
+    stack_gap = rendering.px(STACK_GAP)
+    attitude_w = int(max(rendering.px(260), min(rendering.px(360), body_w * 0.27)))
+    right_w = body_w - attitude_w - stack_gap
+    row_h = (body_h - 3 * stack_gap) // len(IMU_ROWS_MODEL)
     return {
         "attitude_w": attitude_w,
         "body_h": body_h,
         "label_w": label_w,
         "row_h": row_h,
-        "plot_w": max(80, (right_w - label_w - 3 * STACK_GAP) // 3),
-        "plot_h": max(40, row_h - header_h - STACK_GAP),
+        "plot_w": max(rendering.px(80), (right_w - label_w - 3 * stack_gap) // 3),
+        "plot_h": max(rendering.px(40), row_h - header_h - stack_gap),
     }
 
 
@@ -350,7 +357,7 @@ def imu_layout(body_w, body_h, header_h, label_w):
 
 def _text_size(text, font_name):
     """Measured (width, height) of a fixed text in drawlist coordinates."""
-    key = (text, font_name)
+    key = (text, font_name, rendering.ui_scale())
     cached = _TEXT_SIZES.get(key)
     if cached is None:
         font = rendering.font(font_name)
@@ -360,18 +367,20 @@ def _text_size(text, font_name):
     return cached
 
 
-def _mono_width(text, size=rendering.MONO_FONT_SIZE):
+def _mono_width(text, size=None):
     """Width of a text rendered with the drawlist monospace font at one size."""
-    return len(text) * TOF_MONO_ADVANCE * size
+    px_size = rendering.font_size("mono") if size is None else size
+    return len(text) * TOF_MONO_ADVANCE * px_size
 
 
 def _cell_text_size(text, cell_side):
     """Largest monospace size that keeps one cell line inside the cell width."""
-    limit = cell_side - 8
-    for size in range(rendering.MONO_FONT_SIZE, 9, -1):
+    limit = cell_side - rendering.px(8)
+    min_size = max(8, rendering.px(10))
+    for size in range(rendering.font_size("mono"), min_size - 1, -1):
         if _mono_width(text, size) <= limit:
             return size
-    return 10
+    return min_size
 
 
 def _item_height(tag, fallback):
@@ -386,15 +395,17 @@ def _item_height(tag, fallback):
 
 def build_tof(state):
     """Create the ToF tab contents once."""
+    min_grid = rendering.px(TOF_MIN_GRID)
+    mono_sz = rendering.font_size("mono")
     with dpg.group(tag=TOF_ROOT):
         with dpg.group(horizontal=True):
             rendering.add_text(TOF_TITLE_TEXT, "title", config.TEXT, tag=TOF_TITLE)
-            dpg.add_spacer(width=16)
+            dpg.add_spacer(width=rendering.px(16))
             rendering.add_text("", "small", config.TEXT_DIM, tag=TOF_SUMMARY)
         rendering.add_text(TOF_HINT, "small", config.TEXT_DIM, tag=TOF_DETAIL)
         with dpg.group(horizontal=True, tag=TOF_ROW):
             dpg.add_spacer(width=0, tag=TOF_GRID_PAD)
-            with dpg.drawlist(width=TOF_MIN_GRID, height=TOF_MIN_GRID, tag=TOF_GRID):
+            with dpg.drawlist(width=min_grid, height=min_grid, tag=TOF_GRID):
                 dpg.draw_rectangle(
                     (0.0, 0.0),
                     (0.0, 0.0),
@@ -413,7 +424,7 @@ def build_tof(state):
                     value = dpg.draw_text(
                         (0.0, 0.0),
                         "",
-                        size=rendering.MONO_FONT_SIZE,
+                        size=mono_sz,
                         color=rendering.rgba(config.TEXT),
                         tag=f"{TOF_CELL_VALUE}_{index}",
                     )
@@ -421,7 +432,7 @@ def build_tof(state):
                     status = dpg.draw_text(
                         (0.0, 0.0),
                         "",
-                        size=rendering.MONO_FONT_SIZE,
+                        size=mono_sz,
                         color=rendering.rgba(config.TEXT),
                         tag=f"{TOF_CELL_STATUS}_{index}",
                     )
@@ -429,7 +440,7 @@ def build_tof(state):
                     label_item = dpg.draw_text(
                         (0.0, 0.0),
                         "",
-                        size=rendering.MONO_FONT_SIZE,
+                        size=mono_sz,
                         color=rendering.rgba(config.TEXT),
                         tag=f"{TOF_CELL_LABEL}_{index}",
                         show=False,
@@ -440,7 +451,7 @@ def build_tof(state):
                     (0.0, 0.0),
                     fill=(0, 0, 0, 0),
                     color=rendering.rgba(config.ACCENT),
-                    thickness=2.0,
+                    thickness=rendering.pxf(2.0),
                     tag=TOF_HOVER,
                     show=False,
                 )
@@ -455,17 +466,17 @@ def build_tof(state):
                 overlay = dpg.draw_text(
                     (0.0, 0.0),
                     TOF_STALE_OVERLAY,
-                    size=rendering.FONT_SIZES["title"],
+                    size=rendering.font_size("title"),
                     color=rendering.rgba(config.BAD_COLOR),
                     tag=TOF_OVERLAY,
                     show=False,
                 )
                 rendering.bind_font(overlay, "title")
-            dpg.add_spacer(width=TOF_GRID_GAP)
+            dpg.add_spacer(width=rendering.px(TOF_GRID_GAP))
             with dpg.group(tag=TOF_LEGEND_COL):
                 dpg.add_spacer(height=0, tag=TOF_LEGEND_PAD)
                 rendering.add_text("Metros", "small", config.TEXT_DIM, tag=TOF_LEGEND_TITLE)
-                with dpg.drawlist(width=TOF_LEGEND_W, height=200, tag=TOF_LEGEND):
+                with dpg.drawlist(width=rendering.px(TOF_LEGEND_W), height=rendering.px(200), tag=TOF_LEGEND):
                     for slot, color in enumerate(tof_legend_colors()):
                         dpg.draw_rectangle(
                             (0.0, 0.0),
@@ -483,7 +494,7 @@ def build_tof(state):
                         label = dpg.draw_text(
                             (0.0, 0.0),
                             TOF_LEGEND_TICKS[index],
-                            size=rendering.FONT_SIZES["small"],
+                            size=rendering.font_size("small"),
                             color=rendering.rgba(config.TEXT_DIM),
                             tag=f"{TOF_LEGEND_TICK_LABEL}_{index}",
                         )
@@ -500,10 +511,11 @@ def update_tof(state, layout, now):
     """Refresh the ToF tab from the latest range frame."""
     body_w = int(layout["body_w"])
     body_h = int(layout["body_h"])
-    title_h = _item_height(TOF_TITLE, 24)
-    summary_h = _item_height(TOF_SUMMARY, 20)
-    detail_h = _item_height(TOF_DETAIL, 19)
-    header_h = max(title_h, summary_h) + STACK_GAP + detail_h + STACK_GAP + TOF_HEADER_EXTRA
+    stack_gap = rendering.px(STACK_GAP)
+    title_h = _item_height(TOF_TITLE, rendering.px(24))
+    summary_h = _item_height(TOF_SUMMARY, rendering.px(20))
+    detail_h = _item_height(TOF_DETAIL, rendering.px(19))
+    header_h = max(title_h, summary_h) + stack_gap + detail_h + stack_gap + rendering.px(TOF_HEADER_EXTRA)
     geometry = tof_layout(body_w, body_h, header_h)
     if geometry != _TOF_STATE.get("geometry"):
         _apply_tof_geometry(geometry)
@@ -532,7 +544,7 @@ def _tof_cell_lines(distance, status, mode, cell, labelled):
         return value, status_text, ""
     label = tof_status_label(distance, status)
     combined = f"S{status} {label}"
-    if labelled and _mono_width(combined) <= cell - 8:
+    if labelled and _mono_width(combined) <= cell - rendering.px(8):
         value, status_text = tof_cell_texts(distance, status, mode, True)
         return value, status_text, ""
     value, status_text = tof_cell_texts(distance, status, mode, False)
@@ -544,10 +556,11 @@ def _tof_cell_lines(distance, status, mode, cell, labelled):
 def _apply_tof_geometry(geometry):
     """Resize the grid and legend, then place the legend bar and its labels."""
     grid_side = geometry["grid_side"]
+    tick_len = rendering.pxf(TOF_TICK_LENGTH)
     dpg.configure_item(TOF_GRID, width=grid_side, height=grid_side)
     dpg.configure_item(TOF_GRID_BG, pmin=(0.0, 0.0), pmax=(float(grid_side), float(grid_side)))
     dpg.configure_item(TOF_GRID_PAD, width=geometry["left_pad"])
-    dpg.configure_item(TOF_LEGEND, width=TOF_LEGEND_W, height=geometry["legend_h"])
+    dpg.configure_item(TOF_LEGEND, width=rendering.px(TOF_LEGEND_W), height=geometry["legend_h"])
     dpg.configure_item(TOF_LEGEND_PAD, height=geometry["legend_pad"])
     legend = tof_legend_geometry(geometry["legend_h"])
     left, top, right, bottom = legend["bar"]
@@ -564,12 +577,12 @@ def _apply_tof_geometry(geometry):
         dpg.configure_item(
             f"{TOF_LEGEND_TICK}_{index}",
             p1=(right, tick_y),
-            p2=(right + TOF_TICK_LENGTH, tick_y),
+            p2=(right + tick_len, tick_y),
         )
         _label_width, label_h = _text_size(TOF_LEGEND_TICKS[index], "small")
         dpg.configure_item(
             f"{TOF_LEGEND_TICK_LABEL}_{index}",
-            pos=(right + TOF_TICK_LENGTH + 5, tick_y - label_h / 2.0),
+            pos=(right + tick_len + rendering.pxf(5.0), tick_y - label_h / 2.0),
         )
     dpg.configure_item(TOF_LEGEND_BAR, pmin=(left, top), pmax=(right, bottom))
 
@@ -577,7 +590,9 @@ def _apply_tof_geometry(geometry):
 def _update_tof_cells(distances, statuses, mode, geometry):
     """Recolour and relabel every heatmap cell."""
     cell = geometry["cell_side"]
-    labelled = cell >= TOF_LABEL_CELL
+    labelled = cell >= rendering.px(TOF_LABEL_CELL)
+    mono_sz = rendering.font_size("mono")
+    line_gap = rendering.px(2)
     for index, (distance, status) in enumerate(zip(distances, statuses)):
         row, column = divmod(index, config.TOF_SIDE)
         value, status_text, label_text = _tof_cell_lines(distance, status, mode, cell, labelled)
@@ -590,14 +605,14 @@ def _update_tof_cells(distances, statuses, mode, geometry):
             pmax=(left + cell - 1.0, top + cell - 1.0),
             fill=rendering.rgba(fill),
             color=rendering.rgba(border),
-            thickness=thickness,
+            thickness=thickness * rendering.ui_scale(),
         )
-        lines = [(f"{TOF_CELL_VALUE}_{index}", value, rendering.MONO_FONT_SIZE)]
+        lines = [(f"{TOF_CELL_VALUE}_{index}", value, mono_sz)]
         status_size = _cell_text_size(status_text, cell)
         lines.append((f"{TOF_CELL_STATUS}_{index}", status_text, status_size))
         if label_text:
             lines.append((f"{TOF_CELL_LABEL}_{index}", label_text, _cell_text_size(label_text, cell)))
-        stack = sum(size for _tag, _text, size in lines) + 2 * (len(lines) - 1)
+        stack = sum(size for _tag, _text, size in lines) + line_gap * (len(lines) - 1)
         y = top + (cell - stack) / 2.0
         for tag, text, size in lines:
             dpg.configure_item(
@@ -608,7 +623,7 @@ def _update_tof_cells(distances, statuses, mode, geometry):
                 color=rendering.rgba(text_color),
                 show=True,
             )
-            y += size + 2
+            y += size + line_gap
         if not label_text:
             dpg.configure_item(f"{TOF_CELL_LABEL}_{index}", show=False)
 
@@ -668,8 +683,8 @@ def _update_tof_overlay(mode, geometry):
     )
     dpg.configure_item(
         TOF_OVERLAY_BG,
-        pmin=(pos[0] - 18.0, pos[1] - 10.0),
-        pmax=(pos[0] + width + 18.0, pos[1] + height + 10.0),
+        pmin=(pos[0] - rendering.pxf(18.0), pos[1] - rendering.pxf(10.0)),
+        pmax=(pos[0] + width + rendering.pxf(18.0), pos[1] + height + rendering.pxf(10.0)),
         show=True,
     )
 
@@ -774,15 +789,17 @@ def _apply_imu_geometry(geometry):
 
 def _apply_imu_cube_geometry(geometry):
     """Size the orientation cube inside the attitude panel."""
-    inner_w = geometry["attitude_w"] - IMU_PANEL_MARGIN
-    inner_h = geometry["body_h"] - IMU_PANEL_MARGIN
-    title_h = _item_height(f"{IMU_ATTITUDE_PANEL}_title", 26)
-    readouts_h = _item_height(IMU_READOUTS, 90)
-    status_h = _item_height(IMU_STATUS, 19)
-    hint_h = _item_height(IMU_HINT, 14)
-    fixed = title_h + 5 * STACK_GAP + readouts_h + status_h + hint_h + IMU_PANEL_SAFETY
+    margin = rendering.px(IMU_PANEL_MARGIN)
+    stack_gap = rendering.px(STACK_GAP)
+    inner_w = geometry["attitude_w"] - margin
+    inner_h = geometry["body_h"] - margin
+    title_h = _item_height(f"{IMU_ATTITUDE_PANEL}_title", rendering.px(26))
+    readouts_h = _item_height(IMU_READOUTS, rendering.px(90))
+    status_h = _item_height(IMU_STATUS, rendering.px(19))
+    hint_h = _item_height(IMU_HINT, rendering.px(14))
+    fixed = title_h + 5 * stack_gap + readouts_h + status_h + hint_h + rendering.px(IMU_PANEL_SAFETY)
     max_cube = inner_h - fixed
-    cube_h = max(140, min(int(inner_w * 1.5), max_cube))
+    cube_h = max(rendering.px(140), min(int(inner_w * 1.5), max_cube))
     pad = max(0, (max_cube - cube_h) // 2)
     cube = {"width": inner_w, "height": cube_h, "pad": pad}
     if cube == _IMU_STATE.get("cube"):

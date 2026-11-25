@@ -43,6 +43,36 @@ AXES = [((1, 0, 0), "X", (235, 90, 80)), ((0, 1, 0), "Y", (110, 220, 130)), ((0,
 
 _FONTS = {}
 _PLOT_THEME = None
+_UI_SCALE = 1.0
+
+
+def ui_scale():
+    """Active UI scale factor (1.0 at standard 96 DPI layouts)."""
+    return _UI_SCALE
+
+
+def set_ui_scale(scale):
+    """Set the active UI scale factor, clamped to the supported range."""
+    global _UI_SCALE
+    value = float(scale)
+    _UI_SCALE = max(config.UI_SCALE_MIN, min(config.UI_SCALE_MAX, value))
+    return _UI_SCALE
+
+
+def px(value):
+    """Scale an integer pixel dimension by the active UI scale."""
+    return int(round(value * _UI_SCALE))
+
+
+def pxf(value):
+    """Scale a floating-point pixel dimension by the active UI scale."""
+    return float(value) * _UI_SCALE
+
+
+def font_size(name):
+    """Scaled pixel size for one named interface font (or 'mono')."""
+    base = MONO_FONT_SIZE if name == "mono" else FONT_SIZES[name]
+    return max(8, px(base))
 
 
 def rgba(color, alpha=255):
@@ -59,14 +89,15 @@ def _font_file(candidates):
 
 def load_fonts():
     """Create the interface fonts; call once after dpg.create_context()."""
+    _FONTS.clear()
     text_file = _font_file(config.FONT_FILES)
     if text_file is None:
         return
     mono_file = _font_file(config.MONO_FONT_FILES) or text_file
     with dpg.font_registry():
-        for name, size in FONT_SIZES.items():
-            _FONTS[name] = dpg.add_font(text_file, size)
-        _FONTS["mono"] = dpg.add_font(mono_file, MONO_FONT_SIZE)
+        for name in FONT_SIZES:
+            _FONTS[name] = dpg.add_font(text_file, font_size(name))
+        _FONTS["mono"] = dpg.add_font(mono_file, font_size("mono"))
     dpg.bind_font(_FONTS["label"])
 
 
@@ -145,16 +176,18 @@ def apply_theme():
                 (dpg.mvThemeCol_TableBorderLight, config.PANEL),
             ):
                 dpg.add_theme_color(target, rgba(color))
-            dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 16, 16)
-            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 10, 5)
-            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 8, 8)
+            dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, px(16), px(16))
+            dpg.add_theme_style(dpg.mvStyleVar_FramePadding, px(10), px(5))
+            dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, px(8), px(8))
             dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0)
-            dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, 8)
+            dpg.add_theme_style(dpg.mvStyleVar_ChildRounding, px(8))
             dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize, 1)
-            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, 4)
-            dpg.add_theme_style(dpg.mvStyleVar_TabRounding, 5)
-            dpg.add_theme_style(dpg.mvStyleVar_ScrollbarRounding, 4)
-            dpg.add_theme_style(dpg.mvStyleVar_GrabRounding, 4)
+            dpg.add_theme_style(dpg.mvStyleVar_FrameRounding, px(4))
+            dpg.add_theme_style(dpg.mvStyleVar_TabRounding, px(5))
+            dpg.add_theme_style(dpg.mvStyleVar_ScrollbarSize, max(12, px(14)))
+            dpg.add_theme_style(dpg.mvStyleVar_ScrollbarRounding, px(4))
+            dpg.add_theme_style(dpg.mvStyleVar_GrabMinSize, max(8, px(10)))
+            dpg.add_theme_style(dpg.mvStyleVar_GrabRounding, px(4))
     dpg.bind_theme(theme)
 
     with dpg.theme() as plot_theme:
@@ -168,10 +201,10 @@ def apply_theme():
                 (dpg.mvPlotCol_AxisTick, config.PANEL_BORDER),
             ):
                 dpg.add_theme_color(target, rgba(color), category=dpg.mvThemeCat_Plots)
-            dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, 1.5, category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, pxf(1.5), category=dpg.mvThemeCat_Plots)
             # The charts carry no titles or legends; a small padding leaves the
             # pixels to the traces instead of to the empty border.
-            dpg.add_theme_style(dpg.mvPlotStyleVar_PlotPadding, 2.0, 2.0, category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_style(dpg.mvPlotStyleVar_PlotPadding, pxf(2.0), pxf(2.0), category=dpg.mvThemeCat_Plots)
     _PLOT_THEME = plot_theme
 
 
@@ -235,7 +268,7 @@ def add_series(plot_tag, index, color, thickness=2.0):
     with dpg.theme() as theme:
         with dpg.theme_component(dpg.mvLineSeries):
             dpg.add_theme_color(dpg.mvPlotCol_Line, rgba(color), category=dpg.mvThemeCat_Plots)
-            dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, thickness, category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_style(dpg.mvPlotStyleVar_LineWeight, pxf(thickness), category=dpg.mvThemeCat_Plots)
     dpg.bind_item_theme(tag, theme)
     return tag
 
@@ -366,11 +399,11 @@ def add_cube(drawlist_tag, prefix):
         )
     for index, (_vector, label, color) in enumerate(AXES):
         dpg.draw_line(
-            (0, 0), (0, 0), color=rgba(color), thickness=2.0,
+            (0, 0), (0, 0), color=rgba(color), thickness=pxf(2.0),
             parent=drawlist_tag, tag=f"{prefix}_axis_{index}",
         )
         dpg.draw_text(
-            (0, 0), label, color=rgba(color), size=14.0,
+            (0, 0), label, color=rgba(color), size=pxf(14.0),
             parent=drawlist_tag, tag=f"{prefix}_axis_label_{index}",
         )
 

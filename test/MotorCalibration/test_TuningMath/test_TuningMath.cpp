@@ -1,5 +1,6 @@
 #include <unity.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -277,14 +278,17 @@ void test_synthesize_uses_velocity_feedforward_and_integral()
     TEST_ASSERT_TRUE(target >= 5.0f && target <= 30.0f);
 
     const tuning::Gains gains = tuning::synthesize(plant, plant, target);
-    // Nominal dimensionless loop gain: Kp = 0.06 * velocity_ff = 3.0.
-    TEST_ASSERT_FLOAT_WITHIN(0.1f, 3.0f, gains.kp);
+    // Nominal dimensionless loop gain: Kp = 0.18 * velocity_ff = 9.0, bounded
+    // by the step headroom so the step does not start saturated.
+    TEST_ASSERT_TRUE(gains.kp >= 1.0f && gains.kp <= 9.1f);
     const float duty_at_step = gains.feedforward + gains.velocity_ff * target + gains.kp * target;
     TEST_ASSERT_TRUE(duty_at_step <= 0.90f * 1023.0f);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 50.0f, gains.velocity_ff);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 150.0f, gains.feedforward);
-    // The initial integral gain is proportional to Kp, inside the bounds.
-    TEST_ASSERT_FLOAT_WITHIN(0.1f, tuning::KI_RATIO * gains.kp, gains.ki);
+    // The initial integral gain is proportional to Kp, clamped inside bounds.
+    const float expected_ki =
+      std::clamp(tuning::KI_RATIO * gains.kp, tuning::KI_MIN_CAL, tuning::KI_MAX_CAL);
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, expected_ki, gains.ki);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 220.0f, gains.static_friction);
 }
 
@@ -316,10 +320,11 @@ void test_synthesize_fills_both_directions()
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 40.0f, gains.velocity_ff_rev);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, -170.0f, gains.feedforward_rev);
     TEST_ASSERT_FLOAT_WITHIN(0.5f, 240.0f, gains.static_friction_rev);
-    // Common Kp: 0.06 * max(50, 40) = 3.0, still inside the duty headroom.
-    TEST_ASSERT_FLOAT_WITHIN(0.1f, 3.0f, gains.kp);
-    // Same common Kp -> the integral gain starts at KI_RATIO * Kp.
-    TEST_ASSERT_FLOAT_WITHIN(0.1f, tuning::KI_RATIO * gains.kp, gains.ki);
+    // Common Kp bounded by duty headroom in both directions.
+    TEST_ASSERT_TRUE(gains.kp >= 1.0f && gains.kp <= 9.1f);
+    const float expected_ki =
+      std::clamp(tuning::KI_RATIO * gains.kp, tuning::KI_MIN_CAL, tuning::KI_MAX_CAL);
+    TEST_ASSERT_FLOAT_WITHIN(0.1f, expected_ki, gains.ki);
     TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, 0.0f, gains.kd);
 
     const float forward_duty = gains.feedforward + gains.velocity_ff * target + gains.kp * target;
@@ -348,7 +353,7 @@ void test_synthesize_requires_both_directions()
 void test_synthesize_clamps_integral_gain()
 {
     tuning::PlantModel low_gain_plant;           // low Kp: integral at its lower bound
-    low_gain_plant.gain_rad_s_per_duty = 0.05f;  // 20 duty per rad/s -> Kp = 1.2
+    low_gain_plant.gain_rad_s_per_duty = 0.05f;  // 20 duty per rad/s -> Kp = 2.8, 5*Kp = 14 < 20
     low_gain_plant.friction_duty = 150.0f;
     low_gain_plant.breakaway_duty = 220.0f;
     low_gain_plant.valid = true;
@@ -357,7 +362,7 @@ void test_synthesize_clamps_integral_gain()
     TEST_ASSERT_FLOAT_WITHIN(1.0e-4f, tuning::KI_MIN_CAL, gains.ki);
 
     tuning::PlantModel high_gain_plant;            // high Kp: integral at its upper bound
-    high_gain_plant.gain_rad_s_per_duty = 0.007f;  // ~143 duty per rad/s -> Kp = 8.6
+    high_gain_plant.gain_rad_s_per_duty = 0.007f;  // ~143 duty per rad/s -> Kp = 20, 5*Kp > 60
     high_gain_plant.friction_duty = 150.0f;
     high_gain_plant.breakaway_duty = 220.0f;
     high_gain_plant.valid = true;

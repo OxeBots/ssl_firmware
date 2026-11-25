@@ -63,10 +63,13 @@ def console_hit_test(state, width, height, pos):
     if not lines:
         return None
     # The last visible line sits above the bottom padding, older ones above it.
-    row = len(lines) - 1 - int(round((height - CONSOLE_BOTTOM_PAD - pos[1]) / CONSOLE_LINE_H))
+    line_h = rendering.px(CONSOLE_LINE_H)
+    bottom_pad = rendering.px(CONSOLE_BOTTOM_PAD)
+    pad_x = rendering.px(CONSOLE_PAD_X)
+    row = len(lines) - 1 - int(round((height - bottom_pad - pos[1]) / line_h))
     row = max(0, min(len(lines) - 1, row))
     text = lines[row]
-    x = pos[0] - CONSOLE_PAD_X
+    x = pos[0] - pad_x
     if x <= 0:
         return start + row, 0
     char = min(len(text), int(math.ceil(x / _char_width())))
@@ -113,11 +116,11 @@ def build(state):
             (400, 300),
             fill=rendering.rgba(config.PANEL),
             color=rendering.rgba(config.PANEL_BORDER),
-            rounding=8.0,
+            rounding=rendering.pxf(8.0),
         )
-        _add_text((CONSOLE_PAD_X, 6), "Console serial", "title", config.TEXT)
-        _status_item = _add_text((0, 9), "", "small", config.OK_COLOR)
-        _hint_item = _add_text((0, 9), "", "small", config.TEXT_DIM)
+        _add_text((rendering.px(CONSOLE_PAD_X), rendering.px(6)), "Console serial", "title", config.TEXT)
+        _status_item = _add_text((0, rendering.px(9)), "", "small", config.OK_COLOR)
+        _hint_item = _add_text((0, rendering.px(9)), "", "small", config.TEXT_DIM)
         _empty_item = _add_text((0, 0), CONSOLE_EMPTY_TEXT, "small", config.TEXT_DIM, show=False)
         for _ in range(CONSOLE_POOL):
             _highlights.append(
@@ -137,7 +140,7 @@ def build(state):
             (0, 0),
             fill=rendering.rgba(config.INSET),
             color=rendering.rgba(config.PANEL_BORDER),
-            rounding=4.0,
+            rounding=rendering.pxf(4.0),
         )
         _clear_label = _add_text((0, 0), CONSOLE_CLEAR_LABEL, "small", config.TEXT)
 
@@ -154,6 +157,10 @@ def update(state, layout):
     if _char_w is None:
         _char_w = _measure_char_width()
     _update_header(state, width)
+    line_h = rendering.px(CONSOLE_LINE_H)
+    pad_x = rendering.px(CONSOLE_PAD_X)
+    header_h = rendering.px(CONSOLE_HEADER_H)
+    bottom_pad = rendering.px(CONSOLE_BOTTOM_PAD)
     lines, start = console_visible_lines(state, width, height)
     if not lines:
         _hide_lines(0)
@@ -161,7 +168,7 @@ def update(state, layout):
         message_width = _text_width(CONSOLE_EMPTY_TEXT, "small")
         dpg.configure_item(
             _empty_item,
-            pos=((width - message_width) / 2.0, (CONSOLE_HEADER_H + height - CONSOLE_BOTTOM_PAD) / 2.0 - 7.0),
+            pos=((width - message_width) / 2.0, (header_h + height - bottom_pad) / 2.0 - rendering.pxf(7.0)),
             show=True,
         )
         return
@@ -173,15 +180,15 @@ def update(state, layout):
         if (a_line, a_ch) > (b_line, b_ch):
             (a_line, a_ch), (b_line, b_ch) = (b_line, b_ch), (a_line, a_ch)
     char_w = _char_width()
-    max_text_w = width - 2 * CONSOLE_PAD_X
+    max_text_w = width - 2 * pad_x
     for row, raw in enumerate(lines):
-        line_top = height - CONSOLE_BOTTOM_PAD - (len(lines) - 1 - row) * CONSOLE_LINE_H
+        line_top = height - bottom_pad - (len(lines) - 1 - row) * line_h
         text = _fit_line(raw, max_text_w)
         color = config.BAD_COLOR if raw.startswith("ERR") else (config.TEXT if raw.startswith(">") else config.TEXT_DIM)
         dpg.configure_item(
             _lines[row],
             text=text,
-            pos=(float(CONSOLE_PAD_X), float(line_top + 2)),
+            pos=(float(pad_x), float(line_top + rendering.px(2))),
             color=rendering.rgba(color),
             show=True,
         )
@@ -193,8 +200,8 @@ def update(state, layout):
             if right_ch > left_ch:
                 dpg.configure_item(
                     highlight,
-                    pmin=(CONSOLE_PAD_X + left_ch * char_w, line_top),
-                    pmax=(CONSOLE_PAD_X + right_ch * char_w, line_top + CONSOLE_LINE_H - 2),
+                    pmin=(pad_x + left_ch * char_w, line_top),
+                    pmax=(pad_x + right_ch * char_w, line_top + line_h - rendering.px(2)),
                     show=True,
                 )
                 continue
@@ -260,7 +267,7 @@ def wheel(state, delta, pos):
 
 def _add_text(pos, text, font_name, color, show=True):
     """Draw text with an interface font at its configured pixel size."""
-    size = rendering.MONO_FONT_SIZE if font_name == "mono" else rendering.FONT_SIZES[font_name]
+    size = rendering.font_size(font_name)
     item = dpg.draw_text(pos, text, color=rendering.rgba(color), size=float(size), show=show)
     rendering.bind_font(item, font_name)
     return item
@@ -268,7 +275,7 @@ def _add_text(pos, text, font_name, color, show=True):
 
 def _visible_capacity(height):
     """Console rows that fit between the panel header and its bottom padding."""
-    return max(1, (height - CONSOLE_HEADER_H) // CONSOLE_LINE_H)
+    return max(1, (height - rendering.px(CONSOLE_HEADER_H)) // rendering.px(CONSOLE_LINE_H))
 
 
 def _local_position(pos):
@@ -289,7 +296,7 @@ def _measure_char_width():
 
 def _char_width():
     """Glyph advance used for hit testing and selection geometry."""
-    return _char_w if _char_w else CONSOLE_CHAR_W
+    return _char_w if _char_w else rendering.pxf(CONSOLE_CHAR_W)
 
 
 def _text_width(text, font_name):
@@ -297,7 +304,7 @@ def _text_width(text, font_name):
     font = rendering.font(font_name)
     size = dpg.get_text_size(text, font=font) if font is not None else dpg.get_text_size(text)
     if not size:
-        return len(text) * CONSOLE_CHAR_W
+        return len(text) * rendering.pxf(CONSOLE_CHAR_W)
     return size[0]
 
 
@@ -315,8 +322,11 @@ def _fit_line(text, max_w):
 
 def clear_button_rect(width):
     """Header rectangle of the clear button, right-aligned inside the panel."""
-    left = float(width) - CONSOLE_PAD_X - CONSOLE_CLEAR_W
-    return left, CONSOLE_CLEAR_Y, left + CONSOLE_CLEAR_W, CONSOLE_CLEAR_Y + CONSOLE_CLEAR_H
+    clear_w = rendering.pxf(CONSOLE_CLEAR_W)
+    clear_h = rendering.pxf(CONSOLE_CLEAR_H)
+    clear_y = rendering.pxf(CONSOLE_CLEAR_Y)
+    left = float(width) - rendering.pxf(CONSOLE_PAD_X) - clear_w
+    return left, clear_y, left + clear_w, clear_y + clear_h
 
 
 def _update_header(state, width):
@@ -329,9 +339,10 @@ def _update_header(state, width):
     rect = clear_button_rect(width)
     status_width = _text_width(status, "small")
     hint_width = _text_width(hint, "small")
-    x = rect[0] - CONSOLE_CLEAR_GAP - status_width - hint_width
-    dpg.configure_item(_status_item, text=status, pos=(float(x), 9.0), color=rendering.rgba(status_color))
-    dpg.configure_item(_hint_item, text=hint, pos=(float(x + status_width), 9.0))
+    x = rect[0] - rendering.pxf(CONSOLE_CLEAR_GAP) - status_width - hint_width
+    text_y = rendering.pxf(9.0)
+    dpg.configure_item(_status_item, text=status, pos=(float(x), text_y), color=rendering.rgba(status_color))
+    dpg.configure_item(_hint_item, text=hint, pos=(float(x + status_width), text_y))
     hovered = _inside(rect, _local_position(dpg.get_mouse_pos(local=False)))
     dpg.configure_item(
         _clear_bg,
@@ -340,9 +351,10 @@ def _update_header(state, width):
         fill=rendering.rgba(config.TAB_ACTIVE if hovered else config.INSET),
     )
     label_width = _text_width(CONSOLE_CLEAR_LABEL, "small")
+    clear_w = rect[2] - rect[0]
     dpg.configure_item(
         _clear_label,
-        pos=(rect[0] + (CONSOLE_CLEAR_W - label_width) / 2.0, 9.0),
+        pos=(rect[0] + (clear_w - label_width) / 2.0, text_y),
     )
 
 

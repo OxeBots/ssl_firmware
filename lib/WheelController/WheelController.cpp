@@ -570,6 +570,10 @@ void WheelController::reset_control_state_locked(int wheel)
     m_integral_duty[wheel] = 0.0f;
     m_kick_state[wheel] = KickState();
     m_wheel_state[wheel].target_direction_pending = false;
+    m_wheel_state[wheel].reversal_coast = false;
+    m_wheel_state[wheel].wrong_way_since_ms = 0;
+    m_wheel_state[wheel].wrong_way_entry_speed_rad_s = 0.0f;
+    m_wheel_state[wheel].reversal_coast_start_ms = 0;
     m_last_target_sign[wheel] = 0;
     m_ls_fault_ms[wheel] = 0;
     m_ls_fault_sticky[wheel] = false;
@@ -954,15 +958,9 @@ void WheelController::control_task()
             WheelState & wheel = m_wheel_state[i];
             const int8_t latched_direction =
               latched_directions[i] == config::driver::MOTOR_CW ? 1 : -1;
-            const size_t latched_branch = latched_direction > 0 ? 0 : 1;
-            // Only pulse mode uses the tighter encoder jump limit. A wheel
-            // entering it can still be coasting from a continuous target.
-            const float maximum_tracked_rate =
-              m_low_speed[i].active
-                ? std::max({LS_MAX_WHEEL_RATE_RAD_S,
-                            1.5f * m_parameters[i].continuous_min_rad_s[latched_branch],
-                            std::fabs(current_rad_s[i])})
-                : config::driver::WHEEL_MAX_VEL_RAD;
+            // Any physically reachable wheel speed is valid encoder travel; only
+            // jumps far above the drivetrain limit indicate a sensor glitch.
+            const float maximum_tracked_rate = config::driver::WHEEL_MAX_VEL_RAD;
             // Negate because the estimator reports the encoder frame, where CW
             // rotation is negative; targets and the PID use the motor frame.
             float measured_rad_s = -current_rad_s[i];
@@ -1098,10 +1096,9 @@ void WheelController::control_task()
             const bool legacy_law = parameters.ki < LEGACY_KI_THRESHOLD;
 
             // ---- Target sign bookkeeping ----
-            // A large magnitude change clears the previous operating point's integral.
-            if (std::fabs(target_rad_s - m_last_target_rad_s[i]) > 0.5f)
-                m_integral_duty[i] = 0.0f;
-            m_last_target_rad_s[i] = target_rad_s;
+            // Keep the integral across smooth target magnitude changes so load
+            // compensation survives dynamic trajectories; direction reversals
+            // and zero targets still reset it.
             const bool target_direction_changed = target_sign != m_last_target_sign[i];
             if (target_direction_changed)
             {
@@ -1118,11 +1115,80 @@ void WheelController::control_task()
             if (target_sign == latched_direction)
                 wheel.target_direction_pending = false;
 
+            const float direction = static_cast<float>(target_sign);
+
+            // ---- Wrong-way driver latch-up guard ----
+            // Some integrated brushless motor drivers ignore a direction flip
+            // while spinning fast and instead accelerate further in the old
+            // direction. Detect failed braking and coast down before re-engaging.
+            if (wheel.reversal_coast)
+            {
+                const bool cleared = !velocity_feedback_available ||
+                                     direction * measured_rad_s > -REVERSAL_REENGAGE_RAD_S ||
+                                     (now_ms - wheel.reversal_coast_start_ms) >=
+                                       REVERSAL_COAST_TIMEOUT_MS;
+                if (!cleared)
+                {
+                    m_pids[i].clear();
+                    m_integral_duty[i] = 0.0f;
+                    m_kick_state[i] = KickState();
+                    reset_low_speed_locked(i);
+                    duties[i] = 0;
+                    dirs[i] = (target_sign > 0) ? config::driver::MOTOR_CW
+                                                : config::driver::MOTOR_CCW;
+                    wheel.direction = static_cast<int8_t>(target_sign);
+                    wheel.duty = 0;
+                    continue;
+                }
+                wheel.reversal_coast = false;
+                wheel.wrong_way_since_ms = 0;
+            }
+            else if (velocity_feedback_available && latched_direction == target_sign &&
+                     applied_duties[i] > 0 &&
+                     direction * measured_rad_s < -REVERSAL_WRONG_WAY_RAD_S)
+            {
+                const float wrong_way_speed = std::fabs(measured_rad_s);
+                if (wheel.wrong_way_since_ms == 0)
+                {
+                    wheel.wrong_way_since_ms = now_ms;
+                    wheel.wrong_way_entry_speed_rad_s = wrong_way_speed;
+                }
+                else if (now_ms - wheel.wrong_way_since_ms >= REVERSAL_LATCH_CHECK_MS)
+                {
+                    if (wrong_way_speed >=
+                        wheel.wrong_way_entry_speed_rad_s - REVERSAL_MIN_BRAKE_RAD_S)
+                    {
+                        wheel.reversal_coast = true;
+                        wheel.reversal_coast_start_ms = now_ms;
+                        wheel.wrong_way_since_ms = 0;
+                        m_pids[i].clear();
+                        m_integral_duty[i] = 0.0f;
+                        m_kick_state[i] = KickState();
+                        reset_low_speed_locked(i);
+                        ESP_LOGW(TAG,
+                                 "M%d wrong-way spin (v=%.1f rad/s); coasting to reverse.",
+                                 i + 1,
+                                 static_cast<double>(measured_rad_s));
+                        duties[i] = 0;
+                        dirs[i] = (target_sign > 0) ? config::driver::MOTOR_CW
+                                                    : config::driver::MOTOR_CCW;
+                        wheel.direction = static_cast<int8_t>(target_sign);
+                        wheel.duty = 0;
+                        continue;
+                    }
+                    wheel.wrong_way_since_ms = now_ms;
+                    wheel.wrong_way_entry_speed_rad_s = wrong_way_speed;
+                }
+            }
+            else
+            {
+                wheel.wrong_way_since_ms = 0;
+            }
+
             // ---- Feed-forward: the fitted static curve of the target
             // direction. Each direction has its own branch, so the intercept
             // and the velocity gain follow the target sign. The breakaway duty
             // is not a steady floor: it is applied below as a start-up kick.
-            const float direction = static_cast<float>(target_sign);
             const bool forward = target_rad_s >= 0.0f;
             const float ff_intercept =
               forward ? parameters.feedforward : parameters.feedforward_rev;
@@ -1209,10 +1275,14 @@ void WheelController::control_task()
                 const float startup_duty = breakaway + LS_BREAKAWAY_MARGIN_DUTY;
                 const float pulse_duty = parameters.pulse_duty[branch];
                 // Once the wheel is moving, calibration can use a lower pulse
-                // amplitude than it takes to start the wheel from rest.
-                const float minimum_duty = low_speed.starting || pulse_duty == 0.0f
-                                             ? std::max(startup_duty, pulse_duty)
-                                             : pulse_duty;
+                // amplitude than it takes to start the wheel from rest; if it
+                // stalls mid-run, restore breakaway duty immediately instead of
+                // waiting for the stall timeout.
+                const bool need_breakaway = low_speed.starting || pulse_duty == 0.0f ||
+                                            direction * measured_rad_s <
+                                              LS_MOVING_RPM * RPM_TO_RAD_S;
+                const float minimum_duty =
+                  need_breakaway ? std::max(startup_duty, pulse_duty) : pulse_duty;
                 const float base_duty =
                   std::min(std::max(minimum_duty, direction * model_ff + LS_BREAKAWAY_MARGIN_DUTY),
                            MAX_PULSE_DUTY);
@@ -1322,6 +1392,20 @@ void WheelController::control_task()
                           fast_valid ? direction * parameters.angle_sign *
                                          m_control_snapshot.fast_velocity_rad_s[i] * RAD_S_TO_RPM
                                      : low_speed.last_window_rpm;
+                        // Leave full-duty start-up as soon as the fast slope
+                        // confirms motion instead of waiting 20 ms for a full
+                        // ripple window (which caused 150-360% low-speed surges).
+                        if (low_speed.starting && fast_valid && fast_rpm >= LS_MOVING_RPM)
+                        {
+                            low_speed.starting = false;
+                            low_speed.drive_ticks = static_cast<uint8_t>(
+                              std::clamp(low_speed.ton_ticks, 0.0f, period_ticks));
+                            if (low_speed.boost_duty > 0.0f)
+                            {
+                                low_speed.boost_duty = 0.0f;
+                                low_speed.stall_since_us = 0;
+                            }
+                        }
                         if (!fast_valid)
                         {
                             low_speed.fast_sample_us = 0;
@@ -1347,13 +1431,17 @@ void WheelController::control_task()
                             low_speed.previous_fast_rpm = fast_rpm;
                         }
                         // A low-speed surge can accelerate faster than the continuous
-                        // plant fit predicts. Use the encoder slope and check for
-                        // overshoot on every control tick, including within a pulse.
+                        // plant fit predicts. While mean speed is below target, gate
+                        // only on actual fast speed (not the noisy acceleration
+                        // derivative) so phantom spikes do not clip full-drive slots.
                         const float coast_delay_s = parameters.pulse_coast_delay_s[branch];
                         const float projected_rpm =
                           fast_rpm +
                           coast_delay_s * std::max(0.0f, low_speed.fast_acceleration_rpm_s);
-                        const bool coasting = coast_delay_s > 0.0f && projected_rpm >= target_rpm;
+                        const bool coasting =
+                          coast_delay_s > 0.0f &&
+                          (fast_rpm >= LS_SURGE_COAST_FACTOR * target_rpm ||
+                           (low_speed.filtered_rpm >= target_rpm && projected_rpm >= target_rpm));
 
                         // Use the nearest scheduled edge. Interrupt jitter
                         // around an edge must not insert an extra drive slot.
@@ -1419,10 +1507,12 @@ void WheelController::control_task()
                                 const float demand =
                                   feedforward + kp * error_rpm + low_speed.integral_ticks;
                                 const float travel_error = target_rpm * elapsed_s - travel_rpm_s;
-                                // Use travel each cycle. Quantized motor counts stay
-                                // independent for stall detection and calibration.
+                                // Use travel each cycle. Do not block upward
+                                // integration on momentary coasting spikes,
+                                // otherwise steady-state speed settles 15-20%
+                                // below the requested low-speed target.
                                 if (!low_speed.starting &&
-                                    ((!coasting && demand < period_ticks && travel_error > 0.0f) ||
+                                    ((demand < period_ticks && travel_error > 0.0f) ||
                                      (demand > 0.0f && travel_error < 0.0f)))
                                     low_speed.integral_ticks = std::clamp(
                                       low_speed.integral_ticks + kp * travel_error / response_s,
@@ -1680,16 +1770,23 @@ void WheelController::control_task()
                 const bool stall_frozen = kick.active;
 
                 u = static_cast<float>(pid_output) / 10.0f + ff_pwm + m_integral_duty[i];
-                const bool saturated_high = u >= 1023.0f && error_rad_s > 0.0f;
-                const bool saturated_low = u <= -1023.0f && error_rad_s < 0.0f;
+                const float max_delta = PWM_SLEW_RATE_PER_MS * slow_dt_ms;
+                const float current_signed_pwm =
+                  wheel.target_direction_pending
+                    ? 0.0f
+                    : static_cast<float>(applied_duties[i]) * latched_direction;
+                const bool saturated_high =
+                  (u >= 1023.0f || (u - current_signed_pwm) > max_delta) && error_rad_s > 0.0f;
+                const bool saturated_low =
+                  (u <= -1023.0f || (u - current_signed_pwm) < -max_delta) && error_rad_s < 0.0f;
                 // Correct an underestimated feedforward even when it leaves the
                 // wheel stalled far below the requested speed.
                 if (!legacy_law && !stall_frozen && !saturated_high && !saturated_low &&
                     wheel.direction == latched_direction && velocity_feedback_available)
                 {
                     // Keep the calibrated integral active up to maximum speed
-                    // without accumulating a large correction during startup.
-                    const float error_limit = 0.1f * target_magnitude;
+                    // while capping per-step error so startup ramps do not wind up.
+                    constexpr float error_limit = 3.0f;
                     const float integral_error =
                       calibrated_velocity ? std::clamp(error_rad_s, -error_limit, error_limit)
                                           : error_rad_s;

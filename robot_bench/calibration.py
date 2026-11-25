@@ -97,9 +97,10 @@ _STOP_THEME = None
 # ---------------------------------------------------------------------------
 
 
-def content_height(body_h, tab_bar_h=SUBTAB_BAR_HEIGHT):
+def content_height(body_h, tab_bar_h=None):
     """Vertical space left for the active sub-tab below the internal tab bar."""
-    return max(MIN_CONTENT_HEIGHT, int(body_h) - int(tab_bar_h))
+    bar_h = rendering.px(SUBTAB_BAR_HEIGHT) if tab_bar_h is None else int(tab_bar_h)
+    return max(rendering.px(MIN_CONTENT_HEIGHT), int(body_h) - bar_h)
 
 
 def active_subtab():
@@ -371,7 +372,7 @@ def spinning_text(calib):
 def _create_themes():
     global _TABLE_THEME, _ANALOG_BAR_THEME, _I2C_BAR_THEME, _PROGRESS_THEME, _START_THEME, _STOP_THEME
     _TABLE_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 0.0)},
+        styles={dpg.mvStyleVar_CellPadding: (float(rendering.px(2)), 0.0)},
         component=dpg.mvTable,
     )
     _ANALOG_BAR_THEME = rendering.create_theme(
@@ -419,8 +420,12 @@ def _build_levels_table():
             for slot in range(proto.WHEEL_COUNT):
                 with dpg.table_row():
                     rendering.add_text(f"ENC{slot + 1}", "tiny", config.TEXT_DIM)
-                    dpg.add_progress_bar(tag=ANALOG_BARS[slot], default_value=0.0, width=100, height=BAR_HEIGHT)
-                    dpg.add_progress_bar(tag=I2C_BARS[slot], default_value=0.0, width=100, height=BAR_HEIGHT)
+                    dpg.add_progress_bar(
+                        tag=ANALOG_BARS[slot], default_value=0.0, width=rendering.px(100), height=rendering.px(BAR_HEIGHT)
+                    )
+                    dpg.add_progress_bar(
+                        tag=I2C_BARS[slot], default_value=0.0, width=rendering.px(100), height=rendering.px(BAR_HEIGHT)
+                    )
     dpg.bind_item_theme(LEVELS_TABLE, _TABLE_THEME)
     for tag in ANALOG_BARS:
         dpg.bind_item_theme(tag, _ANALOG_BAR_THEME)
@@ -511,34 +516,36 @@ def _build_encoders(state):
                 dpg.add_button(
                     tag=START_BUTTON,
                     label=START_LABEL,
-                    width=200,
-                    height=BUTTON_HEIGHT,
+                    width=rendering.px(200),
+                    height=rendering.px(BUTTON_HEIGHT),
                     callback=on_start,
                 )
                 dpg.bind_item_theme(START_BUTTON, _START_THEME)
                 dpg.add_button(
                     tag=STOP_BUTTON,
                     label=STOP_LABEL,
-                    width=200,
-                    height=BUTTON_HEIGHT,
+                    width=rendering.px(200),
+                    height=rendering.px(BUTTON_HEIGHT),
                     callback=on_stop,
                 )
                 dpg.bind_item_theme(STOP_BUTTON, _STOP_THEME)
             rendering.add_text("Aguardando quadro de calibração", "small", config.TEXT_DIM, tag=STATUS_TEXT)
             rendering.add_text("", "small", config.DEMO_COLOR, tag=MAGNET_WARNING_TEXT, show=False)
             with dpg.group(horizontal=True):
-                dpg.add_progress_bar(tag=PROGRESS_BAR, default_value=0.0, width=200, height=BAR_HEIGHT)
+                dpg.add_progress_bar(
+                    tag=PROGRESS_BAR, default_value=0.0, width=rendering.px(200), height=rendering.px(BAR_HEIGHT)
+                )
                 dpg.bind_item_theme(PROGRESS_BAR, _PROGRESS_THEME)
                 rendering.add_text("Nenhum motor girando", "small", config.TEXT_DIM, tag=SPINNING_TEXT)
             with dpg.group(horizontal=True):
                 _build_levels_table()
                 _build_results_table()
-        with rendering.panel("Mapeamento atual", MAPPING_PANEL, width=RIGHT_WIDTH, height=1):
+        with rendering.panel("Mapeamento atual", MAPPING_PANEL, width=rendering.px(RIGHT_WIDTH), height=1):
             rendering.add_text("Aguardando quadro de calibração", "small", config.TEXT_DIM, tag=MAPPING_HEADER)
             rendering.add_text("", "small", config.TEXT_DIM, tag=STAGE_BADGE)
             rendering.add_text("ENCn: entrada analógica (caminho de controle)", "micro", config.TEXT_DIM)
             rendering.add_text("mux n: par I2C atrás do CD4052B", "micro", config.TEXT_DIM)
-            dpg.add_spacer(height=4)
+            dpg.add_spacer(height=rendering.px(4))
             _build_mapping_table()
             dpg.add_separator()
             rendering.add_text("O mapa é gravado na NVS e sobrevive a reinicializações.", "micro", config.TEXT_DIM)
@@ -560,17 +567,18 @@ def build(state):
 
 
 def _update_controls(state, now, inner_w):
+    gap = rendering.px(GAP)
     dpg.configure_item(
         START_BUTTON,
-        width=(inner_w - GAP) // 2,
+        width=(inner_w - gap) // 2,
         enabled=calibration_start_enabled(state, now),
     )
     dpg.configure_item(
         STOP_BUTTON,
-        width=(inner_w - GAP) // 2,
+        width=(inner_w - gap) // 2,
         enabled=calibration_stop_enabled(state, now),
     )
-    dpg.configure_item(PROGRESS_BAR, width=max(120, inner_w - 190))
+    dpg.configure_item(PROGRESS_BAR, width=max(rendering.px(120), inner_w - rendering.px(190)))
     if dpg.get_value(CONFIRM_CHECK) != state.calibration_confirm:
         dpg.set_value(CONFIRM_CHECK, state.calibration_confirm)
     status, color = status_text(state, now)
@@ -589,11 +597,12 @@ def _update_controls(state, now, inner_w):
 
 
 def _update_levels(state, now, inner_w):
-    levels_w = (inner_w - GAP) * 55 // 100
-    results_w = inner_w - GAP - levels_w
+    gap = rendering.px(GAP)
+    levels_w = (inner_w - gap) * 55 // 100
+    results_w = inner_w - gap - levels_w
     dpg.configure_item(LEVELS_TABLE, width=levels_w)
     dpg.configure_item(RESULTS_TABLE, width=results_w)
-    bar_w = max(40, levels_w * 42 // 100 - 14)
+    bar_w = max(rendering.px(40), levels_w * 42 // 100 - rendering.px(14))
     calib = state.calibration
     if calibration_running(state, now):
         analog_ratios = level_ratios(calib["analog_level"])
@@ -620,7 +629,7 @@ def _update_mapping(state):
     rendering.set_text(MAPPING_HEADER, header, color)
     badge, badge_color = stage_summary(calib)
     rendering.set_text(STAGE_BADGE, badge, badge_color)
-    dpg.configure_item(MAPPING_TABLE, width=RIGHT_WIDTH - PANEL_MARGIN)
+    dpg.configure_item(MAPPING_TABLE, width=rendering.px(RIGHT_WIDTH) - rendering.px(PANEL_MARGIN))
     for wheel in range(proto.WHEEL_COUNT):
         text_color = config.TEXT if calib is not None else config.TEXT_DIM
         rendering.set_text(MAPPING_ANALOG[wheel], analog_text(calib, wheel), text_color)
@@ -643,10 +652,12 @@ def _update_encoders(state, layout, now):
     """Refresh the Encoders sub-tab from the latest calibration frame."""
     body_w = int(layout["body_w"])
     body_h = int(layout["body_h"])
-    main_w = max(320, body_w - RIGHT_WIDTH - GAP)
+    right_w = rendering.px(RIGHT_WIDTH)
+    gap = rendering.px(GAP)
+    main_w = max(rendering.px(320), body_w - right_w - gap)
     dpg.configure_item(PANEL, width=main_w, height=body_h)
-    dpg.configure_item(MAPPING_PANEL, width=RIGHT_WIDTH, height=body_h)
-    inner_w = main_w - PANEL_MARGIN
+    dpg.configure_item(MAPPING_PANEL, width=right_w, height=body_h)
+    inner_w = main_w - rendering.px(PANEL_MARGIN)
     _update_controls(state, now, inner_w)
     _update_levels(state, now, inner_w)
     _update_mapping(state)
@@ -657,7 +668,7 @@ def update(state, layout, now):
     body_h = int(layout["body_h"])
     content = {
         "body_w": layout["body_w"],
-        "body_h": content_height(body_h, rendering.item_height(SUBTAB_BAR) or SUBTAB_BAR_HEIGHT),
+        "body_h": content_height(body_h, rendering.item_height(SUBTAB_BAR) or rendering.px(SUBTAB_BAR_HEIGHT)),
     }
     if active_subtab() == SUBTAB_CONTROL:
         tuning.update(state, content, now)

@@ -324,7 +324,7 @@ def param_rows(tuning):
 def _create_themes():
     global _TABLE_THEME, _PROGRESS_THEME, _START_THEME, _STOP_THEME
     _TABLE_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 0.0)},
+        styles={dpg.mvStyleVar_CellPadding: (float(rendering.px(2)), 0.0)},
         component=dpg.mvTable,
     )
     _PROGRESS_THEME = rendering.create_theme(
@@ -381,26 +381,28 @@ def _build_tuning_panel(state):
             dpg.add_button(
                 tag=START_BUTTON,
                 label=START_LABEL,
-                width=200,
-                height=BUTTON_HEIGHT,
+                width=rendering.px(200),
+                height=rendering.px(BUTTON_HEIGHT),
                 callback=on_start,
             )
             dpg.bind_item_theme(START_BUTTON, _START_THEME)
             dpg.add_button(
                 tag=STOP_BUTTON,
                 label=STOP_LABEL,
-                width=200,
-                height=BUTTON_HEIGHT,
+                width=rendering.px(200),
+                height=rendering.px(BUTTON_HEIGHT),
                 callback=on_stop,
             )
             dpg.bind_item_theme(STOP_BUTTON, _STOP_THEME)
         rendering.add_text(STATUS_WAITING, "small", config.TEXT_DIM, tag=STATUS_TEXT)
-        dpg.add_progress_bar(tag=PROGRESS_BAR, default_value=0.0, width=200, height=8)
+        dpg.add_progress_bar(
+            tag=PROGRESS_BAR, default_value=0.0, width=rendering.px(200), height=rendering.px(8)
+        )
         dpg.bind_item_theme(PROGRESS_BAR, _PROGRESS_THEME)
         rendering.add_text(SPINNING_IDLE, "small", config.TEXT_DIM, tag=PHASE_TEXT)
         dpg.add_separator()
         rendering.add_text("Resposta do passo · 12 s · média 200 ms", "small", config.TEXT_DIM)
-        rendering.add_plot(PLOT, height=120, width=1)
+        rendering.add_plot(PLOT, height=rendering.px(120), width=1)
         rendering.add_series(PLOT, 0, config.VELOCITY_COLOR)
         rendering.add_series(PLOT, 1, config.TARGET_COLOR)
         dpg.add_plot_annotation(
@@ -413,7 +415,7 @@ def _build_tuning_panel(state):
 
 
 def _build_results():
-    with rendering.panel("Resultado e parâmetros", PARAMS_PANEL, width=RIGHT_WIDTH, height=1):
+    with rendering.panel("Resultado e parâmetros", PARAMS_PANEL, width=rendering.px(RIGHT_WIDTH), height=1):
         with dpg.group(horizontal=True):
             with dpg.group():
                 rendering.add_text("Resultado por sentido", "small", config.TEXT_DIM)
@@ -485,14 +487,15 @@ def build(state):
 
 
 def _update_tuning_controls(state, now, inner_w, body_h):
+    gap = rendering.px(GAP)
     dpg.configure_item(
         START_BUTTON,
-        width=(inner_w - GAP) // 2,
+        width=(inner_w - gap) // 2,
         enabled=tuning_start_enabled(state, now),
     )
     dpg.configure_item(
         STOP_BUTTON,
-        width=(inner_w - GAP) // 2,
+        width=(inner_w - gap) // 2,
         enabled=tuning_stop_enabled(state, now),
     )
     dpg.configure_item(PROGRESS_BAR, width=inner_w)
@@ -527,7 +530,10 @@ def _update_tuning_controls(state, now, inner_w, body_h):
         rendering.history_peak(display, 2, now, config.CHART_WINDOW_S, 100.0),
     )
     rendering.set_y_limits(PLOT, -peak, peak)
-    plot_h = min(MAX_PLOT_HEIGHT, max(MIN_PLOT_HEIGHT, int(body_h) - PLOT_RESERVED_HEIGHT))
+    plot_h = min(
+        rendering.px(MAX_PLOT_HEIGHT),
+        max(rendering.px(MIN_PLOT_HEIGHT), int(body_h) - rendering.px(PLOT_RESERVED_HEIGHT)),
+    )
     dpg.configure_item(PLOT, width=inner_w, height=plot_h)
     dpg.configure_item(PLOT + "_placeholder", show=not xs_velocity)
 
@@ -535,8 +541,9 @@ def _update_tuning_controls(state, now, inner_w, body_h):
 def _update_results(state, now):
     tuning = state.tuning if tuning_fresh(state, now) else None
     tone = config.TEXT if tuning else config.TEXT_DIM
-    results_w = (RIGHT_WIDTH - PANEL_MARGIN - GAP) * 48 // 100
-    params_w = RIGHT_WIDTH - PANEL_MARGIN - GAP - results_w
+    right_inner = rendering.px(RIGHT_WIDTH) - rendering.px(PANEL_MARGIN) - rendering.px(GAP)
+    results_w = right_inner * 48 // 100
+    params_w = right_inner - results_w
     dpg.configure_item(RESULTS_TABLE, width=results_w)
     dpg.configure_item(PARAMS_TABLE, width=params_w)
     for row, status_tag, rise_tag, overshoot_tag, ss_tag in zip(
@@ -564,9 +571,11 @@ def update(state, layout, now):
     """Refresh the Controlador sub-tab contents."""
     body_w = int(layout["body_w"])
     body_h = int(layout["body_h"])
-    main_w = max(320, body_w - RIGHT_WIDTH - GAP)
+    right_w = rendering.px(RIGHT_WIDTH)
+    gap = rendering.px(GAP)
+    main_w = max(rendering.px(320), body_w - right_w - gap)
     dpg.configure_item(PANEL, width=main_w, height=body_h)
-    dpg.configure_item(PARAMS_PANEL, width=RIGHT_WIDTH, height=body_h)
-    inner_w = main_w - PANEL_MARGIN
+    dpg.configure_item(PARAMS_PANEL, width=right_w, height=body_h)
+    inner_w = main_w - rendering.px(PANEL_MARGIN)
     _update_tuning_controls(state, now, inner_w, body_h)
     _update_results(state, now)

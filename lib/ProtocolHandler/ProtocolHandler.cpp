@@ -331,7 +331,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
  */
 void ProtocolHandler::handle_command(const RobotCommand & cmd)
 {
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "CMD robot=%d ts=%lu x=%d y=%d vx=%d vy=%d w=%d kick=%d",
              cmd.header.robot_id,
              (unsigned long)cmd.header.timestamp,
@@ -350,7 +350,7 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
 
 void ProtocolHandler::handle_TeamCommand(const SingleRobotVelCmd & r_comand, const Header & hdr)
 {
-    ESP_LOGI(TAG,
+    ESP_LOGD(TAG,
              "r_command vx=%d vy=%d vw=%d kick=%d",
              r_comand.vx,
              r_comand.vy,
@@ -467,7 +467,7 @@ void ProtocolHandler::update()
             m_wheel_ctrl->set_target_velocities(setpoint.wheel_velocity_rad_s);
         if (kick_requested)
         {
-            ESP_LOGI(TAG,
+            ESP_LOGD(TAG,
                      "[KICK-FLOW] cmd_kick=%u seq=%lu | ready=%d fault=%d V=%u | "
                      "lifecycle=%d sev=%d | goal_inh=%d sp_inh=%d sp_kick=%u",
                      m_latest_command.command.kick_velocity,
@@ -576,7 +576,7 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
  */
 void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest & telreq)
 {
-    ESP_LOGI(TAG, "Answering telemetry request, robot: %d", telreq.header.robot_id);
+    ESP_LOGD(TAG, "Answering telemetry request, robot: %d", telreq.header.robot_id);
 
     Telemetry::get_instance().send(telreq.header.timestamp);
 }

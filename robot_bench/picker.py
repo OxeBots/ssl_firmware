@@ -95,14 +95,14 @@ def _add_row(index):
     """Create one port row; the caller rebuilds rows when the port count changes."""
     with dpg.group(tag=f"picker_row_{index}", parent="picker_rows"):
         with dpg.group(horizontal=True):
-            rendering.add_text("", "label", tag=f"picker_device_{index}", wrap=230)
-            dpg.add_spacer(width=10)
-            rendering.add_text("", "tiny", config.TEXT_DIM, tag=f"picker_desc_{index}", wrap=320)
-            dpg.add_spacer(width=10)
+            rendering.add_text("", "label", tag=f"picker_device_{index}", wrap=rendering.px(230))
+            dpg.add_spacer(width=rendering.px(10))
+            rendering.add_text("", "tiny", config.TEXT_DIM, tag=f"picker_desc_{index}", wrap=rendering.px(320))
+            dpg.add_spacer(width=rendering.px(10))
             dpg.add_button(
                 label="Conectar USB", tag=f"picker_connect_{index}", callback=_on_connect, user_data=index
             )
-            rendering.add_text("", "small", config.TEXT_DIM, tag=f"picker_status_{index}", wrap=140)
+            rendering.add_text("", "small", config.TEXT_DIM, tag=f"picker_status_{index}", wrap=rendering.px(140))
         dpg.add_separator()
 
 
@@ -110,14 +110,18 @@ def _add_radio_row(index, device, description):
     """Create one adapter row; the caller rebuilds rows when the list changes."""
     with dpg.group(tag=f"picker_radio_row_{index}", parent="picker_radio_rows"):
         with dpg.group(horizontal=True):
-            rendering.add_text(device, "label", config.TEXT, tag=f"picker_radio_device_{index}", wrap=230)
-            dpg.add_spacer(width=10)
-            rendering.add_text(description, "tiny", config.TEXT_DIM, tag=f"picker_radio_desc_{index}", wrap=320)
-            dpg.add_spacer(width=10)
+            rendering.add_text(
+                device, "label", config.TEXT, tag=f"picker_radio_device_{index}", wrap=rendering.px(230)
+            )
+            dpg.add_spacer(width=rendering.px(10))
+            rendering.add_text(
+                description, "tiny", config.TEXT_DIM, tag=f"picker_radio_desc_{index}", wrap=rendering.px(320)
+            )
+            dpg.add_spacer(width=rendering.px(10))
             dpg.add_button(
                 label="Conectar rádio",
                 tag=f"picker_radio_connect_{index}",
-                width=130,
+                width=rendering.px(130),
                 callback=_connect_radio,
                 user_data=device,
             )
@@ -128,14 +132,16 @@ def _add_discovered_row(index, telemetry):
     """Create one discovery result row; its button connects to that robot."""
     with dpg.group(tag=f"picker_radio_found_row_{index}", parent="picker_radio_found"):
         with dpg.group(horizontal=True):
-            rendering.add_text(discovered_label(telemetry), "label", config.TEXT, wrap=90)
-            dpg.add_spacer(width=10)
-            rendering.add_text(discovered_detail(telemetry), "tiny", config.TEXT_DIM, wrap=380)
-            dpg.add_spacer(width=10)
+            rendering.add_text(discovered_label(telemetry), "label", config.TEXT, wrap=rendering.px(90))
+            dpg.add_spacer(width=rendering.px(10))
+            rendering.add_text(
+                discovered_detail(telemetry), "tiny", config.TEXT_DIM, wrap=rendering.px(380)
+            )
+            dpg.add_spacer(width=rendering.px(10))
             dpg.add_button(
                 label="Conectar rádio",
                 tag=f"picker_radio_found_connect_{index}",
-                width=130,
+                width=rendering.px(130),
                 callback=_connect_discovered,
                 user_data=telemetry,
             )
@@ -149,14 +155,15 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
     _on_connect_radio = on_connect_radio
     _on_discover_radio = on_discover_radio
     _on_back = on_back
+    button_w = rendering.px(130)
     with dpg.window(
         tag=WINDOW,
         no_title_bar=True,
         no_resize=True,
         no_move=True,
         no_collapse=True,
-        width=WIDTH,
-        height=HEIGHT,
+        width=rendering.px(WIDTH),
+        height=rendering.px(HEIGHT),
         show=False,
     ):
         rendering.add_text(config.APP_NAME, "big", tag="picker_title")
@@ -169,11 +176,11 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
         rendering.add_text("Rádio nRF24L01", "title", tag="picker_radio_title")
         with dpg.group(horizontal=True):
             rendering.add_text("Robô alvo", "label")
-            dpg.add_spacer(width=10)
+            dpg.add_spacer(width=rendering.px(10))
             dpg.add_input_int(
                 tag="picker_radio_robot",
                 default_value=0,
-                width=90,
+                width=rendering.px(90),
                 min_value=0,
                 max_value=RADIO_ROBOT_MAX,
                 min_clamped=True,
@@ -185,14 +192,14 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
             dpg.add_button(
                 label="Buscar robôs",
                 tag="picker_radio_discover",
-                width=130,
+                width=button_w,
                 callback=_discover_radio,
             )
             rendering.add_text(
-                "", "tiny", config.TEXT_DIM, tag="picker_radio_scan", wrap=540, show=False
+                "", "tiny", config.TEXT_DIM, tag="picker_radio_scan", wrap=rendering.px(540), show=False
             )
         with dpg.child_window(
-            tag="picker_radio_found", width=-1, height=DISCOVERY_CHILD_HEIGHT, show=False
+            tag="picker_radio_found", width=-1, height=rendering.px(DISCOVERY_CHILD_HEIGHT), show=False
         ):
             pass
         rendering.add_text(DISCOVERY_EMPTY, "small", config.TEXT_DIM, tag="picker_radio_none", show=False)
@@ -200,7 +207,7 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
             DISCOVERY_HINT,
             "tiny",
             config.TEXT_DIM,
-            wrap=720,
+            wrap=rendering.px(720),
             tag="picker_radio_discovery_hint",
             show=False,
         )
@@ -228,12 +235,12 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
             dpg.add_button(
                 tag="picker_back",
                 label="Voltar",
-                width=130,
+                width=button_w,
                 callback=on_back,
                 show=False,
             )
-            dpg.add_button(label="Buscar portas", callback=on_rescan, width=130)
-            dpg.add_button(label="Sair", callback=on_quit, width=130)
+            dpg.add_button(label="Buscar portas", callback=on_rescan, width=button_w)
+            dpg.add_button(label="Sair", callback=on_quit, width=button_w)
         rendering.add_text("Sem resposta? Feche outros monitores seriais.", "tiny", config.TEXT_DIM)
 
 

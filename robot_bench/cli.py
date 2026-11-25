@@ -14,10 +14,16 @@ def main(argv=None):
     parser.add_argument("--baud", type=int, default=115200, help="taxa de transmissão serial (padrão 115200)")
     parser.add_argument("--demo", action="store_true", help="executar com dados sintéticos, sem hardware")
     parser.add_argument(
-        "--width", type=int, default=config.DEFAULT_WINDOW[0], help="largura inicial da janela (redimensionável)"
+        "--width", type=int, default=None, help="largura inicial da janela (padrão: ajustada à tela)"
     )
     parser.add_argument(
-        "--height", type=int, default=config.DEFAULT_WINDOW[1], help="altura inicial da janela (redimensionável)"
+        "--height", type=int, default=None, help="altura inicial da janela (padrão: ajustada à tela)"
+    )
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=None,
+        help="fator de escala da interface, ex.: 1.5 ou 2.0 (padrão: automático pela tela)",
     )
     parser.add_argument(
         "--tab",

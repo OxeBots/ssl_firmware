@@ -156,7 +156,7 @@ def connection_color(value):
 
 def _add_rows(panel, rows):
     with dpg.table(tag=panel + "_table", header_row=False, policy=dpg.mvTable_SizingStretchProp):
-        dpg.add_table_column(width_fixed=True, init_width_or_weight=150)
+        dpg.add_table_column(width_fixed=True, init_width_or_weight=rendering.px(150))
         dpg.add_table_column(width_stretch=True, init_width_or_weight=1.0)
         for label, part in rows:
             with dpg.table_row():
@@ -175,7 +175,7 @@ def build(state):
             _add_rows(SYSTEM_PANEL, SYSTEM_ROWS)
         with rendering.panel("Segurança", SAFETY_PANEL, width=1, height=1):
             _add_rows(SAFETY_PANEL, SAFETY_ROWS)
-            dpg.add_spacer(height=6)
+            dpg.add_spacer(height=rendering.px(6))
             dpg.add_separator()
             rendering.add_text("Avisos ativos", "title", config.TEXT)
             rendering.add_text("Aguardando dados de saúde", "small", config.TEXT_DIM, tag=ERROR_LIST)
@@ -183,10 +183,10 @@ def build(state):
             rendering.add_text("Alimentação", "small", config.TEXT_DIM)
             rendering.add_text("—", "big", config.TEXT_DIM, tag=SUPPLY_VALUE)
             rendering.add_text("Aguardando dados de saúde", "small", config.TEXT_DIM, tag=SUPPLY_STATUS)
-            dpg.add_spacer(height=4)
+            dpg.add_spacer(height=rendering.px(4))
             dpg.add_separator()
             _add_rows(POWER_PANEL, POWER_ROWS)
-            dpg.add_spacer(height=4)
+            dpg.add_spacer(height=rendering.px(4))
             rendering.add_text("A: acelerômetro · G: giroscópio · M: magnetômetro", "micro", config.TEXT_DIM)
 
 
@@ -244,9 +244,10 @@ def _update_power(state, health):
 
 def update(state, layout, now):
     """Refresh the Health tab contents."""
-    panel_w = max(240, (layout["body_w"] - 2 * GAP) // 3)
+    gap = rendering.px(GAP)
+    panel_w = max(rendering.px(240), (layout["body_w"] - 2 * gap) // 3)
     panel_h = layout["body_h"]
-    inner_w = panel_w - 34
+    inner_w = panel_w - rendering.px(34)
     health = live_health(state)
     for panel in (SYSTEM_PANEL, SAFETY_PANEL, POWER_PANEL):
         dpg.configure_item(panel, width=panel_w, height=panel_h)

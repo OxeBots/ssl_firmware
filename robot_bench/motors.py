@@ -169,14 +169,16 @@ def sweep_hint_text(state):
     return f"Varredura ±{state.max_rpm:.0f} RPM · a cada 1 s"
 
 
-def sidebar_height(body_h, tab_bar_h=SIDEBAR_TAB_HEIGHT):
+def sidebar_height(body_h, tab_bar_h=None):
     """Panel height left under the sidebar tab bar."""
-    return max(MIN_SIDEBAR_HEIGHT, int(body_h) - int(tab_bar_h))
+    bar_h = rendering.px(SIDEBAR_TAB_HEIGHT) if tab_bar_h is None else int(tab_bar_h)
+    return max(rendering.px(MIN_SIDEBAR_HEIGHT), int(body_h) - bar_h)
 
 
-def view_height(body_h, tab_bar_h=MOTORS_VIEW_TAB_HEIGHT):
+def view_height(body_h, tab_bar_h=None):
     """Content height left under the Motors internal tab bar."""
-    return max(MIN_VIEW_HEIGHT, int(body_h) - int(tab_bar_h))
+    bar_h = rendering.px(MOTORS_VIEW_TAB_HEIGHT) if tab_bar_h is None else int(tab_bar_h)
+    return max(rendering.px(MIN_VIEW_HEIGHT), int(body_h) - bar_h)
 
 
 def card_plot_height(card_h, top_h, footer_h):
@@ -185,8 +187,8 @@ def card_plot_height(card_h, top_h, footer_h):
     top_h runs from the card top to the chart top; footer_h is the encoder
     status and legend row under the chart.
     """
-    chrome = CARD_ITEM_GAP + CARD_PADDING_Y + CARD_BORDER
-    return max(MIN_PLOT_HEIGHT, int(card_h) - int(top_h) - int(footer_h) - chrome)
+    chrome = rendering.px(CARD_ITEM_GAP) + rendering.px(CARD_PADDING_Y) + CARD_BORDER
+    return max(rendering.px(MIN_PLOT_HEIGHT), int(card_h) - int(top_h) - int(footer_h) - chrome)
 
 
 def active_view():
@@ -318,20 +320,23 @@ def _create_themes():
                     dpg.mvThemeCol_Text: config.TEXT,
                 },
                 styles={
-                    dpg.mvStyleVar_WindowPadding: (float(CARD_PADDING_X), float(CARD_PADDING_Y)),
+                    dpg.mvStyleVar_WindowPadding: (
+                        float(rendering.px(CARD_PADDING_X)),
+                        float(rendering.px(CARD_PADDING_Y)),
+                    ),
                     # The internal Motors tab bar costs each card two rows of
                     # height; tighter item gaps keep the overview unclipped.
-                    dpg.mvStyleVar_ItemSpacing: (8.0, float(CARD_ITEM_GAP)),
+                    dpg.mvStyleVar_ItemSpacing: (float(rendering.px(8)), float(rendering.px(CARD_ITEM_GAP))),
                     # Text rows are padded by the frame padding; the card keeps
                     # it small so the speed chart gets the height instead.
-                    dpg.mvStyleVar_FramePadding: (10.0, 1.0),
+                    dpg.mvStyleVar_FramePadding: (float(rendering.px(10)), float(rendering.px(1))),
                     dpg.mvStyleVar_ChildBorderSize: (border_size,),
-                    dpg.mvStyleVar_ChildRounding: (8.0,),
+                    dpg.mvStyleVar_ChildRounding: (float(rendering.px(8)),),
                 },
             )
         )
     _TABLE_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 0.0)},
+        styles={dpg.mvStyleVar_CellPadding: (float(rendering.px(2)), 0.0)},
         component=dpg.mvTable,
     )
     _BAR_THEME = rendering.create_theme(
@@ -355,10 +360,10 @@ def _create_themes():
             dpg.mvThemeCol_Text: config.TEXT,
         },
         styles={
-            dpg.mvStyleVar_WindowPadding: (16.0, 10.0),
-            dpg.mvStyleVar_ItemSpacing: (8.0, 2.0),
+            dpg.mvStyleVar_WindowPadding: (float(rendering.px(16)), float(rendering.px(10))),
+            dpg.mvStyleVar_ItemSpacing: (float(rendering.px(8)), float(rendering.px(2))),
             dpg.mvStyleVar_ChildBorderSize: (1.0,),
-            dpg.mvStyleVar_ChildRounding: (8.0,),
+            dpg.mvStyleVar_ChildRounding: (float(rendering.px(8)),),
         },
     )
     _SWEEP_THEMES.extend(
@@ -414,9 +419,9 @@ def _build_card(index):
                         rendering.add_text("—", "tiny", config.TEXT, tag=_part(index, part))
         dpg.bind_item_theme(_part(index, "header"), _TABLE_THEME)
         dpg.bind_item_theme(_part(index, "details"), _TABLE_THEME)
-        dpg.add_progress_bar(tag=_part(index, "bar"), width=1, height=BAR_HEIGHT, default_value=0.0)
+        dpg.add_progress_bar(tag=_part(index, "bar"), width=1, height=rendering.px(BAR_HEIGHT), default_value=0.0)
         dpg.bind_item_theme(_part(index, "bar"), _BAR_THEME)
-        rendering.add_plot(_part(index, "plot"), height=MIN_PLOT_HEIGHT, width=1)
+        rendering.add_plot(_part(index, "plot"), height=rendering.px(MIN_PLOT_HEIGHT), width=1)
         rendering.add_series(_part(index, "plot"), 0, config.VELOCITY_COLOR)
         rendering.add_series(_part(index, "plot"), 1, config.TARGET_COLOR)
         rendering.add_series(_part(index, "plot"), 2, config.PULSE_COLOR)
@@ -453,7 +458,10 @@ def _build_control(state):
     def on_arrow_step(_sender, app_data, _user_data=None):
         state.arrow_step_rpm = float(max(1, int(app_data)))
 
-    with rendering.panel(f"Controle · M{state.selected_wheel + 1}", CONTROL_PANEL, width=CONTROL_WIDTH, height=1):
+    button_h = rendering.px(BUTTON_HEIGHT)
+    with rendering.panel(
+        f"Controle · M{state.selected_wheel + 1}", CONTROL_PANEL, width=rendering.px(CONTROL_WIDTH), height=1
+    ):
         rendering.add_text("Alvo da roda selecionada", "small", config.TEXT_DIM)
         rendering.add_text("— RPM", "big", config.ACCENT, tag=CONTROL_TARGET)
         rendering.add_text(max_rpm_text(state)[0], "tiny", max_rpm_text(state)[1], tag=MAX_RPM_TEXT)
@@ -465,7 +473,7 @@ def _build_control(state):
                     tag=ADJUST_BUTTONS[fraction],
                     label=adjust_label(fraction, state.max_rpm),
                     width=1,
-                    height=BUTTON_HEIGHT,
+                    height=button_h,
                     callback=on_adjust,
                     user_data=fraction,
                 )
@@ -476,7 +484,7 @@ def _build_control(state):
                     tag=ADJUST_BUTTONS[fraction],
                     label=adjust_label(fraction, state.max_rpm),
                     width=1,
-                    height=BUTTON_HEIGHT,
+                    height=button_h,
                     callback=on_adjust,
                     user_data=fraction,
                 )
@@ -485,14 +493,14 @@ def _build_control(state):
             tag=STOP_BUTTON,
             label="Parar motores · Espaço",
             width=1,
-            height=BUTTON_HEIGHT,
+            height=button_h,
             callback=on_stop,
         )
         dpg.add_button(
             tag=SWEEP_BUTTON,
             label="Varredura desligada · W",
             width=1,
-            height=BUTTON_HEIGHT,
+            height=button_h,
             callback=on_sweep,
         )
         rendering.add_text(sweep_hint_text(state), "tiny", config.TEXT_DIM, tag=SWEEP_HINT)
@@ -501,7 +509,7 @@ def _build_control(state):
             dpg.add_input_int(
                 tag=ARROW_STEP_INPUT,
                 default_value=int(state.arrow_step_rpm),
-                width=ARROW_STEP_WIDTH,
+                width=rendering.px(ARROW_STEP_WIDTH),
                 min_value=1,
                 max_value=500,
                 min_clamped=True,
@@ -528,7 +536,9 @@ def _build_position(state):
     def on_stop(_sender, _app_data, _user_data=None):
         state.stop_position()
 
-    with rendering.panel("Posição das rodas", POSITION_PANEL, width=CONTROL_WIDTH, height=1):
+    input_w = rendering.px(POSITION_INPUT_WIDTH)
+    button_h = rendering.px(BUTTON_HEIGHT)
+    with rendering.panel("Posição das rodas", POSITION_PANEL, width=rendering.px(CONTROL_WIDTH), height=1):
         rendering.add_text("Gira a roda até o ângulo e mantém.", "small", config.TEXT_DIM)
         rendering.add_text("Relativo = delta · absoluto = desde o boot.", "tiny", config.TEXT_DIM)
         dpg.add_checkbox(
@@ -542,7 +552,7 @@ def _build_position(state):
             dpg.add_input_float(
                 tag=POSITION_MAX_RPM_INPUT,
                 default_value=config.POSITION_MAX_RPM,
-                width=POSITION_INPUT_WIDTH,
+                width=input_w,
                 step=0.0,
                 format="%.0f",
             )
@@ -550,8 +560,8 @@ def _build_position(state):
             dpg.add_button(
                 tag=POSITION_STOP_BUTTON,
                 label=STOP_POSITION_LABEL,
-                width=140,
-                height=BUTTON_HEIGHT,
+                width=rendering.px(140),
+                height=button_h,
                 callback=on_stop,
             )
             dpg.bind_item_theme(POSITION_STOP_BUTTON, _STOP_THEME)
@@ -570,14 +580,14 @@ def _build_position(state):
                     dpg.add_input_float(
                         tag=POSITION_ANGLE_INPUTS[wheel],
                         default_value=90.0,
-                        width=POSITION_INPUT_WIDTH,
+                        width=input_w,
                         step=0.0,
                         format="%.1f",
                     )
                     move_button = dpg.add_button(
                         tag=POSITION_MOVE_BUTTONS[wheel],
                         label="Girar",
-                        width=POSITION_BUTTON_WIDTH,
+                        width=rendering.px(POSITION_BUTTON_WIDTH),
                         callback=on_move(wheel),
                     )
                     rendering.bind_font(move_button, "tiny")
@@ -603,7 +613,11 @@ def _build_overview(state):
                     _build_position(state)
                 with dpg.tab(label="Ajuste", tag=SIDEBAR_TUNING):
                     _TUNING_EDITOR = wheel_tuning.Editor(
-                        state, CONTROL_WIDTH, BUTTON_HEIGHT, _TABLE_THEME, _STOP_THEME
+                        state,
+                        rendering.px(CONTROL_WIDTH),
+                        rendering.px(BUTTON_HEIGHT),
+                        _TABLE_THEME,
+                        _STOP_THEME,
                     )
             dpg.bind_item_theme(CONTROL_PANEL, _SIDEBAR_THEME)
             dpg.bind_item_theme(POSITION_PANEL, _SIDEBAR_THEME)
@@ -682,19 +696,21 @@ def _update_control(state, now):
     target = state.manual_targets[selected] if state.demo else state.wheels[selected]["tgt"]
     target_text = f"{target:+.0f} RPM" if live else "— RPM"
     rendering.set_text(CONTROL_TARGET, target_text, config.ACCENT if live else config.TEXT_DIM)
+    control_inner = rendering.px(CONTROL_INNER)
+    gap = rendering.px(GAP)
     for fraction, tag in ADJUST_BUTTONS.items():
         dpg.configure_item(
             tag,
-            width=(CONTROL_INNER - GAP) // 2,
+            width=(control_inner - gap) // 2,
             label=adjust_label(fraction, state.max_rpm),
         )
     limit_text, limit_color = max_rpm_text(state)
     rendering.set_text(MAX_RPM_TEXT, limit_text, limit_color)
     rendering.set_text(SWEEP_HINT, sweep_hint_text(state))
-    dpg.configure_item(STOP_BUTTON, width=CONTROL_INNER)
+    dpg.configure_item(STOP_BUTTON, width=control_inner)
     dpg.configure_item(
         SWEEP_BUTTON,
-        width=CONTROL_INNER,
+        width=control_inner,
         label=f"Varredura {'ligada' if state.sweep else 'desligada'} · W",
     )
     if state.sweep != _BOUND_SWEEP and _SWEEP_THEMES:
@@ -714,7 +730,7 @@ def _update_position(state, now, inner_w):
         dpg.configure_item(POSITION_MOVE_BUTTONS[wheel], enabled=move_enabled(state, now, wheel))
     busy = state.calibration_running() or state.tuning_running()
     dpg.configure_item(POSITION_ABSOLUTE_CHECK, enabled=not busy)
-    dpg.configure_item(POSITION_MAX_RPM_INPUT, width=POSITION_INPUT_WIDTH, enabled=not busy)
+    dpg.configure_item(POSITION_MAX_RPM_INPUT, width=rendering.px(POSITION_INPUT_WIDTH), enabled=not busy)
     dpg.configure_item(POSITION_STOP_BUTTON, enabled=position_stop_enabled(state, now))
     dpg.configure_item(POSITION_GRID, width=inner_w)
 
@@ -723,7 +739,7 @@ def update(state, layout, now):
     """Refresh the active Motors sub-tab contents."""
     global _RAW_VIEW_ACTIVE
     body_h = view_height(
-        layout["body_h"], rendering.item_height(MOTORS_VIEW_TABS) or MOTORS_VIEW_TAB_HEIGHT
+        layout["body_h"], rendering.item_height(MOTORS_VIEW_TABS) or rendering.px(MOTORS_VIEW_TAB_HEIGHT)
     )
     if active_view() == MOTORS_VIEW_RAW:
         if not _RAW_VIEW_ACTIVE:
@@ -735,9 +751,11 @@ def update(state, layout, now):
         _RAW_VIEW_ACTIVE = False
         raw.on_hide(state)
     _apply_selection(state.selected_wheel)
-    card_w = max(250, (layout["body_w"] - CONTROL_WIDTH - 2 * GAP) // 2)
-    card_h = max(180, (body_h - GAP) // 2)
-    inner_w = card_w - CARD_INNER_MARGIN
+    control_w = rendering.px(CONTROL_WIDTH)
+    gap = rendering.px(GAP)
+    card_w = max(rendering.px(250), (layout["body_w"] - control_w - 2 * gap) // 2)
+    card_h = max(rendering.px(180), (body_h - gap) // 2)
+    inner_w = card_w - rendering.px(CARD_INNER_MARGIN)
     for index, card in enumerate(CARD_TAGS):
         plot = _part(index, "plot")
         dpg.configure_item(card, width=card_w, height=card_h)
@@ -755,15 +773,15 @@ def update(state, layout, now):
             ),
         )
         _update_card(state, index, now)
-    panel_h = sidebar_height(body_h, rendering.item_height(SIDEBAR_TABS) or SIDEBAR_TAB_HEIGHT)
-    dpg.configure_item(CONTROL_PANEL, width=CONTROL_WIDTH, height=panel_h)
-    dpg.configure_item(POSITION_PANEL, width=CONTROL_WIDTH, height=panel_h)
+    panel_h = sidebar_height(body_h, rendering.item_height(SIDEBAR_TABS) or rendering.px(SIDEBAR_TAB_HEIGHT))
+    dpg.configure_item(CONTROL_PANEL, width=control_w, height=panel_h)
+    dpg.configure_item(POSITION_PANEL, width=control_w, height=panel_h)
     selected_tab = sidebar_tab()
     if selected_tab == SIDEBAR_TUNING:
-        dpg.configure_item(wheel_tuning.PANEL, width=CONTROL_WIDTH, height=panel_h)
+        dpg.configure_item(wheel_tuning.PANEL, width=control_w, height=panel_h)
         _TUNING_EDITOR.update(now)
     elif selected_tab == SIDEBAR_POSITION:
-        _update_position(state, now, CONTROL_INNER)
+        _update_position(state, now, rendering.px(CONTROL_INNER))
     else:
         _update_control(state, now)
 

@@ -199,6 +199,11 @@ class WheelController
         uint32_t duty = 0;
         // Keep a newly commanded direction until the driver has latched it.
         bool target_direction_pending = false;
+        // Coast-down guard when a motor driver ignores a high-speed direction flip.
+        bool reversal_coast = false;
+        uint32_t wrong_way_since_ms = 0;
+        float wrong_way_entry_speed_rad_s = 0.0f;
+        uint32_t reversal_coast_start_ms = 0;
     };
     std::array<WheelState, 4> m_wheel_state;
 
@@ -222,9 +227,6 @@ class WheelController
     std::array<float, 4> m_integral_duty = {};
     // Sign of the last nonzero target, used to reset the integral and kick.
     std::array<int8_t, 4> m_last_target_sign = {};
-    // Last requested target per wheel: a large magnitude change starts a new
-    // step, so the integrator is cleared before the new operating point.
-    std::array<float, 4> m_last_target_rad_s = {};
 
     // Per-wheel pulse modulation and travel feedback.
     struct LowSpeedState
@@ -321,6 +323,14 @@ class WheelController
     // ── Motor model constants (from the Arduino reference) ─────────────────
     static constexpr float STATIC_FRICTION_THRESHOLD = 175.0f;
     static constexpr float PWM_SLEW_RATE_PER_MS = 10.0f;
+    // Wrong-way latch-up guard: if a motor keeps spinning opposite to the
+    // commanded direction without braking, coast until its internal driver
+    // accepts the new direction.
+    static constexpr float REVERSAL_WRONG_WAY_RAD_S = 5.0f;
+    static constexpr uint32_t REVERSAL_LATCH_CHECK_MS = 60;
+    static constexpr float REVERSAL_MIN_BRAKE_RAD_S = 2.0f;
+    static constexpr float REVERSAL_REENGAGE_RAD_S = 8.0f;
+    static constexpr uint32_t REVERSAL_COAST_TIMEOUT_MS = 1500;
 
     // ── Start-up kick and integral action ─────────────────────────────────
     // The kick fires once per target engagement while the wheel is (nearly)
@@ -375,15 +385,15 @@ class WheelController
     // Speed guard: coast above the pulse operating range.
     static constexpr float LS_RUNAWAY_FACTOR = 3.0f;
     static constexpr float LS_RUNAWAY_FLOOR_RAD_S = 8.5f;
+    // Projected-speed surge threshold for intracycle coasting while mean speed
+    // is still below target.
+    static constexpr float LS_SURGE_COAST_FACTOR = 1.45f;
     static constexpr uint32_t LS_FAULT_RETRY_MS = 5000;
     static constexpr uint32_t LS_SNAPSHOT_MAX_AGE_US = 40000;
-    // A wheel cannot exceed the calibrated maximum on the bench; an angle delta
-    // that implies a much higher wheel rate is a sensor glitch.
-    static constexpr float LS_MAX_WHEEL_RATE_RAD_S = 25.0f;
-    // Successive controller snapshots can fall on either side of an encoder
-    // publication. Allow for one publication interval at the maximum rate.
-    static constexpr float ENCODER_DELTA_MARGIN_RAD = 0.011f;
-    static constexpr uint32_t LS_GLITCH_CONFIRM_US = 8000;
+    // Margin above one physical drivetrain step per sample interval so normal
+    // acceleration or analog wrap slew does not trip the glitch guard.
+    static constexpr float ENCODER_DELTA_MARGIN_RAD = 0.08f;
+    static constexpr uint32_t LS_GLITCH_CONFIRM_US = 80000;
 
     // The continuous law keeps its calibrated 100 Hz timing.
     static constexpr float PID_HZ = 100.0f;

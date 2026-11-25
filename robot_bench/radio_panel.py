@@ -149,15 +149,15 @@ def telemetry_rows(snapshot):
 
 
 def _text_width(text, font_name):
-    """Rendered width of one interface text, measured once."""
-    key = (text, font_name)
+    """Rendered width of one interface text, measured once per scale."""
+    key = (text, font_name, rendering.ui_scale())
     width = _TEXT_WIDTHS.get(key)
     if width is not None:
         return width
     font = rendering.font(font_name)
     measured = dpg.get_text_size(text, font=font) if font is not None else dpg.get_text_size(text)
     if not measured:
-        return len(text) * 7.0
+        return len(text) * rendering.pxf(7.0)
     _TEXT_WIDTHS[key] = width = float(measured[0])
     return width
 
@@ -167,15 +167,15 @@ def _create_themes():
     if _TABLE_THEME is not None:
         return
     _TABLE_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 1.0)},
+        styles={dpg.mvStyleVar_CellPadding: (float(rendering.px(2)), float(rendering.px(1)))},
         component=dpg.mvTable,
     )
     _TELEMETRY_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 2.0)},
+        styles={dpg.mvStyleVar_CellPadding: (float(rendering.px(2)), float(rendering.px(2)))},
         component=dpg.mvTable,
     )
     _MESSAGES_THEME = rendering.create_theme(
-        styles={dpg.mvStyleVar_CellPadding: (2.0, 0.0)},
+        styles={dpg.mvStyleVar_CellPadding: (float(rendering.px(2)), 0.0)},
         component=dpg.mvTable,
     )
     _ACTION_THEME = rendering.create_theme(
@@ -199,13 +199,13 @@ def _create_themes():
 def _build_header(on_disconnect):
     with dpg.group(horizontal=True):
         rendering.add_text("Rádio nRF24L01", "title", config.TEXT, tag=RADIO_TITLE)
-        dpg.add_spacer(tag=RADIO_HEADER_SPACER, width=8)
+        dpg.add_spacer(tag=RADIO_HEADER_SPACER, width=rendering.px(8))
         rendering.add_text("", "small", config.TEXT_DIM, tag=RADIO_STATUS)
         dpg.add_button(
             tag=RADIO_DISCONNECT_BUTTON,
             label="Desconectar",
-            width=DISCONNECT_WIDTH,
-            height=BUTTON_HEIGHT,
+            width=rendering.px(DISCONNECT_WIDTH),
+            height=rendering.px(BUTTON_HEIGHT),
             callback=on_disconnect,
         )
 
@@ -228,7 +228,7 @@ def _build_target_row(on_target_changed, on_stop):
         dpg.add_input_int(
             tag=RADIO_TARGET_INPUT,
             default_value=0,
-            width=80,
+            width=rendering.px(80),
             min_value=0,
             max_value=radio.ROBOT_ID_MAX,
             min_clamped=True,
@@ -239,8 +239,8 @@ def _build_target_row(on_target_changed, on_stop):
         dpg.add_button(
             tag=RADIO_STOP_BUTTON,
             label="Parar [Espaço]",
-            width=150,
-            height=BUTTON_HEIGHT,
+            width=rendering.px(150),
+            height=rendering.px(BUTTON_HEIGHT),
             callback=on_stop,
         )
         dpg.bind_item_theme(RADIO_STOP_BUTTON, _STOP_THEME)
@@ -255,7 +255,7 @@ def _build_keyboard_tab():
             dpg.add_input_int(
                 tag=RADIO_KEYBOARD_SPEED,
                 default_value=radio.KEYBOARD_MIN_RPM,
-                width=100,
+                width=rendering.px(100),
                 min_value=radio.KEYBOARD_MIN_RPM,
                 max_value=radio.KEYBOARD_MAX_RPM,
                 min_clamped=True,
@@ -280,6 +280,7 @@ def _build_keyboard_tab():
 
 
 def _build_command_panel(on_send_motion, on_kick):
+    button_h = rendering.px(BUTTON_HEIGHT)
     with dpg.tab(label="Manual", tag=RADIO_COMMAND_PANEL):
         rendering.add_text(
             "x, y (mm) · ângulo (0,01°) · vx, vy (mm/s) · w (0,01 rad/s)",
@@ -297,7 +298,7 @@ def _build_command_panel(on_send_motion, on_kick):
                         rendering.add_text(MOTION_LABELS[index], "tiny", config.TEXT_DIM)
                         dpg.add_input_int(
                             tag=RADIO_MOTION_INPUTS[index],
-                            width=80,
+                            width=rendering.px(80),
                             min_value=INT16_MIN,
                             max_value=INT16_MAX,
                             min_clamped=True,
@@ -309,7 +310,7 @@ def _build_command_panel(on_send_motion, on_kick):
             tag=RADIO_SEND_BUTTON,
             label="Enviar movimento contínuo",
             width=1,
-            height=BUTTON_HEIGHT,
+            height=button_h,
             callback=on_send_motion,
         )
         dpg.bind_item_theme(RADIO_SEND_BUTTON, _ACTION_THEME)
@@ -317,7 +318,7 @@ def _build_command_panel(on_send_motion, on_kick):
             rendering.add_text("Chute", "small", config.TEXT_DIM)
             dpg.add_input_int(
                 tag=RADIO_KICK_INPUT,
-                width=KICK_INPUT_WIDTH,
+                width=rendering.px(KICK_INPUT_WIDTH),
                 min_value=0,
                 max_value=255,
                 min_clamped=True,
@@ -329,12 +330,13 @@ def _build_command_panel(on_send_motion, on_kick):
                 tag=RADIO_KICK_BUTTON,
                 label="Chutar",
                 width=1,
-                height=BUTTON_HEIGHT,
+                height=button_h,
                 callback=on_kick,
             )
 
 
 def _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, on_factory_reset):
+    button_h = rendering.px(BUTTON_HEIGHT)
     with dpg.tab(label="Configuração", tag=RADIO_CONFIG_PANEL):
         rendering.add_text(
             "PERIGO: levante o robô e mantenha as rodas livres.",
@@ -348,7 +350,7 @@ def _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, o
             tag=RADIO_CONTROL_CAL_BUTTON,
             label="Calibração de controle",
             width=1,
-            height=BUTTON_HEIGHT,
+            height=button_h,
             callback=on_control_calibration,
         )
         dpg.bind_item_theme(RADIO_CONTROL_CAL_BUTTON, _ACTION_THEME)
@@ -356,14 +358,14 @@ def _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, o
             tag=RADIO_MAG_CAL_BUTTON,
             label="Calibrar magnetômetro",
             width=1,
-            height=BUTTON_HEIGHT,
+            height=button_h,
             callback=on_mag_calibration,
         )
         with dpg.group(horizontal=True):
             rendering.add_text("Novo ID", "small", config.TEXT_DIM)
             dpg.add_input_int(
                 tag=RADIO_NEW_ID_INPUT,
-                width=NEW_ID_INPUT_WIDTH,
+                width=rendering.px(NEW_ID_INPUT_WIDTH),
                 min_value=0,
                 max_value=radio.ROBOT_ID_MAX,
                 min_clamped=True,
@@ -374,7 +376,7 @@ def _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, o
                 tag=RADIO_SET_ID_BUTTON,
                 label="Definir ID",
                 width=1,
-                height=BUTTON_HEIGHT,
+                height=button_h,
                 callback=on_set_id,
             )
         dpg.add_separator()
@@ -384,7 +386,7 @@ def _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, o
             tag=RADIO_RESET_BUTTON,
             label="Reset de fábrica",
             width=1,
-            height=BUTTON_HEIGHT,
+            height=button_h,
             callback=on_factory_reset,
         )
         dpg.bind_item_theme(RADIO_RESET_BUTTON, _STOP_THEME)
@@ -480,49 +482,52 @@ def build(on_disconnect, stop_usb):
 
 
 def _apply_layout(body_w, body_h):
-    content_h = max(390, body_h - HEADER_HEIGHT - GAP)
+    gap = rendering.px(GAP)
+    panel_margin = rendering.px(PANEL_MARGIN)
+    content_h = max(rendering.px(390), body_h - rendering.px(HEADER_HEIGHT) - gap)
     telemetry_w = body_w * 45 // 100
-    drive_w = body_w - telemetry_w - GAP
-    telemetry_h = 312
+    drive_w = body_w - telemetry_w - gap
+    telemetry_h = rendering.px(312)
     dpg.configure_item(RADIO_DRIVE_PANEL, width=drive_w, height=content_h)
     dpg.configure_item(RADIO_TELEMETRY_PANEL, width=telemetry_w, height=telemetry_h)
-    dpg.configure_item(RADIO_MESSAGES_PANEL, width=telemetry_w, height=content_h - telemetry_h - GAP)
+    dpg.configure_item(RADIO_MESSAGES_PANEL, width=telemetry_w, height=content_h - telemetry_h - gap)
 
-    telemetry_inner = telemetry_w - PANEL_MARGIN
-    command_inner = drive_w - PANEL_MARGIN
+    telemetry_inner = telemetry_w - panel_margin
+    command_inner = drive_w - panel_margin
     dpg.configure_item(RADIO_TELEMETRY_TABLE, width=telemetry_inner)
-    value_w = max(80, telemetry_inner * 78 // 100 - 6)
+    value_w = max(rendering.px(80), telemetry_inner * 78 // 100 - rendering.px(6))
     for tag in RADIO_TELEMETRY_VALUES:
         dpg.configure_item(tag, wrap=value_w)
     dpg.configure_item(RADIO_COMMAND_UNITS, wrap=command_inner)
-    motion_w = max(60, command_inner // 4 - 10)
+    motion_w = max(rendering.px(60), command_inner // 4 - rendering.px(10))
     for tag in RADIO_MOTION_INPUTS:
         dpg.configure_item(tag, width=motion_w)
     dpg.configure_item(RADIO_SEND_BUTTON, width=command_inner)
     kick_fixed = (
         int(_text_width("Chute", "small"))
-        + KICK_INPUT_WIDTH
+        + rendering.px(KICK_INPUT_WIDTH)
         + int(_text_width("0–255", "tiny"))
-        + 3 * GAP
+        + 3 * gap
     )
-    dpg.configure_item(RADIO_KICK_BUTTON, width=max(80, command_inner - kick_fixed))
+    dpg.configure_item(RADIO_KICK_BUTTON, width=max(rendering.px(80), command_inner - kick_fixed))
     dpg.configure_item(RADIO_CONFIG_WARNING, wrap=command_inner)
     for tag in (RADIO_CONTROL_CAL_BUTTON, RADIO_MAG_CAL_BUTTON, RADIO_RESET_BUTTON):
         dpg.configure_item(tag, width=command_inner)
-    set_id_fixed = int(_text_width("Novo ID", "small")) + NEW_ID_INPUT_WIDTH + 2 * GAP
-    dpg.configure_item(RADIO_SET_ID_BUTTON, width=max(80, command_inner - set_id_fixed))
+    set_id_fixed = int(_text_width("Novo ID", "small")) + rendering.px(NEW_ID_INPUT_WIDTH) + 2 * gap
+    dpg.configure_item(RADIO_SET_ID_BUTTON, width=max(rendering.px(80), command_inner - set_id_fixed))
 
 
 def _update_header(snapshot, body_w):
     status, color = status_text(snapshot)
     rendering.set_text(RADIO_STATUS, status, color)
+    gap = rendering.px(GAP)
     fixed = (
         _text_width("Rádio nRF24L01", "title")
         + _text_width(status, "small")
-        + DISCONNECT_WIDTH
-        + 3 * GAP
+        + rendering.px(DISCONNECT_WIDTH)
+        + 3 * gap
     )
-    dpg.configure_item(RADIO_HEADER_SPACER, width=max(8, int(body_w - fixed)))
+    dpg.configure_item(RADIO_HEADER_SPACER, width=max(gap, int(body_w - fixed)))
 
 
 def _update_telemetry(snapshot):

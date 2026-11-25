@@ -18,13 +18,15 @@ static constexpr int MEAS_VELOCITY = 1;
 static constexpr double NOMINAL_UPDATE_HZ = 577.0;
 
 // Process-noise densities per second, diagonal [angle, velocity,
-// acceleration]. These are the former per-step variances (0.001, 0.1, 10) at
-// the nominal rate, so a different sample interval gives the same estimate.
-static constexpr double Q_PROCESS[STATE_DIM] = {0.577, 57.7, 5770.0};
+// acceleration]. Keeping angle process noise small lets encoder angle
+// innovations update velocity and acceleration directly instead of lagging
+// behind fast speed steps.
+static constexpr double Q_PROCESS[STATE_DIM] = {0.001, 50.0, 50000.0};
 
-// Measurement noise variances. The velocity variance covers one count of
-// window quantization plus the edge noise the counter picks up.
-static constexpr double R_MEAS_ANGLE = 0.1;
+// Measurement noise variances. Bench standstill noise on the magnetic encoder
+// is ~0.12 deg (~0.0007 rad on the wheel shaft); 0.005 rad^2 remains conservative
+// against wrap jitter while cutting step velocity lag by ~4x.
+static constexpr double R_MEAS_ANGLE = 0.005;
 static constexpr double R_MEAS_VELOCITY = 0.4;
 
 /**

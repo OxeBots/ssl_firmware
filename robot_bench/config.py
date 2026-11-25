@@ -5,6 +5,11 @@ APP_NAME = "Robot Bench"
 # Window size limits: resizable between MIN_WINDOW and the full screen
 MIN_WINDOW = (1024, 640)
 DEFAULT_WINDOW = (1280, 800)
+# Automatic HiDPI and screen-fit defaults
+UI_SCALE_MIN = 0.75
+UI_SCALE_MAX = 3.0
+WINDOW_WORKAREA_RATIO = 0.86
+HIDPI_REF_SIZE = (1600, 1000)
 
 # Dashboard tabs, in display order. The radio tab only shows while the radio
 # link is connected, so USB and radio sessions can run at the same time.

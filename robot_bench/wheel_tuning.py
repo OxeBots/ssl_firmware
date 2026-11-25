@@ -129,7 +129,7 @@ class Editor:
             with dpg.group(horizontal=True):
                 dpg.add_input_float(
                     tag=TARGET,
-                    width=75,
+                    width=rendering.px(75),
                     step=0.0,
                     format="%.1f",
                     on_enter=True,
@@ -152,7 +152,7 @@ class Editor:
                     height=button_height,
                     callback=self.reload,
                 )
-            rendering.add_text("Lendo controlador…", "micro", config.TEXT_DIM, tag=STATUS, wrap=222)
+            rendering.add_text("Lendo controlador…", "micro", config.TEXT_DIM, tag=STATUS, wrap=rendering.px(222))
             rendering.add_text("Ajustes em RAM até reiniciar.", "micro", config.TEXT_DIM)
             with dpg.child_window(height=-1, border=False):
                 rendering.add_text("Passe sobre o nome para ver o efeito.", "micro", config.TEXT_DIM)
@@ -160,7 +160,7 @@ class Editor:
                     BRANCHES,
                     tag=DIRECTION,
                     default_value=BRANCHES[0],
-                    width=126,
+                    width=rendering.px(126),
                     callback=self.select_direction,
                 )
                 with dpg.tab_bar(tag=SECTIONS):
@@ -196,7 +196,7 @@ class Editor:
                     tag = f"{PANEL}_label_{index}"
                     rendering.add_text(label, "tiny", config.TEXT, tag=tag)
                     with dpg.tooltip(tag):
-                        rendering.add_text(explanation, "small", config.TEXT, wrap=305)
+                        rendering.add_text(explanation, "small", config.TEXT, wrap=rendering.px(305))
                     rendering.add_text("—", "tiny", config.TEXT_DIM, tag=ACTIVE[index])
                     if index >= LAST_NUMERIC:
                         dpg.add_checkbox(tag=INPUTS[index])
