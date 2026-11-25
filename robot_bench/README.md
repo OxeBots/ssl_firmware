@@ -3,7 +3,10 @@
 Live diagnostics and motor controls for the SSL robot serial debug stream. Pairs with the
 main firmware built with `CONFIG_SERIAL_DEBUG=y` (menuconfig or
 `sdkconfig.defaults`), which streams binary debug frames over the serial
-console as long as a dashboard client keeps the connection alive. The connection picker can also link the dashboard to the
+console as long as a dashboard client keeps the connection alive. The dashboard
+also serves a local JSON HTTP API, so scripts and LLM agents can read the same
+telemetry and send the same commands while the window stays open (see
+**Local API** below). The connection picker can also link the dashboard to the
 robot over the nRF24L01 radio bridge, simultaneously with the USB debug link
 (see **Conexão por rádio** below).
 
@@ -20,6 +23,8 @@ python3 -m robot_bench --tab 3                # open on the ToF tab
 python3 -m robot_bench --tab 4                # open on the IMU tab
 python3 -m robot_bench --tab 5                # open on the Console tab
 python3 -m robot_bench --screenshot-dir tmp/gui   # save PNG frames
+python3 -m robot_bench --api-port 9000            # local API on another port
+python3 -m robot_bench --api-port 0 --api-socket ""   # local API disabled
 ```
 
 Requires `dearpygui` and `pyserial`. In the devcontainer, use `python -m robot_bench`;
@@ -172,6 +177,95 @@ Other radio controls:
 returns to the connection picker, otherwise the dashboard stays open with the
 USB link. The robot stops on its own once the commands stop.
 
+## Local API (automation and LLM agents)
+
+The dashboard owns the serial port, so it is the only process that talks to the
+robot. It also serves a small JSON HTTP API over that live state: reads return
+the latest telemetry frames, writes call exactly the commands the GUI controls
+call. A human keeps using the window while an agent reads frames, moves the
+wheels, runs calibrations and follows the console in parallel. Telemetry comes
+from the streams requested by the visible tab and sub-tab. Other frame
+endpoints return stale data or an empty result until their screen is opened.
+Attitude is returned by `/api/imu`.
+
+Two local-only listeners serve the same API:
+
+| Listener     | Address                    | Reaches                                                |
+| ------------ | -------------------------- | ------------------------------------------------------ |
+| TCP loopback | `http://127.0.0.1:8765`    | processes in the same machine or container             |
+| TCP (opt-in) | `--api-host 0.0.0.0`       | local-network machines; public/web peers are refused   |
+| Unix socket  | `tmp/robot_bench_api.sock` | host and container agents (bind-mounted repo), mode 0600 |
+
+The console prints both addresses at startup. The defaults need no flags: an
+agent on the host reaches a dashboard running inside the devcontainer through
+the same socket path in the bind-mounted repository, and processes in the
+container can use loopback TCP.
+
+Access is limited to this machine and the local network; the web cannot use the
+API. The TCP listener binds loopback by default, and `--api-host 0.0.0.0` opens
+it to the local network. Every request is checked before it reaches any command:
+the client must be loopback, a private (RFC1918) or link-local address, and the
+request must not carry browser or proxy headers (`Origin`, `Sec-Fetch-Site`,
+`X-Forwarded-For`, `Forwarded`); anything else gets HTTP 403. The Unix socket is
+created with mode 0600, so only the dashboard user can connect. There is still no
+authentication, so do not create port forwards, tunnels or reverse proxies to
+this port: they run inside the machine and are outside the API's control.
+
+```bash
+python3 -m robot_bench                                  # 127.0.0.1:8765 + socket
+python3 -m robot_bench --api-port 9000                  # another TCP port
+python3 -m robot_bench --api-host 0.0.0.0               # add the local network (web stays blocked)
+python3 -m robot_bench --api-port 0 --api-socket ""     # disable the API
+```
+
+```bash
+curl -s http://127.0.0.1:8765/api/state | jq .data.wheels
+curl -s --unix-socket tmp/robot_bench_api.sock http://localhost/api/snapshot
+curl -s -X POST http://127.0.0.1:8765/api/targets -d '{"wheel": 0, "rpm": 500}'
+curl -s -X POST http://127.0.0.1:8765/api/calibration -d '{"action": "start", "confirm": true}'
+curl -s 'http://127.0.0.1:8765/api/console?since=0&limit=200'
+```
+
+`GET /` lists every endpoint in JSON; HTTP clients get the same catalogue
+without reading this file. Wheel indices are 0..3 (M1..M4). Frame reads answer
+`{"ok": true, "live": ..., "age_s": ..., "data": ...}` (`/api/status` and
+`/api/console` answer their own fields): `live` follows the same freshness
+windows as the GUI (1 s for state, IMU, ToF and position; 0.5 s for raw; 1.5 s for
+health, calibration and tuning) and `data` is `null` before the first frame arrives.
+Errors answer `{"ok": false, "error": "..."}` with 400 (malformed body), 403
+(client outside the local network, or a browser/proxy request), 404 (unknown
+endpoint), 405 (unsupported method), 409 (command refused by the dashboard), 413 (body too
+large) or 500.
+
+| Method | Path                | Body                                                       | Content |
+| ------ | ------------------- | ---------------------------------------------------------- | ------- |
+| GET | `/api/status` | – | link state, frame counters, dashboard options, the calibrated `max_rpm` and `raw_encoder_wheel` |
+| GET | `/api/state` | – | four wheels (PWM, RPM, target, angle, FG pulse speed and count), encoder and pulse masks |
+| GET | `/api/health` | – | safety lifecycle, faults, supply voltage and heap |
+| GET | `/api/tof` | – | 8x8 distance grid in mm with the sensor status codes |
+| GET | `/api/imu` | – | acceleration (g), rotation (°/s) and magnetic field (mG) |
+| GET | `/api/calibration` | – | wiring calibration frame with maps, per-wheel encoder stages and `adc_min_raw`/`adc_max_raw` endpoints, plus `state_name`, `error_name`, `wheel_error_names` and `stage_names` |
+| GET | `/api/tuning` | – | control calibration frame plus `state_name`, `phase_name`, `error_name`, forward/reverse parameter/metric arrays, `max_rpm` and `wheel_max_rpm` |
+| GET | `/api/position` | – | position frame plus `error_name` |
+| GET | `/api/raw` | – | raw ADC/I2C encoder values, FG pulse deltas, EKF RPM and applied PWM |
+| POST | `/api/raw_encoder` | `{"wheel": 0..3}` or `{"wheel": null}` | focus the raw I2C read on one wheel's encoder (null releases) |
+| GET | `/api/console` | `?limit=100&since=N` | console lines; `since` returns only newer lines, `next_since` is the next cursor |
+| GET | `/api/snapshot` | `?console=100` | status and every frame in one call |
+| POST | `/api/targets` | `{"targets_rpm": [r1, r2, r3, r4]}` or `{"wheel": 0, "rpm": 500}` | set wheel targets, clamped to the calibrated limit |
+| POST | `/api/stop` | – | zero every wheel target and cancel the sweep |
+| POST | `/api/sweep` | `{"enabled": true}` | dashboard square sweep on the selected wheel |
+| POST | `/api/calibration` | `{"action": "start", "confirm": true}` or `{"action": "stop"}` | wiring calibration |
+| POST | `/api/tuning` | `{"action": "start", "confirm": true}` or `{"action": "stop"}` | control calibration |
+| POST | `/api/position` | `{"action": "move", "moves": [{"wheel": 0, "angle_deg": 45}], "absolute": false, "max_rpm": 300}` or `{"action": "stop"}` | wheel position moves |
+
+The safety rules are the same for both paths. A calibration start needs
+`"confirm": true` (the dashboard arms its own confirmation checkbox, so the
+human sees it), wheel targets are refused while a calibration runs or without a
+live link, and position moves are refused without calibrated encoders. Every API
+command is written to the Console tab, so the human sees what the agent did.
+Commands from the API and the window share one `BenchState`; the last writer wins
+and `/api/console?since=N` is the reliable way to follow a running routine.
+
 ## Posição das rodas
 
 The **Posição** sub-tab of the Motors sidebar commands wheel position moves. Enter an angle in
@@ -298,11 +392,15 @@ produce a 138 RPM limit.
 | `picker.py`    | First-screen connection picker: USB debug ports and radio adapters    |
 | `app.py`       | Dear PyGui viewport, main loop, phases (picker/dashboard/radio), input |
 | `cli.py`       | Argument parsing and wiring                                           |
+| `api.py`       | Local JSON HTTP API over the shared dashboard state                   |
 
 The view modules build Dear PyGui widgets once and refresh their values from
 `BenchState` every frame. `app.py` routes mouse and keyboard input through
 `perform_action`; commands stay in `BenchState`. The demo source produces
 telemetry and uses the same sweep timing as a real session.
+The API module runs its listeners in their own threads and reads/writes the same
+`BenchState`; it never opens the serial port itself.
+
 ## GUI checks
 
 Run inside the devcontainer, from `/workspaces/ssl_firmware`:
@@ -336,7 +434,9 @@ command routing; wheel position parsing, frame encoding, move/stop gating and ro
 tracking, target clamping and sweep amplitude, Motors fraction buttons/labels and the
 configurable arrow-key RPM step (Controle panel, default 10 RPM); the raw view helpers, per-wheel raw history, I2C sentinel handling, selector
 labels/widths and sync, distinct ADC/I2C plot colours, plot height, mux focus command/clearing,
-status and stale/disconnect clearing; and the radio link
+status and stale/disconnect clearing; and the local API (index, freshness payloads with the FG pulse
+fields and the raw frame, calibrated limit in the status, target clamping, console cursor,
+command validation, safety gating and both listeners); and the radio link
 (bitproto command, config and telemetry-request encoders cross-checked against generated
 bindings, telemetry decoding, adapter detection, discovery, command/request alternation,
 write spacing, session snapshots, panel formatting, and picker radio rows). Run a firmware

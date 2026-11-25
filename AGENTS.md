@@ -61,6 +61,16 @@ Test environments (`platformio.ini`): `test_logic` (kinematics, IMU orientation)
 
 - For ad-hoc scripts, `write` them to a temp file (e.g. `/tmp`), run, edit if needed, remove when done. Don't embed multi-line scripts in `bash` commands.
 
+## Robot Bench API
+
+While the `robot_bench` GUI runs it owns the serial port, so other processes must not open
+it. Use its local JSON HTTP API instead: loopback `http://127.0.0.1:8765` and the Unix
+socket `tmp/robot_bench_api.sock` in the workspace (reachable from the host even when the
+dashboard runs inside the devcontainer). It accepts only this machine and the local
+network: public peers and browser/proxy requests get HTTP 403, so never forward or tunnel the
+port to the web. `GET /` lists the endpoints; telemetry reads and motor/calibration commands
+are documented in `robot_bench/README.md` (Local API).
+
 ## Git
 
 - Only use git commands if the user requested.
