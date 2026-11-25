@@ -18,7 +18,7 @@ If you already cloned without submodules, fetch them manually:
 git submodule update --init --recursive
 ```
 
-### Start the devlopment environment
+### Start the development environment
 
 The project is fully configured for Docker-based development. You only need VS Code with the Dev Containers extension installed.
 
@@ -38,7 +38,8 @@ If you want to use AI coding assistants, edit `.devcontainer/devcontainer.json` 
   "INSTALL_GEMINI": "0",
   "INSTALL_QWEN": "0",
   "INSTALL_CODEX": "0",
-  "INSTALL_OPENCODE": "0"
+  "INSTALL_OPENCODE": "0",
+  "INSTALL_PI": "0"
 }
 ```
 
