@@ -9,6 +9,7 @@ import serial
 import serial.tools.list_ports
 
 from . import protocol as proto
+from . import radio
 
 # Give a board that is already rebooting time to answer the probe.
 PROBE_WINDOW_S = 4.5
@@ -19,10 +20,19 @@ PROBE_RESEND_S = 0.9
 SCAN_RETRY_S = 4.0
 
 
+def is_radio_adapter(port):
+    """True when a serial port object belongs to the nRF24L01 USB radio adapter."""
+    return port.vid == radio.ADAPTER_VID and port.pid == radio.ADAPTER_PID
+
+
 def list_candidate_ports():
     """All USB serial devices as (device, description) tuples."""
     candidates = []
     for port in serial.tools.list_ports.comports():
+        if is_radio_adapter(port):
+            # The radio bridge forwards every byte over the air, so probing it
+            # would transmit debug frames. It is opened by the radio link instead.
+            continue
         device = port.device
         if re.search(r"ttyUSB\d+|ttyACM\d+|usbserial|usbmodem", device) or re.match(r"COM\d+$", device):
             if "Bluetooth" not in (port.description or ""):

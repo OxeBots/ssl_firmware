@@ -6,14 +6,16 @@ APP_NAME = "Robot Bench"
 MIN_WINDOW = (1024, 640)
 DEFAULT_WINDOW = (1280, 800)
 
-# Dashboard tabs, in display order
+# Dashboard tabs, in display order. The radio tab only shows while the radio
+# link is connected, so USB and radio sessions can run at the same time.
 TAB_MOTORS = 0
 TAB_CALIBRATION = 1
 TAB_HEALTH = 2
 TAB_TOF = 3
 TAB_IMU = 4
 TAB_CONSOLE = 5
-TAB_TITLES = ("Motores", "Calibração", "Saúde", "ToF", "IMU", "Console")
+TAB_RADIO = 6
+TAB_TITLES = ("Motores", "Calibração", "Saúde", "ToF", "IMU", "Console", "Rádio")
 
 # Speed strip chart time span
 CHART_WINDOW_S = 12.0

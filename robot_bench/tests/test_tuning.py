@@ -101,7 +101,7 @@ class TuningHelperTests(unittest.TestCase):
             patch.object(calibration, "update"),
             patch.object(calibration, "active_subtab", return_value=calibration.SUBTAB_CONTROL),
         ):
-            app.refresh_dashboard(state, layout, time.monotonic(), 0, 0, 60)
+            app.refresh_dashboard(state, None, layout, time.monotonic(), 0, 0, 60)
 
         self.assertEqual(
             state.stream_mask,

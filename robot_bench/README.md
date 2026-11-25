@@ -3,14 +3,16 @@
 Live diagnostics and motor controls for the SSL robot serial debug stream. Pairs with the
 main firmware built with `CONFIG_SERIAL_DEBUG=y` (menuconfig or
 `sdkconfig.defaults`), which streams binary debug frames over the serial
-console as long as a dashboard client keeps the connection alive.
+console as long as a dashboard client keeps the connection alive. The connection picker can also link the dashboard to the
+robot over the nRF24L01 radio bridge, simultaneously with the USB debug link
+(see **Conexão por rádio** below).
 
 ## Run
 
 From the repository root (host or devcontainer):
 
 ```bash
-python3 -m robot_bench                        # connection picker, then dashboard
+python3 -m robot_bench                        # connection picker (USB or radio), then dashboard
 python3 -m robot_bench --port /dev/ttyUSB0    # skip the picker
 python3 -m robot_bench --demo                 # synthetic data, no hardware
 python3 -m robot_bench --tab 1                # open on the Calibração tab
@@ -58,7 +60,7 @@ switches between **Controle** (wheel target and sweep) and
 **Posição** (wheel position moves, see below). All keyboard shortcuts remain
 available: `[1-4]` select wheel, `[UP/DOWN]` adjust by the RPM step shown in Controle,
 `[LEFT/RIGHT]` +/-100 %, `[SPACE]` stop all motors, `[W]` square sweep between
-+/- the limit, `[F1-F6]` switch tabs, `[Q/ESC]` quit.
++/- the limit, `[F1-F7]` switch tabs (`F7` is Rádio while connected), `[Q/ESC]` quit.
 
 The **Dados brutos** sub-tab of Motors shows the unfiltered sensor path one wheel at a
 time, so the plots get most of the tab height. A selector row has one button per motor
@@ -111,6 +113,64 @@ magnetic field (mG). Each measurement axis has a scrolling 12-second history plo
 its current reading, and an automatic vertical scale. All twelve plots fit on the
 IMU tab together. Traces break at gaps in telemetry; orientation traces also
 break at angle wraparound. Stale readings show a dash while recent history remains visible.
+
+## Conexão por rádio (nRF24L01)
+
+The connection picker offers two links: a robot on a USB debug port
+(**Conectar USB**) or the robot over the nRF24L01 radio bridge (**Conectar
+rádio**). Both can be connected **at the same time**: the radio link appears as
+a **Rádio** tab in the dashboard, so the USB tabs keep driving the robot while
+the radio tab follows its communication. The **Conexões** button in the
+dashboard header reopens the picker to add, change or disconnect a link; the
+picker's **Voltar** button returns to the dashboard. The bridge is the CH340 USB
+adapter (`1a86:7523`) that `scripts/nrf24_usb.py` uses, and the picker detects
+it automatically. Only one process can hold the adapter, so close other radio
+tools first. The adapter is never probed as a robot port: every byte written to
+it is transmitted over the air.
+
+While the picker is open the dashboard auto-discovers the active robots: it
+sends a telemetry request to every robot id 0..10 over the radio and lists every
+robot that answers, with round-trip time, battery and error flags (**Buscar
+robôs** repeats the search). **Conectar rádio** on a result row already uses the
+discovered id, so the manual **Robô alvo** field is only needed when discovery
+is not usable. If no robot answers, the picker retries while it remains open.
+
+A fresh radio motion command (pose or velocity fields) takes control of the wheels.
+An all-zero radio command (**Parar**) or an expired command zeroes the radio targets
+and releases control. With both links connected, the USB dashboard can then send
+new targets until the next radio motion command.
+
+The radio link uses `proto/ssl_robot_protocol.bitproto`, like `scripts/nrf24_usb.py`.
+The session alternates commands and unicast `RobotTelemetryRequest` packets
+with at least 50 ms between adapter writes, for about 10 Hz each when replies
+arrive promptly. The firmware replies with `RobotTelemetry` and stops the
+wheels if commands expire after 250 ms.
+
+The **Rádio** tab shows up in the dashboard while the link is up. Open
+**Teclado** and select **Ativar teclado**. Hold **W/A/S/D** or the arrow keys
+to translate in the robot frame, and **Q/E** to turn. Two perpendicular keys
+move diagonally. The keyboard speed is in wheel RPM and starts at the
+50 RPM minimum. Release the keys or press **Space** to stop. The wheels also
+stop while the dashboard window is unfocused, and a key held through a focus
+change only drives again after it is released. Leaving the keyboard view
+disarms it. Motion also stops if fresh radio replies are lost.
+
+Other radio controls:
+
+- **Telemetria**: link state, target robot, round-trip time, TX/RX counters,
+  battery percentage, kicker voltage, yaw, pose and active warnings.
+- **Manual**: x, y, angle, vx, vy and w fields (mm, 0.01 degree, mm/s,
+  0.01 rad/s) with **Enviar movimento contínuo** and **Parar**, plus a one-shot kick
+  (1..255) with **Chutar**.
+- **Configuração do robô**: control calibration, magnetometer calibration, set
+  robot id and factory reset. Calibration and the id change need the **Robô
+  levantado · rodas livres** confirmation; the factory reset has its own
+  confirmation (it erases NVS and reboots the robot).
+- **Mensagens**: the link and command log.
+
+**Desconectar** stops the command stream; when only the radio is connected it
+returns to the connection picker, otherwise the dashboard stays open with the
+USB link. The robot stops on its own once the commands stop.
 
 ## Posição das rodas
 
@@ -233,8 +293,10 @@ produce a 138 RPM limit.
 | `health.py`    | System, safety, power and sensor status                              |
 | `sensing.py`   | Distance heatmap, orientation and sensor measurements                 |
 | `console.py`   | Console drawlist, history scrolling, text selection and clear button  |
-| `picker.py`    | First-screen connection picker: USB debug ports    |
-| `app.py`       | Dear PyGui viewport, main loop, phases (picker/dashboard), input |
+| `radio.py`     | nRF24L01 USB adapter transport, robot radio codec, command session    |
+| `radio_panel.py` | Radio link screen: telemetry, movement commands and robot configuration |
+| `picker.py`    | First-screen connection picker: USB debug ports and radio adapters    |
+| `app.py`       | Dear PyGui viewport, main loop, phases (picker/dashboard/radio), input |
 | `cli.py`       | Argument parsing and wiring                                           |
 
 The view modules build Dear PyGui widgets once and refresh their values from
@@ -260,7 +322,9 @@ the ADC min–max endpoint column (stored range vs range_mask), start/stop routi
 simulated routine frames (all REDUCED with plausible ADC ranges in the demo); layout
 space reservation and connection/status wording; picker ordering; console history
 clamping and anchoring, hit testing, selection text, clipboard copy, clearing and scrolling;
-wheel card status, digital pulse text and hit testing; the six USB tabs; health
+wheel card status, digital pulse text and hit testing; the seven-tab layout with the
+radio tab; the simultaneous USB + radio mode (tab visibility per link, combined header
+badge, radio panel placeholder, keep-port scanner exclusion, discovery rows); health
 freshness, lifecycle, flags, supply, IMU
 calibration and connection rows; history sample filtering, gap and wraparound
 breaks, automatic scaling, distance colours and rotation math; raw range transport
@@ -272,8 +336,11 @@ command routing; wheel position parsing, frame encoding, move/stop gating and ro
 tracking, target clamping and sweep amplitude, Motors fraction buttons/labels and the
 configurable arrow-key RPM step (Controle panel, default 10 RPM); the raw view helpers, per-wheel raw history, I2C sentinel handling, selector
 labels/widths and sync, distinct ADC/I2C plot colours, plot height, mux focus command/clearing,
-status and stale/disconnect clearing.
-
+status and stale/disconnect clearing; and the radio link
+(bitproto command, config and telemetry-request encoders cross-checked against generated
+bindings, telemetry decoding, adapter detection, discovery, command/request alternation,
+write spacing, session snapshots, panel formatting, and picker radio rows). Run a firmware
+build first to generate the bindings.
 
 ## Serial protocol
 

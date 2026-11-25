@@ -5,7 +5,30 @@ import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
-from robot_bench import discovery, protocol
+from robot_bench import app, discovery, protocol
+
+
+class RadioDiscoveryRetryTests(unittest.TestCase):
+    def test_retries_an_empty_scan_after_the_delay(self):
+        state = {
+            "session": None,
+            "devices": [("/dev/ttyUSB0", "Radio")],
+            "discovering": False,
+            "discovered": [],
+            "discovered_device": "/dev/ttyUSB0",
+            "discovery_retry_at": 10.0,
+        }
+        self.assertFalse(app.radio_discovery_due(state, 9.9))
+        self.assertTrue(app.radio_discovery_due(state, 10.0))
+        state["discovering"] = True
+        self.assertFalse(app.radio_discovery_due(state, 11.0))
+        state["discovering"] = False
+        state["discovered"] = [{"robot_id": 0}]
+        self.assertFalse(app.radio_discovery_due(state, 12.0))
+        state["devices"] = [("/dev/ttyUSB2", "Radio")]
+        self.assertTrue(app.radio_discovery_due(state, 12.0))
+        state["session"] = object()
+        self.assertFalse(app.radio_discovery_due(state, 13.0))
 
 
 class UsbDiscoveryTests(unittest.TestCase):

@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import dearpygui.dearpygui as dpg
 
-from robot_bench import app, config, console, demo, health, motors, picker, protocol, raw, rendering
+from robot_bench import app, config, console, demo, health, motors, picker, protocol, radio_panel, raw, rendering
 from robot_bench.app import compute_layout, connection_status, perform_action, status_line
 from robot_bench.state import BenchState
 
@@ -737,8 +737,9 @@ class PositionCommandTests(unittest.TestCase):
 
 
 class TabLayoutTests(unittest.TestCase):
-    def test_usb_tabs(self):
-        self.assertEqual(len(config.TAB_TITLES), 6)
+    def test_usb_tabs_plus_the_radio_tab(self):
+        self.assertEqual(len(config.TAB_TITLES), 7)
+        self.assertEqual(config.TAB_TITLES[-1], "Rádio")
         self.assertEqual(
             app.TAB_TAGS,
             (
@@ -748,6 +749,7 @@ class TabLayoutTests(unittest.TestCase):
                 "tab_tof",
                 "tab_imu",
                 "tab_console",
+                "tab_radio",
             ),
         )
         self.assertEqual(len(app.TAB_TAGS), len(config.TAB_TITLES))
@@ -757,6 +759,60 @@ class TabLayoutTests(unittest.TestCase):
         self.assertEqual(app.KEY_ACTIONS[dpg.mvKey_Down], ("adjust_rpm", -1.0))
         self.assertEqual(app.KEY_ACTIONS[dpg.mvKey_Right], ("adjust", 1.0))
         self.assertEqual(app.KEY_ACTIONS[dpg.mvKey_Left], ("adjust", -1.0))
+
+
+class DualConnectionTests(unittest.TestCase):
+    def test_tab_visibility_needs_the_matching_link(self):
+        self.assertFalse(app.tab_visible(config.TAB_MOTORS, radio_active=False, usb_active=False))
+        self.assertTrue(app.tab_visible(config.TAB_MOTORS, radio_active=False, usb_active=True))
+        self.assertFalse(app.tab_visible(config.TAB_RADIO, radio_active=False, usb_active=True))
+        self.assertTrue(app.tab_visible(config.TAB_RADIO, radio_active=True, usb_active=False))
+        self.assertTrue(app.tab_visible(config.TAB_RADIO, radio_active=True, usb_active=True))
+
+    def test_radio_connection_status_covers_the_link_states(self):
+        self.assertEqual(
+            app.radio_connection_status({"live": True, "connected": True, "rx_count": 5}),
+            ("Rádio ao vivo", config.OK_COLOR),
+        )
+        self.assertEqual(
+            app.radio_connection_status({"live": False, "connected": True, "rx_count": 5}),
+            ("Rádio sem resposta", config.BAD_COLOR),
+        )
+        self.assertEqual(
+            app.radio_connection_status({"live": False, "connected": True, "rx_count": 0}),
+            ("Rádio aguardando", config.TEXT_DIM),
+        )
+        self.assertEqual(
+            app.radio_connection_status({"live": False, "connected": False, "rx_count": 0}),
+            ("Rádio desconectado", config.BAD_COLOR),
+        )
+
+    def test_header_combines_both_links(self):
+        state = BenchState()
+        state.connected = "/dev/ttyUSB1"
+        state.streaming = True
+        state.last_state_t = time.monotonic()
+        radio_snapshot = {"live": True, "connected": True, "rx_count": 5}
+        text, color = app.connection_status(state, radio_snapshot)
+        self.assertIn("Ao vivo | /dev/ttyUSB1", text)
+        self.assertIn("Rádio ao vivo", text)
+        self.assertEqual(color, config.OK_COLOR)
+        text, _color = app.connection_status(state)
+        self.assertEqual(text, "Ao vivo | /dev/ttyUSB1")
+
+    def test_radio_only_header_shows_the_active_link(self):
+        snapshot = {"live": True, "connected": True, "rx_count": 5}
+        self.assertEqual(app.connection_status(BenchState(), snapshot), ("Rádio ao vivo", config.OK_COLOR))
+
+    def test_radio_panel_placeholder_snapshot_is_disconnected(self):
+        snapshot = radio_panel._empty_snapshot()
+        self.assertFalse(snapshot["live"])
+        self.assertFalse(snapshot["connected"])
+        self.assertIsNone(snapshot["telemetry"])
+        self.assertEqual(snapshot["messages"], [])
+        text, color = radio_panel.status_text(snapshot)
+        self.assertEqual(text, "Desconectado · reconectando")
+        self.assertEqual(color, config.BAD_COLOR)
 
 
 class HealthPanelTests(unittest.TestCase):

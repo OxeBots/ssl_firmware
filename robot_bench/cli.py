@@ -24,7 +24,7 @@ def main(argv=None):
         type=int,
         choices=range(len(config.TAB_TITLES)),
         default=0,
-        help="aba inicial: 0 motores, 1 calibração, 2 saúde, 3 ToF, 4 IMU, 5 console",
+        help="aba inicial: 0 motores, 1 calibração, 2 saúde, 3 ToF, 4 IMU, 5 console, 6 rádio (se conectado)",
     )
     parser.add_argument("--screenshot-dir", help="salvar um PNG da janela a cada --screenshot-period segundos")
     parser.add_argument("--screenshot-period", type=float, default=2.0, help="segundos entre capturas de tela")
