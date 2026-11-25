@@ -192,7 +192,7 @@ void test_motor_3()
 
 void test_all_motors_cw()
 {
-    const uint32_t test_duty = config::test::MAX_DUTY * 0.01;  // 15% speed for safety with 4 motors
+    const uint32_t test_duty = config::test::MAX_DUTY * 0.01;  // 1% speed for safety with 4 motors
     printf("\n=== Testing ALL Motors CW ===\n");
     printf("Press ENTER to start moving ALL motors CW...\n");
     wait_for_enter();
