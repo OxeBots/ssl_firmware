@@ -437,6 +437,8 @@ tuning::SettledSpeed MotorCalibration::measure_open_loop_speed(int wheel,
 
 bool MotorCalibration::wait_for_stop(int wheel, uint32_t start_us)
 {
+    constexpr float standstill_rad_s = 0.3f;
+    constexpr int64_t standstill_us = 10000;
     auto & estimator = WheelStateEstimator::get_instance();
     const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(STOP_TIMEOUT_MS) * 1000;
     int64_t stopped_since = 0;
@@ -454,15 +456,13 @@ bool MotorCalibration::wait_for_stop(int wheel, uint32_t start_us)
                       ((sample.stuck_analog_mask | sample.clamped_raw_mask) & bit) == 0 &&
                       sample.sample_us[i] > 0 &&
                       now - sample.sample_us[i] <= config::driver::BL48250_FB_WINDOW_MS * 1000 &&
-                      std::fabs(sample.smoothed_velocity_rad_s[i]) <=
-                        WheelController::DIRECTION_CHANGE_STANDSTILL_RAD_S;
+                      std::fabs(sample.smoothed_velocity_rad_s[i]) <= standstill_rad_s;
         }
         if (!stopped)
             stopped_since = 0;
         else if (stopped_since == 0)
             stopped_since = now;
-        else if (now - stopped_since >=
-                 static_cast<int64_t>(WheelController::DIRECTION_CHANGE_STANDSTILL_MS) * 1000)
+        else if (now - stopped_since >= standstill_us)
             return true;
         vTaskDelay(pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }

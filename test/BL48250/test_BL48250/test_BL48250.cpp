@@ -185,7 +185,7 @@ void test_set_duties_zero()
     BL48250::get_instance().deinit();
 }
 
-void test_reversal_cuts_duty_and_waits_for_standstill()
+void test_reversal_cuts_duty_for_timed_delay()
 {
     configure_driver();
     auto & driver = BL48250::get_instance();
@@ -195,20 +195,34 @@ void test_reversal_cuts_duty_and_waits_for_standstill()
     DELAY_MS(20);
 
     dirs[0] = config::driver::MOTOR_CCW;
-    driver.set_duties(duties, dirs, 1U);
-    DELAY_MS(20);
-    assert_motor_duty(0, 0, "reversal cuts duty before switching direction");
+    driver.update_duties(duties, dirs);
+    TEST_ASSERT_EQUAL_UINT32(0, driver.get_duty_cycles()[0]);
     assert_motor_direction(0, config::driver::MOTOR_CW, "direction held while disabling duty");
-    assert_motor_duty(1, duties[1], "unaffected motor keeps driving");
 
-    driver.set_duties(duties, dirs, 0);
-    assert_motor_direction(0, config::driver::MOTOR_CW, "direction held without standstill");
-    assert_motor_duty(0, 0, "duty held at zero without standstill");
+    const std::array<uint32_t, 4> latest_duties = {3, 4, 0, 0};
+    driver.update_duties(latest_duties, dirs);
+    assert_motor_direction(0, config::driver::MOTOR_CW, "direction held during reversal delay");
+    TEST_ASSERT_EQUAL_UINT32(0, driver.get_duty_cycles()[0]);
+    TEST_ASSERT_EQUAL_UINT32(latest_duties[1], driver.get_duty_cycles()[1]);
 
-    driver.set_duties(duties, dirs, 1U);
     DELAY_MS(20);
-    assert_motor_direction(0, config::driver::MOTOR_CCW, "direction latched at standstill");
-    assert_motor_duty(0, duties[0], "reverse duty applied after direction latched");
+    driver.update_duties(latest_duties, dirs);
+    DELAY_MS(20);
+    assert_motor_direction(0, config::driver::MOTOR_CCW, "direction latched after delay");
+    assert_motor_duty(0, latest_duties[0], "latest reverse duty applied");
+
+    dirs[0] = config::driver::MOTOR_CW;
+    driver.update_duties(duties, dirs);
+    assert_motor_direction(0, config::driver::MOTOR_CCW, "next reversal starts a new delay");
+    TEST_ASSERT_EQUAL_UINT32(0, driver.get_duty_cycles()[0]);
+
+    dirs[0] = config::driver::MOTOR_CCW;
+    driver.update_duties({}, dirs);
+    DELAY_MS(20);
+    dirs[0] = config::driver::MOTOR_CW;
+    driver.update_duties(duties, dirs);
+    assert_motor_direction(0, config::driver::MOTOR_CCW, "cancelled delay cannot be reused");
+    TEST_ASSERT_EQUAL_UINT32(0, driver.get_duty_cycles()[0]);
     driver.deinit();
 }
 
@@ -237,7 +251,7 @@ void setup()
     RUN_TEST(test_set_duties_ccw);
     RUN_TEST(test_set_duties_mixed);
     RUN_TEST(test_set_duties_zero);
-    RUN_TEST(test_reversal_cuts_duty_and_waits_for_standstill);
+    RUN_TEST(test_reversal_cuts_duty_for_timed_delay);
     RUN_TEST(test_destructor_reset_outputs);
     UNITY_END();
 }

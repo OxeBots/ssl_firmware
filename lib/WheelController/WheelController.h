@@ -68,9 +68,6 @@ class WheelController
     static constexpr float PULSE_HANDOFF_HYSTERESIS_FRACTION = 0.02f;
     static constexpr uint32_t CONTROL_PERIOD_US = 500;
     static constexpr float MAX_PULSE_DUTY = 700.0f;
-    // Keep the wheel below this speed before switching its direction output.
-    static constexpr float DIRECTION_CHANGE_STANDSTILL_RAD_S = 0.3f;
-    static constexpr uint32_t DIRECTION_CHANGE_STANDSTILL_MS = 10;
 
     // Position-control failure reasons, matching DBG_POSITION_ERROR_*.
     enum class PositionError : uint8_t
@@ -157,9 +154,6 @@ class WheelController
 
     std::array<float, 4> m_target_velocity_rad_s;
     std::array<float, 4> m_current_velocity_rad_s;
-    // Last time each wheel was seen turning faster than the standstill
-    // threshold; the direction-change gate uses it to confirm rest.
-    std::array<uint32_t, 4> m_standstill_since_ms = {};
     std::array<float, 4> m_pid_output_duty;  // signed PWM duty (±1023)
     // Common calibrated speed limit, applied before the control loop.
     float m_max_velocity_rad_s;
@@ -186,13 +180,13 @@ class WheelController
     uint32_t m_position_start_us;
     float m_position_max_velocity_rad_s;
 
-    // Per-wheel state: current signed PWM, used by the slew-rate limiter, and
-    // the direction requested while the wheel decelerates to a stop.
+    // Last output request, held between continuous control updates.
     struct WheelState
     {
         int8_t direction = 1;
         uint32_t duty = 0;
-        bool direction_pending = false;
+        // Keep a newly commanded direction until the driver has latched it.
+        bool target_direction_pending = false;
     };
     std::array<WheelState, 4> m_wheel_state;
 

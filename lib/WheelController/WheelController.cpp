@@ -569,7 +569,7 @@ void WheelController::reset_control_state_locked(int wheel)
         return;
     m_integral_duty[wheel] = 0.0f;
     m_kick_state[wheel] = KickState();
-    m_wheel_state[wheel].direction_pending = false;
+    m_wheel_state[wheel].target_direction_pending = false;
     m_last_target_sign[wheel] = 0;
     m_ls_fault_ms[wheel] = 0;
     m_ls_fault_sticky[wheel] = false;
@@ -838,7 +838,6 @@ void WheelController::control_task()
         std::array<uint8_t, 4> dirs;
         std::array<int32_t, 4> pulse_counts = {};
         bool pulse_counts_read = false;
-        uint8_t standstill_mask = 0;
 
         xSemaphoreTake(m_mutex, portMAX_DELAY);
 
@@ -854,6 +853,7 @@ void WheelController::control_task()
         const auto applied_duties = driver.get_duty_cycles();
         for (int i = 0; i < 4; ++i)
         {
+            WheelState & wheel = m_wheel_state[i];
             const int8_t latched_direction =
               latched_directions[i] == config::driver::MOTOR_CW ? 1 : -1;
             const size_t latched_branch = latched_direction > 0 ? 0 : 1;
@@ -865,9 +865,6 @@ void WheelController::control_task()
                             1.5f * m_parameters[i].continuous_min_rad_s[latched_branch],
                             std::fabs(current_rad_s[i])})
                 : config::driver::WHEEL_MAX_VEL_RAD;
-            if (m_wheel_state[i].direction != latched_direction)
-                m_wheel_state[i].direction_pending = false;
-            m_wheel_state[i].direction = latched_direction;
             // Negate because the estimator reports the encoder frame, where CW
             // rotation is negative; targets and the PID use the motor frame.
             float measured_rad_s = -current_rad_s[i];
@@ -922,20 +919,10 @@ void WheelController::control_task()
                 }
             }
 
-            // Track rest for the direction-change gate. A stale encoder sample
-            // or a stuck analog channel is not proof that the wheel stopped.
             const bool velocity_feedback_available =
               snapshot_fresh && (m_control_snapshot.smoothed_valid_mask & (1U << i)) != 0 &&
               ((stuck_analog_mask | clamped_raw_mask) & (1U << i)) == 0 &&
               std::isfinite(measured_rad_s);
-            if (!velocity_feedback_available ||
-                std::fabs(measured_rad_s) > DIRECTION_CHANGE_STANDSTILL_RAD_S)
-                m_standstill_since_ms[i] = now_ms;
-            const bool at_standstill =
-              velocity_feedback_available &&
-              (now_ms - m_standstill_since_ms[i]) >= DIRECTION_CHANGE_STANDSTILL_MS;
-            if (at_standstill)
-                standstill_mask |= static_cast<uint8_t>(1U << i);
 
             // ---- Resolve the target: position mode or a velocity target ----
             bool position = (m_position_active_mask & (1U << i)) != 0;
@@ -986,34 +973,11 @@ void WheelController::control_task()
             target_rad_s = std::clamp(target_rad_s, -m_max_velocity_rad_s, m_max_velocity_rad_s);
             const int target_sign = signf(target_rad_s);
 
-            // An opposite target cuts drive immediately, before the PWM slew
-            // limit or the velocity loop can delay the reversal.
-            if (target_sign != 0 && target_sign != latched_direction)
-            {
-                if (!m_wheel_state[i].direction_pending)
-                {
-                    m_pids[i].clear();
-                    reset_control_state_locked(i);
-                    m_wheel_state[i].direction_pending = true;
-                }
-                if (applied_duties[i] != 0)
-                {
-                    m_standstill_since_ms[i] = now_ms;
-                    standstill_mask &= static_cast<uint8_t>(~(1U << i));
-                }
-                duties[i] = 0;
-                dirs[i] = target_sign > 0 ? config::driver::MOTOR_CW : config::driver::MOTOR_CCW;
-                m_wheel_state[i].duty = 0;
-                m_pid_output_duty[i] = 0.0f;
-                continue;
-            }
-
             // A zero target disables drive while the wheel coasts. Evaluating
             // the velocity model here can sustain motion through its intercept.
             if (target_rad_s == 0.0f)
             {
                 duties[i] = 0;
-                m_pid_output_duty[i] = 0.0f;
                 const bool was_pulsing = m_low_speed[i].active;
                 m_pids[i].clear();
                 reset_control_state_locked(i);
@@ -1023,12 +987,9 @@ void WheelController::control_task()
                 // stopped: the next engagement starts with exactly one pulse.
                 if (std::fabs(measured_rad_s) < KICK_REARM_RAD_S)
                     m_kick_state[i].armed = true;
-                m_wheel_state[i].duty = 0;
-                // The module only accepts a DIR change at standstill.
-                if (at_standstill)
-                    m_wheel_state[i].direction = 1;
-                dirs[i] = (m_wheel_state[i].direction > 0) ? config::driver::MOTOR_CW
-                                                           : config::driver::MOTOR_CCW;
+                wheel.duty = 0;
+                wheel.direction = latched_direction;
+                dirs[i] = latched_directions[i];
                 continue;
             }
 
@@ -1039,27 +1000,25 @@ void WheelController::control_task()
             const bool legacy_law = parameters.ki < LEGACY_KI_THRESHOLD;
 
             // ---- Target sign bookkeeping ----
-            // A direction change starts from rest: drop the integral built in
-            // the old direction and the kick inherited from the old target.
-            // A new step (large magnitude change) must not inherit the
-            // integrator of the previous operating point.
+            // A large magnitude change clears the previous operating point's integral.
             if (std::fabs(target_rad_s - m_last_target_rad_s[i]) > 0.5f)
                 m_integral_duty[i] = 0.0f;
             m_last_target_rad_s[i] = target_rad_s;
-            if (target_sign != m_last_target_sign[i])
+            const bool target_direction_changed = target_sign != m_last_target_sign[i];
+            if (target_direction_changed)
             {
-                m_integral_duty[i] = 0.0f;
-                // A direction change is a new engagement: restart the low-speed
-                // pulse tracker and release a feedback-fault latch.
-                m_ls_fault_ms[i] = 0;
-                m_ls_fault_sticky[i] = false;
-                m_low_speed[i] = LowSpeedState();
-                m_kick_state[i] = KickState();
+                m_pids[i].clear();
+                reset_control_state_locked(i);
                 m_last_target_sign[i] = static_cast<int8_t>(target_sign);
-                // A fresh nonzero target is one new engagement: arm its kick.
-                if (target_sign != 0)
-                    m_kick_state[i].armed = true;
+                m_kick_state[i].armed = true;
+                // Start the driver's delay on the fast tick. Hold the new
+                // direction through the delay even if the controller asks to coast.
+                wheel.target_direction_pending = target_sign != latched_direction;
+                wheel.direction = static_cast<int8_t>(target_sign);
+                wheel.duty = 0;
             }
+            if (target_sign == latched_direction)
+                wheel.target_direction_pending = false;
 
             // ---- Feed-forward: the fitted static curve of the target
             // direction. Each direction has its own branch, so the intercept
@@ -1103,7 +1062,6 @@ void WheelController::control_task()
               continuous_gate * (low_speed.selected ? 1.0f + PULSE_HANDOFF_HYSTERESIS_FRACTION
                                                     : 1.0f - PULSE_HANDOFF_HYSTERESIS_FRACTION);
             const bool pulse_requested = LS_MODE_ENABLED && m_low_speed_mode_enabled && !position &&
-                                         target_sign != 0 && !m_wheel_state[i].direction_pending &&
                                          target_magnitude_abs <= gate;
             const bool pulse_eligible = pulse_requested && feedback_available;
             // Below the floor the continuous law inherits the legacy breakaway
@@ -1141,11 +1099,9 @@ void WheelController::control_task()
             // when it owns the wheel.
             if (!low_speed.active && !low_speed_blocked && !slow_tick)
             {
-                duties[i] = m_wheel_state[i].duty;
-                const bool reverse = m_wheel_state[i].direction < 0;
+                duties[i] = wheel.duty;
+                const bool reverse = wheel.direction < 0;
                 dirs[i] = reverse ? config::driver::MOTOR_CCW : config::driver::MOTOR_CW;
-                m_pid_output_duty[i] =
-                  reverse ? -static_cast<float>(duties[i]) : static_cast<float>(duties[i]);
                 continue;
             }
 
@@ -1631,7 +1587,7 @@ void WheelController::control_task()
                 // Correct an underestimated feedforward even when it leaves the
                 // wheel stalled far below the requested speed.
                 if (!legacy_law && !stall_frozen && !saturated_high && !saturated_low &&
-                    !m_wheel_state[i].direction_pending && velocity_feedback_available)
+                    wheel.direction == latched_direction && velocity_feedback_available)
                 {
                     // Keep the calibrated integral active up to maximum speed
                     // without accumulating a large correction during startup.
@@ -1656,8 +1612,10 @@ void WheelController::control_task()
             if (!pulse_eligible && !low_speed_blocked)
             {
                 float max_delta = PWM_SLEW_RATE_PER_MS * slow_dt_ms;
-                float current_signed_pwm = static_cast<float>(m_wheel_state[i].duty) *
-                                           static_cast<float>(m_wheel_state[i].direction);
+                const float current_signed_pwm =
+                  wheel.target_direction_pending
+                    ? 0.0f
+                    : static_cast<float>(applied_duties[i]) * latched_direction;
                 float pwm_diff = u - current_signed_pwm;
 
                 if (pwm_diff > max_delta)
@@ -1667,61 +1625,42 @@ void WheelController::control_task()
             }
 
             // ---- Write outputs ----
+            const bool follow_target_direction =
+              target_direction_changed || wheel.target_direction_pending || low_speed.active;
+            if (follow_target_direction && target_sign * u < 0.0f)
+                u = 0.0f;
             int abs_u = static_cast<int>(std::fabs(u));
             if (abs_u > 1023)
                 abs_u = 1023;
             const int8_t requested_direction =
-              low_speed.active ? (forward ? 1 : -1) : (abs_u == 0 ? latched_direction : signf(u));
+              follow_target_direction ? target_sign : (abs_u == 0 ? latched_direction : signf(u));
 
-            if (requested_direction == m_wheel_state[i].direction)
-                m_wheel_state[i].direction_pending = false;
-            else if (!m_wheel_state[i].direction_pending)
+            if (requested_direction != wheel.direction && requested_direction != latched_direction)
             {
-                // The motor module only accepts a DIR change with the rotor at
-                // rest: stop the wheel and hold it until the measured speed has
-                // stayed below the standstill threshold.
-                m_wheel_state[i].direction_pending = true;
                 m_pids[i].clear();
                 m_integral_duty[i] = 0.0f;
                 m_kick_state[i] = KickState();
                 m_low_speed[i] = LowSpeedState();
             }
 
-            if (m_wheel_state[i].direction_pending)
-            {
-                duties[i] = 0;
-                m_wheel_state[i].duty = 0;
-                m_pid_output_duty[i] = 0.0f;
-                if (at_standstill)
-                {
-                    // A released target leaves the direction to the zero-target
-                    // override; otherwise latch the direction the controller now
-                    // asks for and drive it on the next tick.
-                    if (target_sign != 0)
-                        m_wheel_state[i].direction = requested_direction;
-                    m_wheel_state[i].direction_pending = false;
-                    m_pids[i].clear();
-                    m_integral_duty[i] = 0.0f;
-                    m_kick_state[i] = KickState();
-                    m_low_speed[i] = LowSpeedState();
-                }
-                dirs[i] = (m_wheel_state[i].direction > 0) ? config::driver::MOTOR_CW
-                                                           : config::driver::MOTOR_CCW;
-                continue;
-            }
-
             duties[i] = static_cast<uint32_t>(abs_u);
             dirs[i] =
               (requested_direction > 0) ? config::driver::MOTOR_CW : config::driver::MOTOR_CCW;
-            m_pid_output_duty[i] = u;
-            m_wheel_state[i].duty = duties[i];
+            wheel.direction = requested_direction;
+            wheel.duty = duties[i];
         }
 
         if (report_ripple)
             m_last_rip_report_us = now_us;
+        driver.update_duties(duties, dirs);
+        const auto output_duties = driver.get_duty_cycles();
+        const auto output_directions = driver.get_directions();
+        for (size_t i = 0; i < output_duties.size(); ++i)
+        {
+            const float duty = static_cast<float>(output_duties[i]);
+            m_pid_output_duty[i] = output_directions[i] == config::driver::MOTOR_CW ? duty : -duty;
+        }
         xSemaphoreGive(m_mutex);
-
-        driver.set_duties(duties, dirs, standstill_mask);
 #if CONFIG_ENCODER_DIAG
         const uint32_t work_us = static_cast<uint32_t>(esp_timer_get_time() - start_us);
         diag_max_work_us = std::max(diag_max_work_us, work_us);
