@@ -69,6 +69,8 @@ const DBG_STREAM_TUNING = 32;
 const DBG_STREAM_POSITION = 64;
 const DBG_STREAM_RAW = 128;
 const DBG_STREAM_TEXT = 256;
+// Request one encoder output-stage readback when this bit becomes active.
+const DBG_STREAM_ENCODER_STAGES = 512;
 
 message DebugSubscribe {
     uint16 streams = 1;

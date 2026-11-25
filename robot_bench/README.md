@@ -323,7 +323,9 @@ the ESP32 ADC linear range (the factory FULL mode spans 0..VCC and can clip). Th
 adds a **Modo** column per wheel (REDUCED green, FULL amber, PWM red, "—" unknown/unverified)
 and a badge: green "Encoders em modo REDUCED" when all four are verified REDUCED, otherwise a
 warning naming the wheels that are FULL/PWM/unknown; a non-REDUCED encoder is not usable for
-the analog control path. The same table has an **ADC mín–máx** column with the stored raw ADC
+the analog control path. Opening **Encoders** and finishing alignment each request one readback
+while the wheels have zero targets. Motor telemetry uses the last readback. The same table
+has an **ADC mín–máx** column with the stored raw ADC
 endpoints of each wheel's encoder (the 0 and 360 degree values, e.g. "410–3680"), or "—" when
 no range is stored (range_mask bit clear) or when the stored pair is unusable (max <= min, for
 example a wheel whose raw range was rejected while the mV fallback kept the mask bit, like an

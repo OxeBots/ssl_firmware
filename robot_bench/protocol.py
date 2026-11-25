@@ -39,6 +39,7 @@ STREAM_TUNING = 32
 STREAM_POSITION = 64
 STREAM_RAW = 128
 STREAM_TEXT = 256
+STREAM_ENCODER_STAGES = 512
 
 # Bitproto serialized sizes (BYTES_LENGTH_* in the generated C header)
 STATE_SIZE = 61

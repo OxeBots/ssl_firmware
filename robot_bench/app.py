@@ -316,6 +316,8 @@ def refresh_dashboard(state, radio_session, layout, now, hz_state, hz_tof, fps):
         state.stream_mask = proto.STREAM_CALIBRATION
         if calibration.active_subtab() == calibration.SUBTAB_CONTROL:
             state.stream_mask |= proto.STREAM_STATE | proto.STREAM_TUNING
+        else:
+            state.stream_mask |= proto.STREAM_ENCODER_STAGES
         calibration.update(state, layout, now)
     elif state.active_tab == config.TAB_HEALTH:
         state.stream_mask = proto.STREAM_HEALTH

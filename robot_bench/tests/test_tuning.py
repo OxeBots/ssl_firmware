@@ -89,6 +89,26 @@ class PositionWireFormatTests(unittest.TestCase):
 
 
 class TuningHelperTests(unittest.TestCase):
+    def test_only_encoder_calibration_requests_output_stage_readback(self):
+        state = live_state()
+        layout = app.compute_layout(1200, 800)
+        with (
+            patch.object(app.dpg, "configure_item"),
+            patch.object(app.rendering, "set_text"),
+            patch.object(app, "header_spacer_width", return_value=20),
+            patch.object(app.motors, "leave"),
+            patch.object(app.motors, "update"),
+            patch.object(app.motors, "active_view", return_value=app.motors.MOTORS_VIEW_OVERVIEW),
+            patch.object(app.motors, "sidebar_tab", return_value=app.motors.SIDEBAR_TUNING),
+            patch.object(calibration, "update"),
+            patch.object(calibration, "active_subtab", return_value=calibration.SUBTAB_ENCODERS),
+        ):
+            for tab, expect_readback in ((config.TAB_MOTORS, False), (config.TAB_CALIBRATION, True)):
+                state.active_tab = tab
+                app.refresh_dashboard(state, None, layout, time.monotonic(), 0, 0, 60)
+                self.assertTrue(state.stream_mask & protocol.STREAM_CALIBRATION)
+                self.assertEqual(bool(state.stream_mask & protocol.STREAM_ENCODER_STAGES), expect_readback)
+
     def test_control_calibration_subscribes_to_wheel_history_and_tuning(self):
         state = live_state()
         state.active_tab = config.TAB_CALIBRATION

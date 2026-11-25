@@ -273,6 +273,9 @@ void SerialDebug::handle_subscription_frame()
         m_raw_pulse_seeded = false;
     if (new_session || ((old_streams ^ subscription.streams) & DBG_STREAM_TOF))
         m_tof_frame_sent = false;
+    if ((subscription.streams & DBG_STREAM_ENCODER_STAGES) &&
+        (new_session || !(old_streams & DBG_STREAM_ENCODER_STAGES)))
+        m_encoder_stage_scan_pending = true;
     m_last_keepalive_us.store(static_cast<uint64_t>(esp_timer_get_time()));
     m_streaming.store(true);
 }
@@ -318,7 +321,11 @@ void SerialDebug::handle_control_frame()
             else if (result != ESP_OK)
                 ESP_LOGE(TAG, "%s start failed: %s.", routine, esp_err_to_name(result));
             else
+            {
+                if (align_encoders)
+                    m_encoder_stage_scan_pending = true;
                 ESP_LOGW(TAG, "%s started: the wheels spin one at a time.", routine);
+            }
             break;
         }
 
@@ -984,12 +991,15 @@ void SerialDebug::send_calibration()
     calibration.range_mask = range_mask;
     calibration.error_code = static_cast<uint8_t>(status.error);
 
-    // Encoder analog output stage: read the AS5600 CONF register of every wheel
-    // through the mux so the calibration screen sees the stage actually in
-    // effect. The calibration routine owns the mux while it runs; the values
-    // read before it started stay published meanwhile.
-    if (m_cd4052b != nullptr && !MotorCalibration::get_instance().is_running())
+    // Ordinary calibration telemetry reports the last verified stages.
+    // Probe the hardware when opening the encoder screen or after alignment.
+    auto & wheels = WheelController::get_instance();
+    if (m_cd4052b != nullptr && m_encoder_stage_scan_pending &&
+        (m_streams.load() & DBG_STREAM_ENCODER_STAGES) &&
+        !MotorCalibration::get_instance().is_running() && wheels.get_position_active_mask() == 0 &&
+        wheels.get_target_velocities() == std::array<float, 4>{})
     {
+        m_encoder_stage_scan_pending = false;
         m_encoder_stage_mask = 0;
         for (size_t i = 0; i < 4; ++i)
         {

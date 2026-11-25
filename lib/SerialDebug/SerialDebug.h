@@ -93,6 +93,7 @@ class SerialDebug
     // values survive a calibration run, which owns the mux while it executes.
     std::array<uint8_t, 4> m_encoder_stages = {3, 3, 3, 3};
     uint8_t m_encoder_stage_mask = 0;
+    bool m_encoder_stage_scan_pending = false;
     std::atomic_bool m_streaming{false};
     std::atomic<uint64_t> m_last_keepalive_us{0};
     std::atomic<uint16_t> m_streams{0};
