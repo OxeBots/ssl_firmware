@@ -75,7 +75,7 @@ void Telemetry::send(uint32_t echo_timestamp)
     }
 
 
-    tel.battery_percentage = static_cast<uint8_t>(PowerMonitor::get_instance().get_supply_voltage_v());
+    tel.battery_percentage = bat_per;
     tel.kicker_voltage = static_cast<uint16_t>(
       static_cast<uint16_t>(KickerController::get_instance().get_voltage()) * 100U);
     tel.error_flags = state.get_error_flags();
