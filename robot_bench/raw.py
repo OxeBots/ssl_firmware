@@ -119,9 +119,8 @@ def _create_selector_themes():
 
 
 def sync_selection(state):
-    """Send the mux focus when the wheel changed elsewhere (keys or overview)."""
-    if state.raw_encoder_wheel != state.selected_wheel:
-        state.select_raw_encoder(state.selected_wheel)
+    """Sync the mux focus once the serial link can accept it."""
+    state.select_raw_encoder(state.selected_wheel)
 
 
 def on_show(state):

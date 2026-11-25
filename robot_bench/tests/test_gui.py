@@ -457,6 +457,24 @@ class RawViewTests(unittest.TestCase):
 
 
 class RawEncoderFocusTests(unittest.TestCase):
+    def test_focus_chosen_before_link_is_sent_once_after_link_becomes_live(self):
+        state = BenchState()
+        state.reader = Mock()
+        state.selected_wheel = 1
+        raw.on_show(state)
+        self.assertEqual(state.raw_encoder_wheel, 1)
+        state.reader.send_frame.assert_not_called()
+
+        state.connected = "/dev/ttyUSB0"
+        state.streaming = True
+        state.last_link_t = time.monotonic()
+        raw.sync_selection(state)
+        raw.sync_selection(state)
+        state.reader.send_frame.assert_called_once_with(
+            protocol.MSG_CONTROL,
+            protocol.encode_control(protocol.OP_SELECT_RAW_ENCODER, 1, [1, 0, 0, 0]),
+        )
+
     def test_selection_sends_the_control_op_and_clears_on_disconnect(self):
         state = BenchState()
         state.reader = Mock()

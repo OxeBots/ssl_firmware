@@ -63,6 +63,7 @@ class BenchState:
         self.raw_history = [collections.deque(maxlen=600) for _ in range(proto.WHEEL_COUNT)]
         # Wheel whose encoder the mux is focused on for the raw I2C read.
         self.raw_encoder_wheel = None
+        self._raw_encoder_sent = None
         # Demo source: start time of the simulated runs, None while idle
         self.demo_calibration_start = None
         self.demo_tuning_start = None
@@ -197,6 +198,7 @@ class BenchState:
             self.wheel_max_rpm = [0.0] * proto.WHEEL_COUNT
             self.raw = None
             self.raw_encoder_wheel = None
+            self._raw_encoder_sent = None
             for history in self.raw_history:
                 history.clear()
 
@@ -339,19 +341,22 @@ class BenchState:
                 wheel = None
             if wheel is not None and not 0 <= wheel < proto.WHEEL_COUNT:
                 wheel = None
-        if wheel == self.raw_encoder_wheel:
-            return
         self.raw_encoder_wheel = wheel
         if self.demo or self.reader is None or not self._live_link():
+            self._raw_encoder_sent = None
+            return
+        if wheel == self._raw_encoder_sent:
             return
         self.control_sequence += 1
         selector = -1 if wheel is None else wheel
-        self.reader.send_frame(
+        sent = self.reader.send_frame(
             proto.MSG_CONTROL,
             proto.encode_control(
                 proto.OP_SELECT_RAW_ENCODER, self.control_sequence, [selector, 0, 0, 0]
             ),
         )
+        if sent:
+            self._raw_encoder_sent = wheel
 
     def set_calibration_confirm(self, value):
         """Arm the safety confirmation required before starting a calibration."""

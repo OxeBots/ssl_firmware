@@ -35,6 +35,7 @@ class BenchReader(threading.Thread):
         self.ser = None
         self.send_lock = threading.Lock()
         self.decoder = proto.FrameDecoder()
+        self._reset_on_open = False
 
     def run(self):
         first_open_fail = None
@@ -65,25 +66,26 @@ class BenchReader(threading.Thread):
             time.sleep(RECONNECT_DELAY_S)
 
     def _connect(self):
-        if self.requested_port:
-            candidates = [self.requested_port]
-        else:
-            candidates = []
-        for device in candidates:
+        if not self.requested_port:
+            return None
+        try:
+            ser = serial.Serial(baudrate=self.baud, timeout=0.05, write_timeout=0.5, exclusive=True)
+            ser.port = self.requested_port
+            # Keep the auto-reset lines inactive when opening a healthy link.
+            if not self._reset_on_open:
+                ser.dtr = False
+                ser.rts = False
+            ser.open()
+        except (serial.SerialException, OSError, ValueError):
+            return None
+        if self._reset_on_open:
+            self._reset_on_open = False
             try:
-                ser = serial.Serial(device, self.baud, timeout=0.05, write_timeout=0.5, exclusive=True)
-            except (serial.SerialException, OSError, ValueError):
-                continue
-            try:
-                # Best effort: avoid the auto-reset pulse on open. Some
-                # devices (and ptys) reject the modem ioctls; that only
-                # means the reset trick does not apply.
                 ser.dtr = False
                 ser.rts = False
             except (serial.SerialException, OSError):
                 pass
-            return ser
-        return None
+        return ser
 
     def _read_loop(self, ser):
         # Send changes immediately and renew the subscription periodically.
@@ -104,6 +106,7 @@ class BenchReader(threading.Thread):
                 # reopen the port. Its DTR/RTS edge hardware-resets the board
                 # for a clean session.
                 self.state.add_console("sem quadros - reabrindo a porta para recuperar o link")
+                self._reset_on_open = True
                 return
             mask = self.state.stream_mask
             if mask != last_mask or now - last_send >= SEND_PERIOD_S:
@@ -191,11 +194,12 @@ class BenchReader(threading.Thread):
         self.send_frame(proto.MSG_CONTROL, proto.encode_control(proto.OP_STOP_STREAM))
 
     def send_frame(self, msg_type, message):
-        """Transmit one control frame (best effort, thread-safe)."""
+        """Transmit one control frame and report whether it was written."""
         with self.send_lock:
             if self.ser is None:
-                return
+                return False
             try:
-                self.ser.write(proto.encode_frame(msg_type, message))
+                frame = proto.encode_frame(msg_type, message)
+                return self.ser.write(frame) == len(frame)
             except (serial.SerialException, OSError):
-                pass
+                return False

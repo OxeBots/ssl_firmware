@@ -3,10 +3,12 @@
 import struct
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 from robot_bench import protocol, serial_io
 from robot_bench.state import BenchState
 from scripts.serial_debug_protocol_bp import (
+    DBG_STREAM_ENCODER_STAGES,
     DebugCalibration,
     DebugRaw,
     DebugState,
@@ -133,6 +135,22 @@ class ConsoleTextTests(unittest.TestCase):
 
 
 class SerialReaderConsoleTests(unittest.TestCase):
+    def test_serial_open_keeps_reset_lines_inactive_except_for_stalled_link_recovery(self):
+        reader = serial_io.BenchReader(BenchState(), "fake", 115200)
+        for reset_on_open in (False, True):
+            reader._reset_on_open = reset_on_open
+            port = Mock(port=None, dtr=True, rts=True)
+            with patch.object(serial_io.serial, "Serial", return_value=port) as factory:
+                port.open.side_effect = lambda: self.assertEqual(
+                    (port.port, port.dtr, port.rts), ("fake", reset_on_open, reset_on_open)
+                )
+                self.assertIs(reader._connect(), port)
+                factory.assert_called_once_with(
+                    baudrate=115200, timeout=0.05, write_timeout=0.5, exclusive=True
+                )
+                port.open.assert_called_once_with()
+                self.assertEqual((port.dtr, port.rts, reader._reset_on_open), (False, False, False))
+
     def test_boot_text_reaches_the_console_from_the_serial_reader(self):
         class FakeSerial:
             def __init__(self, state, data):
@@ -170,6 +188,30 @@ class SerialReaderConsoleTests(unittest.TestCase):
 
 
 class CalibrationWireFormatTests(unittest.TestCase):
+    def test_encoder_stage_subscription_matches_bitproto(self):
+        self.assertEqual(protocol.STREAM_ENCODER_STAGES, DBG_STREAM_ENCODER_STAGES)
+
+    def test_calibration_frame_can_start_with_a_newline_byte(self):
+        message = DebugCalibration(
+            state=protocol.CALIBRATION_DONE,
+            wheel=4,
+            progress=100,
+            result_mask=15,
+            i2c_ready=15,
+            mapping_valid=1,
+            analog_map=[2, 3, 0, 1],
+        ).encode()
+        frame = protocol.encode_frame(protocol.MSG_CALIBRATION, message)
+        self.assertEqual(frame[:1], b"\n")
+        expected = [(protocol.MSG_CALIBRATION, message)]
+
+        self.assertEqual(protocol.FrameDecoder().feed(frame), expected)
+
+        decoder = protocol.FrameDecoder()
+        self.assertEqual(decoder.feed(b"\n" + frame[:1]), [])
+        self.assertEqual(decoder.feed(frame[1:]), expected)
+        self.assertEqual(decoder.drain_lines(), [])
+
     def test_calibration_parser_matches_generated_bitproto_layout(self):
         generated = DebugCalibration(
             state=protocol.CALIBRATION_PARTIAL,

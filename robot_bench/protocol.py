@@ -242,19 +242,21 @@ class FrameDecoder:
         self._buffer += data
         frames = []
         while True:
-            # Text printed directly on the port may sit between frames too.
-            self._split_text_lines()
             index = self._buffer.find(0)
-            if index < 0:
-                if len(self._buffer) > _MAX_CHUNK and not _is_plain_text(self._buffer):
-                    self._buffer.clear()
-                break
-            chunk = bytes(self._buffer[:index])
-            del self._buffer[: index + 1]
-            if chunk:
-                frame = _decode_frame(chunk)
+            if index > 0:
+                frame = _decode_frame(bytes(self._buffer[:index]))
                 if frame is not None:
                     frames.append(frame)
+                    del self._buffer[: index + 1]
+                    continue
+            if self._take_text_line(frame_complete=index >= 0):
+                continue
+            if index >= 0:
+                del self._buffer[: index + 1]
+                continue
+            if len(self._buffer) > _MAX_CHUNK and not _is_plain_text(self._buffer):
+                self._buffer.clear()
+            break
         return frames
 
     def drain_lines(self):
@@ -268,27 +270,27 @@ class FrameDecoder:
         if not _is_plain_text(self._buffer):
             self._buffer.clear()
 
-    def _split_text_lines(self):
-        """Peel complete plain text lines off the head of the buffer."""
-        while True:
-            end = self._buffer.find(b"\n")
-            if end < 0 or not _is_plain_text(self._buffer[: end + 1]):
-                return
-            raw = bytes(self._buffer[: end + 1])
-            del self._buffer[: end + 1]
-            line = _strip_escapes(raw.rstrip(b"\r\n").decode("utf-8", "replace")).rstrip()
-            if line:
-                self._lines.append(line)
-                if len(self._lines) > _PENDING_LINES_MAX:
-                    del self._lines[0]
+    def _take_text_line(self, frame_complete):
+        """Peel one plain text line off the head of the buffer."""
+        end = self._buffer.find(b"\n")
+        # A leading newline can be a COBS code byte. Wait for the delimiter
+        # before treating it as a blank line so the frame gets a CRC check.
+        if end < 0 or (end == 0 and not frame_complete):
+            return False
+        raw = bytes(self._buffer[: end + 1])
+        if not _is_plain_text(raw):
+            return False
+        del self._buffer[: end + 1]
+        line = _strip_escapes(raw.rstrip(b"\r\n").decode("utf-8", "replace")).rstrip()
+        if line:
+            self._lines.append(line)
+            if len(self._lines) > _PENDING_LINES_MAX:
+                del self._lines[0]
+        return True
 
 
 def _is_plain_text(raw):
-    """True when the bytes are the printable text the board prints directly.
-
-    A binary frame always carries its message type (a control character) right
-    after the COBS code byte, so it can never pass this check.
-    """
+    """True when the bytes could be text printed directly by the board."""
     if len(raw) > _CONSOLE_LINE_MAX:
         return False
     # ESC starts an ANSI colour sequence that the console strips for display.
