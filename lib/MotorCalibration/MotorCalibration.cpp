@@ -9,6 +9,7 @@
 
 #include "AS5600.h"
 #include "BL48250.h"
+#include "IMUGY85.h"
 #include "WheelController.h"
 #include "wheel_state_estimator.h"
 
@@ -1029,27 +1030,33 @@ void MotorCalibration::run_encoder_alignment()
     auto & motors = BL48250::get_instance();
     wheel_controller.set_open_loop(true);
     motors.set_duties(STOP_DUTIES, CLOCKWISE_DIRECTIONS);
-    ESP_LOGI(TAG, "Calibration started: open loop, one wheel at a time; the wheels spin.");
-
-    if (estimator.configure_encoder_output_stage(AS5600::OutputStage::ANALOG_REDUCED) == ESP_OK)
-        ESP_LOGI(TAG, "Encoder output stage: all wheels REDUCED.");
-    else
-        ESP_LOGE(TAG,
-                 "Encoder output stage: not all wheels are REDUCED; ranges may be unreliable.");
-
-    const RawRanges previous_ranges = {estimator.get_range_raw_min(),
-                                       estimator.get_range_raw_max()};
-    estimator.start_range_tracking();
 
     EncoderStatus status = get_encoder_status();
-    EncoderError error = detect_wiring(status);
-    if (error == EncoderError::NONE && status.result_mask == ALL_WHEELS_MASK)
-        error = apply_calibration(status, previous_ranges);
-    else
+    EncoderError error = EncoderError::I2C;
+    // Retry if the shared bus was unavailable at startup.
+    if (IMUGY85::get_instance().init_i2c_bus() == ESP_OK)
     {
-        estimator.stop_range_tracking();
-        if (error == EncoderError::NONE)
-            ESP_LOGE(TAG, "Calibration incomplete; the stored wiring map was kept.");
+        ESP_LOGI(TAG, "Calibration started: open loop, one wheel at a time; the wheels spin.");
+
+        if (estimator.configure_encoder_output_stage(AS5600::OutputStage::ANALOG_REDUCED) == ESP_OK)
+            ESP_LOGI(TAG, "Encoder output stage: all wheels REDUCED.");
+        else
+            ESP_LOGE(TAG,
+                     "Encoder output stage: not all wheels are REDUCED; ranges may be unreliable.");
+
+        const RawRanges previous_ranges = {estimator.get_range_raw_min(),
+                                           estimator.get_range_raw_max()};
+        estimator.start_range_tracking();
+
+        error = detect_wiring(status);
+        if (error == EncoderError::NONE && status.result_mask == ALL_WHEELS_MASK)
+            error = apply_calibration(status, previous_ranges);
+        else
+        {
+            estimator.stop_range_tracking();
+            if (error == EncoderError::NONE)
+                ESP_LOGE(TAG, "Calibration incomplete; the stored wiring map was kept.");
+        }
     }
 
     motors.set_duties(STOP_DUTIES, CLOCKWISE_DIRECTIONS);
