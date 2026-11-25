@@ -6,6 +6,7 @@
 #include <unity.h>
 
 #include "../shared_test_bus.h"
+#include "../shared_test_spi.h"
 #include "74HC595.h"
 #include "AS5600.h"
 #include "CD4052B.h"

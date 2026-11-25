@@ -3,6 +3,7 @@
 #include <unity.h>
 
 #include "../shared_test_bus.h"
+#include "../shared_test_spi.h"
 #include "74HC595.h"
 #include "SPIdev.h"
 

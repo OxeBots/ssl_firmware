@@ -1,18 +1,15 @@
-// Shared test-rig buses for suites that run back-to-back in the merged test
-// binary (test/all). Every hardware suite wires the same I2C port and the same
-// SPI2 pins, so the buses are created once and reused instead of claiming the
-// port again per suite. Standalone suites behave identically: the first call
-// creates what a fresh boot would have created anyway.
+// Shared I2C bus for suites that run back-to-back in the merged test binary
+// (test/test_all). Every hardware suite wires the same I2C port, so the bus is
+// created once and reused instead of claiming the port again per suite. The
+// shared SPI bus lives in shared_test_spi.h. Standalone suites behave
+// identically: the first call creates what a fresh boot would have created anyway.
 
 #ifndef _SHARED_TEST_BUS_H_
 #define _SHARED_TEST_BUS_H_
 
 #include <driver/i2c_master.h>
-#include <driver/spi_master.h>
 #include <esp_err.h>
 #include <sdkconfig.h>
-
-#include "SPIdev.h"
 
 // Single storage point so the helpers below and shared_test_i2c_adopt()
 // operate on the same handle.
@@ -54,18 +51,6 @@ inline void shared_test_i2c_adopt(i2c_master_bus_handle_t handle)
     i2c_master_bus_handle_t & slot = shared_test_i2c_storage();
     if (slot == nullptr)
         slot = handle;
-}
-
-// Creates the shared SPI bus once; SPIdev::init() does the actual work and
-// tolerates an already-claimed host (e.g. when a suite initialized it first).
-inline void shared_test_spi_bus()
-{
-    static bool initialized = false;
-    if (initialized)
-        return;
-
-    SPIdev::init();
-    initialized = true;
 }
 
 #endif  // _SHARED_TEST_BUS_H_

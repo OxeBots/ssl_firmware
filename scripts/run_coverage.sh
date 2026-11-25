@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run the hardware test suite with gcov instrumentation and produce an HTML
-# coverage report (ESP-IDF gcov over JTAG).
+# Run the merged logic and hardware test suites with gcov instrumentation and
+# produce an HTML coverage report (ESP-IDF gcov over JTAG).
 #
 # Requirements:
 #   - ESP32 with a JTAG probe wired up (TDI/TDO/TCK/TMS/GND)

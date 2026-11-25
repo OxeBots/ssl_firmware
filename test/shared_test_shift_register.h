@@ -16,6 +16,7 @@
 
 #include "74HC595.h"
 #include "shared_test_bus.h"
+#include "shared_test_spi.h"
 
 inline HC595 & shared_test_shift_register()
 {

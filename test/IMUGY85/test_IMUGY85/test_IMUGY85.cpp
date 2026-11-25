@@ -59,6 +59,7 @@ void test_raw_acceleration(void)
     {
         ESP_LOGW(TAG, "Accel returned all zeros — sensor may not be connected.");
     }
+    TEST_ASSERT_FALSE_MESSAGE(all_zeros, "Accel returned all zeros - sensor may not be connected.");
 }
 
 void test_raw_gyro(void)
@@ -76,6 +77,7 @@ void test_raw_gyro(void)
     {
         ESP_LOGW(TAG, "Gyro returned all zeros — sensor may not be connected.");
     }
+    TEST_ASSERT_FALSE_MESSAGE(all_zeros, "Gyro returned all zeros - sensor may not be connected.");
 }
 
 void test_raw_magnetometer(void)
@@ -93,6 +95,8 @@ void test_raw_magnetometer(void)
     {
         ESP_LOGW(TAG, "Magnetometer returned all zeros — sensor may not be connected.");
     }
+    TEST_ASSERT_FALSE_MESSAGE(all_zeros,
+                              "Magnetometer returned all zeros - sensor may not be connected.");
 }
 
 void test_calibrated_readings(void)

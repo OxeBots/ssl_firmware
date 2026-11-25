@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "../shared_test_bus.h"
+#include "../shared_test_spi.h"
 #include "74HC595.h"
 #include "BL48250.h"
 #include "CD4052B.h"

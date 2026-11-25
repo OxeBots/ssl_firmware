@@ -37,6 +37,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <sdkconfig.h>
+#include <string.h>
 #include <unity.h>
 
 #include "../shared_test_shift_register.h"
