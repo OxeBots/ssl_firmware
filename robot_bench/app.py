@@ -207,13 +207,15 @@ class KeyRepeater:
     def __init__(self):
         self._next_repeat = {}
 
-    def poll(self, now, *, drive_shortcuts=True, editing_step=False):
+    def poll(self, now, *, drive_shortcuts=True, editing_step=False, editing_tuning=False):
         actions = []
         for key, action in KEY_ACTIONS.items():
             pressed = dpg.is_key_pressed(key)
             down = dpg.is_key_down(key)
             blocked = not drive_shortcuts and (key == dpg.mvKey_Q or action[0] not in ("tab", "quit"))
             if editing_step and action[0] in ("wheel", "adjust", "adjust_rpm"):
+                blocked = True
+            if editing_tuning and (action[0] in ("wheel", "adjust", "adjust_rpm", "sweep") or key == dpg.mvKey_Q):
                 blocked = True
             if blocked:
                 if down:
@@ -574,6 +576,7 @@ def run_gui(state, args):
                 now,
                 drive_shortcuts=not picking_port and state.active_tab != config.TAB_RADIO,
                 editing_step=dpg.is_item_active(motors.ARROW_STEP_INPUT),
+                editing_tuning=state.active_tab == config.TAB_MOTORS and motors.editing_wheel_tuning(),
             )
             if not picking_port:
                 for action, value in actions:

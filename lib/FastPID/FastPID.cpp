@@ -116,8 +116,6 @@ int16_t FastPID::step(int16_t sp, int16_t fb)
     if (m_d)
     {
         int32_t deriv = (err - m_last_err) - static_cast<int32_t>(sp - m_last_sp);
-        m_last_sp = sp;
-        m_last_err = err;
 
         if (deriv > FAST_PID_DERIV_MAX)
             deriv = FAST_PID_DERIV_MAX;
@@ -126,6 +124,9 @@ int16_t FastPID::step(int16_t sp, int16_t fb)
 
         derivative = static_cast<int32_t>(m_d) * static_cast<int32_t>(deriv);
     }
+    // Keep a recent sample when the derivative gain is enabled live.
+    m_last_sp = sp;
+    m_last_err = err;
 
     int64_t out = static_cast<int64_t>(proportional) + static_cast<int64_t>(integral) +
                   static_cast<int64_t>(derivative);

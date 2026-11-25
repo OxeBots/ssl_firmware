@@ -2,7 +2,7 @@
 
 import dearpygui.dearpygui as dpg
 
-from . import config, raw, rendering
+from . import config, raw, rendering, wheel_tuning
 from . import protocol as proto
 from .state import WHEEL_NAMES
 
@@ -54,6 +54,7 @@ ADJUST_BUTTONS = {
 SIDEBAR_TABS = "motors_sidebar_tabs"
 SIDEBAR_CONTROL = "motors_sidebar_control"
 SIDEBAR_POSITION = "motors_sidebar_position"
+SIDEBAR_TUNING = "motors_sidebar_tuning"
 # Internal Motors tab bar: overview cards + sidebar, or the raw data view.
 MOTORS_VIEW_TABS = "motors_view_tabs"
 MOTORS_VIEW_OVERVIEW = "motors_view_overview"
@@ -96,6 +97,7 @@ _SWEEP_THEMES = []
 _BOUND_SELECTED = -1
 _BOUND_SWEEP = None
 _RAW_VIEW_ACTIVE = False
+_TUNING_EDITOR = None
 
 
 def _part(index, name):
@@ -204,7 +206,16 @@ def sidebar_tab():
     selected = dpg.get_value(SIDEBAR_TABS)
     if isinstance(selected, int):
         selected = dpg.get_item_alias(selected)
-    return selected if selected == SIDEBAR_POSITION else SIDEBAR_CONTROL
+    return selected if selected in (SIDEBAR_POSITION, SIDEBAR_TUNING) else SIDEBAR_CONTROL
+
+
+def editing_wheel_tuning():
+    return (
+        _TUNING_EDITOR is not None
+        and active_view() == MOTORS_VIEW_OVERVIEW
+        and sidebar_tab() == SIDEBAR_TUNING
+        and _TUNING_EDITOR.editing()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +588,7 @@ def _build_position(state):
 
 
 def _build_overview(state):
+    global _TUNING_EDITOR
     with dpg.group(horizontal=True):
         with dpg.group():
             for row in range(2):
@@ -589,8 +601,13 @@ def _build_overview(state):
                     _build_control(state)
                 with dpg.tab(label="Posição", tag=SIDEBAR_POSITION):
                     _build_position(state)
+                with dpg.tab(label="Ajuste", tag=SIDEBAR_TUNING):
+                    _TUNING_EDITOR = wheel_tuning.Editor(
+                        state, CONTROL_WIDTH, BUTTON_HEIGHT, _TABLE_THEME, _STOP_THEME
+                    )
             dpg.bind_item_theme(CONTROL_PANEL, _SIDEBAR_THEME)
             dpg.bind_item_theme(POSITION_PANEL, _SIDEBAR_THEME)
+            dpg.bind_item_theme(wheel_tuning.PANEL, _SIDEBAR_THEME)
 
 
 def build(state):
@@ -741,7 +758,11 @@ def update(state, layout, now):
     panel_h = sidebar_height(body_h, rendering.item_height(SIDEBAR_TABS) or SIDEBAR_TAB_HEIGHT)
     dpg.configure_item(CONTROL_PANEL, width=CONTROL_WIDTH, height=panel_h)
     dpg.configure_item(POSITION_PANEL, width=CONTROL_WIDTH, height=panel_h)
-    if sidebar_tab() == SIDEBAR_POSITION:
+    selected_tab = sidebar_tab()
+    if selected_tab == SIDEBAR_TUNING:
+        dpg.configure_item(wheel_tuning.PANEL, width=CONTROL_WIDTH, height=panel_h)
+        _TUNING_EDITOR.update(now)
+    elif selected_tab == SIDEBAR_POSITION:
         _update_position(state, now, CONTROL_INNER)
     else:
         _update_control(state, now)

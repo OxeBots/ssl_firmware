@@ -21,6 +21,14 @@ MSG_POSITION_CONTROL = 10
 MSG_RAW = 11
 MSG_SUBSCRIBE = 12
 MSG_LINK = 13
+MSG_WHEEL_TUNING = 14
+
+WHEEL_TUNING_REQUEST = 0
+WHEEL_TUNING_OK = 1
+WHEEL_TUNING_BUSY = 2
+WHEEL_TUNING_INVALID = 3
+WHEEL_TUNING_FIELDS = 23
+_WHEEL_TUNING = struct.Struct(f"<BBBII{WHEEL_TUNING_FIELDS}f")
 
 STREAM_STATE = 1
 STREAM_IMU = 2
@@ -529,6 +537,28 @@ def encode_position_control(op, mode, wheel_mask, angles_deg, max_rpm=0, sequenc
     )
 
 
+def encode_wheel_tuning(wheel, sequence, fields=0, values=None):
+    if values is None:
+        values = (0.0,) * WHEEL_TUNING_FIELDS
+    return _WHEEL_TUNING.pack(wheel, WHEEL_TUNING_REQUEST, 0, sequence, fields, *values)
+
+
+def parse_wheel_tuning(message):
+    if len(message) != _WHEEL_TUNING.size:
+        return None
+    wheel, status, mode, sequence, fields, *values = _WHEEL_TUNING.unpack(message)
+    if status not in (WHEEL_TUNING_OK, WHEEL_TUNING_BUSY, WHEEL_TUNING_INVALID):
+        return None
+    return {
+        "wheel": wheel,
+        "status": status,
+        "mode": mode,
+        "sequence": sequence,
+        "fields": fields,
+        "values": values,
+    }
+
+
 def parse_frame(msg_type, message):
     """Map one decoded frame to its parser; None for unknown types."""
     parsers = {
@@ -539,6 +569,7 @@ def parse_frame(msg_type, message):
         MSG_TEXT: parse_text,
         MSG_CALIBRATION: parse_calibration,
         MSG_TUNING: parse_tuning,
+        MSG_WHEEL_TUNING: parse_wheel_tuning,
         MSG_POSITION: parse_position,
         MSG_RAW: parse_raw,
         MSG_LINK: parse_link,

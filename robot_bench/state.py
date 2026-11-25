@@ -1,6 +1,7 @@
 """Thread-shared snapshot of the latest serial debug telemetry."""
 
 import collections
+import math
 import threading
 import time
 
@@ -48,6 +49,7 @@ class BenchState:
         # Wheel control calibration frame (PID + feedforward per wheel)
         self.tuning = None
         self.tuning_confirm = False
+        self.wheel_tuning_reply = None
         # Calibrated wheel-speed limit in RPM (from the control calibration).
         # Before the first tuning frame the old constant is the fallback.
         self.max_rpm = proto.WHEEL_RPM_MAX
@@ -64,6 +66,7 @@ class BenchState:
         # Demo source: start time of the simulated runs, None while idle
         self.demo_calibration_start = None
         self.demo_tuning_start = None
+        self.demo_wheel_tuning = {}
         self.demo_position = None
         # Bookkeeping
         self.last_link_t = 0.0
@@ -183,6 +186,7 @@ class BenchState:
             self.health = {}
             self.calibration = None
             self.tuning = None
+            self.wheel_tuning_reply = None
             self.position = None
             self.pulse_valid_mask = 0
             for wheel in self.wheels:
@@ -475,6 +479,37 @@ class BenchState:
             proto.MSG_CONTROL,
             proto.encode_control(proto.OP_STOP_TUNING, self.control_sequence),
         )
+
+    def request_wheel_tuning(self, wheel, sequence, fields=0, values=None):
+        """Read or patch the selected wheel's current controller values."""
+        if not self._live_link() or (self.reader is None and not self.demo):
+            return False
+        try:
+            payload = proto.encode_wheel_tuning(wheel, sequence, fields, values)
+        except OverflowError:
+            return False
+        if self.demo:
+            profile = self.demo_wheel_tuning.setdefault(
+                wheel, [1.0, 12.0, 0.01] + [0.0, 30.0, 175.0, 8.0, 240.0, 0.0, 0.0, 0.1, 0.02] * 2
+                + [0.0, 0.0],
+            )
+            for index in range(proto.WHEEL_TUNING_FIELDS):
+                if fields & (1 << index):
+                    profile[index] = values[index]
+            rpm = self.manual_targets[wheel]
+            gate = profile[6 if rpm >= 0.0 else 15] or 12.0
+            mode = 0 if not rpm else (2 if abs(rpm) <= gate * 30.0 / math.pi else 1)
+            self.wheel_tuning_reply = {
+                "wheel": wheel,
+                "status": proto.WHEEL_TUNING_OK,
+                "mode": mode,
+                "sequence": sequence,
+                "fields": fields,
+                "values": profile.copy(),
+            }
+        else:
+            self.reader.send_frame(proto.MSG_WHEEL_TUNING, payload)
+        return True
 
     def position_live(self):
         """True while the latest position frame is recent enough to use."""

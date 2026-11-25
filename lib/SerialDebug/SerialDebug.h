@@ -41,6 +41,7 @@ class SerialDebug
 
     void handle_control_frame();
     void handle_position_frame();
+    void handle_wheel_tuning_frame();
     void handle_subscription_frame();
     void stop_bench_targets();
     void send_state(uint32_t now_ms);

@@ -116,6 +116,20 @@ bool ProtocolHandler::set_bench_targets(const std::array<float, 4> & targets)
     return accepted;
 }
 
+esp_err_t ProtocolHandler::apply_bench_wheel_tuning(int wheel,
+                                                    uint32_t fields,
+                                                    const WheelController::TuningValues & values)
+{
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    if (m_wheel_ctrl && !m_radio_owns_wheels &&
+        !SafetySupervisor::health_inhibits_motion(m_health_state) &&
+        !MotorCalibration::get_instance().is_running())
+        result = m_wheel_ctrl->apply_live_tuning(wheel, fields, values);
+    xSemaphoreGive(m_mutex);
+    return result;
+}
+
 esp_err_t ProtocolHandler::start_bench_position_move(uint8_t wheel_mask,
                                                      const std::array<float, 4> & angles,
                                                      bool relative,
@@ -520,7 +534,9 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
 
     if (cfg.config_flags & CONFIG_FLAG_RUN_CALIBRATION)
     {
+        xSemaphoreTake(m_mutex, portMAX_DELAY);
         const esp_err_t result = MotorCalibration::get_instance().start_controller_tuning();
+        xSemaphoreGive(m_mutex);
         if (result == ESP_ERR_INVALID_STATE)
             ESP_LOGW(TAG, "Controller tuning start ignored: a motor calibration is running.");
         else if (result != ESP_OK)

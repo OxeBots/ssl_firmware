@@ -644,6 +644,104 @@ void WheelController::apply_parameters(int wheel, const Parameters & parameters)
     xSemaphoreGive(m_mutex);
 }
 
+// Order of the float fields in DebugWheelTuning. The pulse pattern flags
+// follow them in the tuning array.
+template <typename Parameters>
+static auto tuning_fields(Parameters & p)
+{
+    return std::array{&p.kp,
+                      &p.ki,
+                      &p.kd,
+                      &p.feedforward,
+                      &p.velocity_ff,
+                      &p.static_friction,
+                      &p.continuous_min_rad_s[0],
+                      &p.pulse_duty[0],
+                      &p.pulse_off_duty[0],
+                      &p.pulse_floor_duty[0],
+                      &p.pulse_response_s[0],
+                      &p.pulse_coast_delay_s[0],
+                      &p.feedforward_rev,
+                      &p.velocity_ff_rev,
+                      &p.static_friction_rev,
+                      &p.continuous_min_rad_s[1],
+                      &p.pulse_duty[1],
+                      &p.pulse_off_duty[1],
+                      &p.pulse_floor_duty[1],
+                      &p.pulse_response_s[1],
+                      &p.pulse_coast_delay_s[1]};
+}
+
+WheelController::VelocityMode WheelController::get_live_tuning(int wheel,
+                                                               TuningValues & values) const
+{
+    if (!m_mutex || wheel < 0 || wheel >= static_cast<int>(m_parameters.size()))
+        return VelocityMode::STOPPED;
+
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    const Parameters & p = m_parameters[wheel];
+    const auto fields = tuning_fields(p);
+    for (size_t i = 0; i < fields.size(); ++i) values[i] = *fields[i];
+    for (size_t i = 0; i < p.pulse_interleaved.size(); ++i)
+        values[fields.size() + i] = p.pulse_interleaved[i] != 0;
+
+    VelocityMode mode = VelocityMode::STOPPED;
+    if (!m_open_loop && m_last_target_sign[wheel] != 0)
+    {
+        const auto & pulse = m_low_speed[wheel];
+        mode = pulse.active
+                 ? VelocityMode::PULSED
+                 : (pulse.selected ? VelocityMode::PULSE_BLOCKED : VelocityMode::CONTINUOUS);
+    }
+    xSemaphoreGive(m_mutex);
+    return mode;
+}
+
+/**
+ * @brief Changes selected parameters together without restarting the wheel loop.
+ */
+esp_err_t WheelController::apply_live_tuning(int wheel,
+                                             uint32_t fields,
+                                             const TuningValues & values)
+{
+    if (!m_mutex)
+        return ESP_ERR_INVALID_STATE;
+    if (wheel < 0 || wheel >= static_cast<int>(m_parameters.size()) || fields == 0 ||
+        fields >> values.size())
+        return ESP_ERR_INVALID_ARG;
+
+    for (size_t i = 0; i < values.size(); ++i)
+        if ((fields & (1U << i)) && !std::isfinite(values[i]))
+            return ESP_ERR_INVALID_ARG;
+
+    xSemaphoreTake(m_mutex, portMAX_DELAY);
+    if (m_open_loop || !m_low_speed_mode_enabled)
+    {
+        xSemaphoreGive(m_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const Parameters & current = m_parameters[wheel];
+    Parameters updated = current;
+    const auto changes = tuning_fields(updated);
+    static_assert(changes.size() + updated.pulse_interleaved.size() == TuningValues{}.size());
+    for (size_t i = 0; i < changes.size(); ++i)
+        if (fields & (1U << i))
+            *changes[i] = values[i];
+    for (size_t i = 0; i < updated.pulse_interleaved.size(); ++i)
+        if (fields & (1U << (changes.size() + i)))
+            updated.pulse_interleaved[i] = values[changes.size() + i] != 0.0f;
+    updated = clamp_parameters(updated);
+
+    if (updated.kp != current.kp || updated.kd != current.kd)
+        m_pids[wheel].set_coefficients(updated.kp, 0.0f, updated.kd, PID_HZ);
+    if ((current.ki < LEGACY_KI_THRESHOLD) != (updated.ki < LEGACY_KI_THRESHOLD))
+        m_integral_duty[wheel] = 0.0f;
+    m_parameters[wheel] = updated;
+    xSemaphoreGive(m_mutex);
+    return ESP_OK;
+}
+
 // One write keeps the gains and motor measurements for a wheel together. A
 // read queued behind the write confirms the data before reporting success.
 static esp_err_t store_pid_blob(const char * key, const void * data, size_t length)

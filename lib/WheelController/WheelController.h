@@ -107,6 +107,18 @@ class WheelController
     // Parameters in effect and persistence helpers used by the calibration.
     std::array<Parameters, 4> get_parameters() const;
     void apply_parameters(int wheel, const Parameters & parameters);
+
+    enum class VelocityMode : uint8_t
+    {
+        STOPPED,
+        CONTINUOUS,
+        PULSED,
+        PULSE_BLOCKED,
+    };
+    using TuningValues = std::array<float, 23>;
+    VelocityMode get_live_tuning(int wheel, TuningValues & values) const;
+    esp_err_t apply_live_tuning(int wheel, uint32_t fields, const TuningValues & values);
+
     esp_err_t save_parameters(int wheel);
     void save_all_parameters();
 

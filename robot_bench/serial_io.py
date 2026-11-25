@@ -168,6 +168,8 @@ class BenchReader(threading.Thread):
             self.state.update_calibration(data)
         elif msg_type == proto.MSG_TUNING:
             self.state.update_tuning(data)
+        elif msg_type == proto.MSG_WHEEL_TUNING:
+            self.state.wheel_tuning_reply = data
         elif msg_type == proto.MSG_POSITION:
             self.state.update_position(data)
         elif msg_type == proto.MSG_RAW:

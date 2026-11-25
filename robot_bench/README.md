@@ -61,11 +61,21 @@ Stopping cancels the sweep so it cannot restart the motors. The adjustment butto
 and the square sweep are fractions of the calibrated wheel-speed limit, which the
 sidebar shows as "Máximo calibrado: ±138 RPM"; before a control calibration the
 fallback limit is 4000/3 RPM and the line says it is not calibrated. The sidebar
-switches between **Controle** (wheel target and sweep) and
-**Posição** (wheel position moves, see below). All keyboard shortcuts remain
+switches between **Controle** (wheel target and sweep), **Posição** (wheel
+position moves), and **Ajuste** (live velocity-controller settings). Keyboard shortcuts remain
 available: `[1-4]` select wheel, `[UP/DOWN]` adjust by the RPM step shown in Controle,
 `[LEFT/RIGHT]` +/-100 %, `[SPACE]` stop all motors, `[W]` square sweep between
 +/- the limit, `[F1-F7]` switch tabs (`F7` is Rádio while connected), `[Q/ESC]` quit.
+
+In **Ajuste**, select a wheel, enter a signed speed and press **Definir RPM**.
+The plots keep showing measured speed and target while you edit. The **Ativo**
+column shows the values read from the controller. Hover over a parameter name
+for its effect and units. The PID gains are shared between directions and apply
+in continuous mode. **Frente (+)** and **Ré (−)** select the feedforward,
+starting duty and low-speed pulse settings for each direction. **Aplicar ao vivo**
+sends the edited fields together at the current target and reports the values
+accepted by the firmware. **Recarregar** discards pending edits. Manual changes
+are held in RAM and the stored profile loads again at boot.
 
 The **Dados brutos** sub-tab of Motors shows the unfiltered sensor path one wheel at a
 time, so the plots get most of the tab height. A selector row has one button per motor

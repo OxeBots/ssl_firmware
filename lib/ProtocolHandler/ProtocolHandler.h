@@ -43,6 +43,9 @@ class ProtocolHandler
     bool is_base_station_connected() const;
 
     bool set_bench_targets(const std::array<float, 4> & targets);
+    esp_err_t apply_bench_wheel_tuning(int wheel,
+                                       uint32_t fields,
+                                       const WheelController::TuningValues & values);
     esp_err_t start_bench_position_move(uint8_t wheel_mask,
                                         const std::array<float, 4> & angles,
                                         bool relative,

@@ -163,6 +163,8 @@ void SerialDebug::task_loop()
                 handle_subscription_frame();
             else if (m_decoder.message_type() == DBG_MSG_POSITION_CONTROL)
                 handle_position_frame();
+            else if (m_decoder.message_type() == DBG_MSG_WHEEL_TUNING)
+                handle_wheel_tuning_frame();
             else
                 handle_control_frame();
             m_decoder.pop();
@@ -437,6 +439,44 @@ void SerialDebug::handle_position_frame()
             ESP_LOGW(TAG, "Unknown position control op %d.", control.op);
             break;
     }
+}
+
+/**
+ * @brief Applies a live tuning edit and replies with the values in effect.
+ */
+void SerialDebug::handle_wheel_tuning_frame()
+{
+    if (!session_active() || m_decoder.message_length() != BYTES_LENGTH_DEBUG_WHEEL_TUNING)
+        return;
+
+    DebugWheelTuning message;
+    memset(&message, 0, sizeof(message));
+    DecodeDebugWheelTuning(&message, const_cast<uint8_t *>(m_decoder.message()));
+    if (message.status != DBG_WHEEL_TUNING_REQUEST)
+        return;
+
+    WheelController::TuningValues values = {};
+    static_assert(sizeof(message.values) == sizeof(values));
+    esp_err_t result = ESP_OK;
+    if (message.wheel >= 4)
+        result = ESP_ERR_INVALID_ARG;
+    else if (message.fields != 0)
+    {
+        std::memcpy(values.data(), message.values, sizeof(message.values));
+        result = ProtocolHandler::get_instance().apply_bench_wheel_tuning(
+          message.wheel, message.fields, values);
+    }
+
+    values.fill(0.0f);
+    message.mode =
+      static_cast<uint8_t>(WheelController::get_instance().get_live_tuning(message.wheel, values));
+    std::memcpy(message.values, values.data(), sizeof(message.values));
+    message.status = result == ESP_OK                  ? DBG_WHEEL_TUNING_OK
+                     : result == ESP_ERR_INVALID_STATE ? DBG_WHEEL_TUNING_BUSY
+                                                       : DBG_WHEEL_TUNING_INVALID;
+    uint8_t payload[BYTES_LENGTH_DEBUG_WHEEL_TUNING];
+    EncodeDebugWheelTuning(&message, payload);
+    send_frame(DBG_MSG_WHEEL_TUNING, payload, sizeof(payload));
 }
 
 /**

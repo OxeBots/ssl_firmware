@@ -449,4 +449,25 @@ message DebugRaw {
 }
 // DebugRaw size: 4 + 5 x 4 x 2 = 44 bytes
 
+// Read or edit one wheel's live velocity control profile (both directions).
+const DBG_MSG_WHEEL_TUNING = 14;
+const DBG_WHEEL_TUNING_REQUEST = 0;
+const DBG_WHEEL_TUNING_OK = 1;
+const DBG_WHEEL_TUNING_BUSY = 2;
+const DBG_WHEEL_TUNING_INVALID = 3;
+
+message DebugWheelTuning {
+    uint8 wheel       = 1;  // 0..3
+    uint8 status      = 2;  // DBG_WHEEL_TUNING_*
+    uint8 mode        = 3;  // Reply: 0 stopped, 1 continuous, 2 pulsed, 3 pulse blocked
+    uint32 sequence   = 4;  // Request counter, echoed by the reply
+    uint32 fields     = 5;  // Request: bit per changed field, zero reads the active values
+    // IEEE 754 binary32 bits. Order: Kp/Ki/Kd; then forward and reverse groups
+    // of intercept, velocity gain, breakaway duty, handoff speed (rad/s),
+    // pulse drive/off/floor duties, response time (s), and coast delay (s);
+    // then forward/reverse pulse interleaving (0 or 1).
+    // Replies carry the complete active profile.
+    uint32[23] values = 6;
+}
+
 
