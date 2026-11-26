@@ -1,5 +1,31 @@
 menu "Oxebots Robot Configuration"
 
+    choice FIRMWARE_ROLE
+        prompt "Firmware target role"
+        default FIRMWARE_ROLE_ROBOT
+        help
+            Select whether this binary runs on an SSL robot PCB or on the
+            USB-connected ESP32 DevKit Base Station.
+
+        config FIRMWARE_ROLE_ROBOT
+            bool "SSL Robot"
+            help
+                Standard robot firmware driving motors, sensors, kicker and radio.
+
+        config FIRMWARE_ROLE_BASE_STATION
+            bool "USB Base Station"
+            help
+                Dedicated ESP32 DevKit base station bridging UART0 COBS+Bitproto
+                frames to the nRF24L01+ radio network.
+    endchoice
+
+    config BASE_STATION_UART_BAUD
+        int "Base Station UART0 baud rate"
+        depends on FIRMWARE_ROLE_BASE_STATION
+        default 921600
+        help
+            Baud rate for binary COBS+CRC8 communication between PC and Base Station.
+
     config GPIO_MAX_INDEX
         int "Maximum GPIO number for the target board"
         default 39 if IDF_TARGET_ESP32
@@ -39,6 +65,29 @@ menu "Oxebots Robot Configuration"
             help
                 Software key used by the shared SPI driver. The radio uses
                 manual chip-select (CSNRF24), so this is not a GPIO number.
+
+        config RADIO_REPLY_DELAY_US
+            int "Robot telemetry reply turnaround delay (microseconds)"
+            range 0 10000
+            default 500
+            help
+                Short pause before a robot transmits an uplink reply so the ESP32
+                base station finishes switching from transmit to receive mode.
+
+        config RADIO_CHANNEL_HUNT_TRIGGER_MS
+            int "Robot channel-hunt trigger after communication loss (ms)"
+            range 1000 60000
+            default 15000
+            help
+                Duration without base-station packets before the robot cycles
+                through rendezvous channels to rediscover the base station.
+
+        config RADIO_CHANNEL_HUNT_DWELL_MS
+            int "Robot channel-hunt dwell time per channel (ms)"
+            range 50 5000
+            default 300
+            help
+                Time spent listening on each candidate channel during rendezvous hunting.
 
     endmenu
 

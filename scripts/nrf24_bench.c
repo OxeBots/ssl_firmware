@@ -1,25 +1,11 @@
 /*
- * nrf24_bench.c — minimal C round-trip benchmark for one SSL robot.
+ * nrf24_bench.c — minimal standalone C benchmark for the ESP32 Base Station.
  *
- * Talks to the nRF24 USB bridge directly (no Python, no pyserial, no
- * bitproto): sends fire-and-forget 30-byte RobotCommand frames (synced on the
- * dongle's 6-byte TX status) and explicit 5-byte RobotTelemetryRequest frames
- * every tel_interval commands (-I, default 1), measuring the 22-byte
- * RobotTelemetry round-trip distribution.
+ * Speaks COBS + CRC-8 (poly 0x07) + 0x00 framing over UART0 @ 921600 baud
+ * matching proto/base_station_protocol.bitproto and proto/ssl_robot_protocol.bitproto.
  *
- * Wire layout (bitproto, little-endian):
- *   cmd[0]      = (robot_id << 4) | MSG_TYPE_COMMAND(0)
- *   cmd[1..4]   = uint32 timestamp, ms
- *   cmd[5..16]  = Pose {x,y,angle,x_v,y_v,angular_vel}, int16 each (all 0)
- *   cmd[17..28] = vision_pose (unused)
- *   cmd[29]     = kick_velocity
- *   req[0]      = (robot_id << 4) | MSG_TYPE_TELEMETRY_REQ(3)
- *   req[1..4]   = uint32 timestamp, ms
- *   tel[0]      = (robot_id << 4) | MSG_TYPE_TELEMETRY(2)
- *   tel[1..4]   = echoed timestamp
- *
- * Build:  gcc -O2 -Wall -Wextra -o nrf24_bench nrf24_bench.c
- * Usage:  ./nrf24_bench [-p /dev/ttyUSB1] [-r 1] [-n 500] [-I 5] [-w 0] [-t 100] [-i]
+ * Build:  gcc -O2 -Wall -Wextra -Werror -o nrf24_bench nrf24_bench.c
+ * Usage:  ./nrf24_bench -p /dev/ttyUSB0 [-b 921600] [-r 0] [-n 500] [-I 5] [-t 25]
  */
 #define _DEFAULT_SOURCE
 
@@ -30,24 +16,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
-#define CMD_LEN 30
-#define TEL_REQ_LEN 5
-#define TEL_LEN 22
-#define STATUS_LEN 6
-#define MAX_REPLY 256
-
 enum
 {
+    BS_MSG_PING = 0x80,
+    BS_MSG_RF_TX = 0x84,
+    BS_MSG_INFO = 0x88,
+    BS_MSG_RF_TX_STATUS = 0x89,
+    BS_MSG_RF_RX = 0x8A,
+    BS_TX_FLAG_EXPECT_REPLY = 2,
+    BS_TX_STATUS_OK = 0,
     MSG_COMMAND = 0,
     MSG_TELEMETRY = 2,
     MSG_TELEMETRY_REQ = 3
 };
-
-static const uint8_t STATUS_BYTES[STATUS_LEN] = {0x02, 0, 0, 0, 0, 0};
 
 static double now_ms(void)
 {
@@ -59,24 +45,159 @@ static double now_ms(void)
 static uint32_t wall_ms(void)
 {
     struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
 }
 
-static int speed_from_int(int baud)
+static uint8_t crc8(const uint8_t * data, size_t len)
+{
+    uint8_t crc = 0;
+    for (size_t i = 0; i < len; ++i)
+    {
+        crc ^= data[i];
+        for (int b = 0; b < 8; ++b)
+            crc = (crc & 0x80u) ? (uint8_t)((crc << 1) ^ 0x07u) : (uint8_t)(crc << 1);
+    }
+    return crc;
+}
+
+static size_t cobs_encode(const uint8_t * in, size_t len, uint8_t * out)
+{
+    size_t w = 1, code_idx = 0;
+    uint8_t code = 1;
+    for (size_t i = 0; i < len; ++i)
+    {
+        if (in[i] != 0)
+        {
+            out[w++] = in[i];
+            if (++code == 0xFF)
+            {
+                out[code_idx] = 0xFF;
+                code = 1;
+                code_idx = w++;
+            }
+        }
+        else
+        {
+            out[code_idx] = code;
+            code = 1;
+            code_idx = w++;
+        }
+    }
+    out[code_idx] = code;
+    return w;
+}
+
+static size_t cobs_decode(const uint8_t * in, size_t len, uint8_t * out, size_t cap)
+{
+    size_t w = 0, i = 0;
+    while (i < len)
+    {
+        uint8_t code = in[i++];
+        if (code == 0)
+            return 0;
+        for (uint8_t j = 1; j < code; ++j)
+        {
+            if (i >= len || w >= cap)
+                return 0;
+            out[w++] = in[i++];
+        }
+        if (code < 0xFF && i < len)
+        {
+            if (w >= cap)
+                return 0;
+            out[w++] = 0;
+        }
+    }
+    return w;
+}
+
+static int send_frame(int fd, uint8_t msg_type, const uint8_t * payload, size_t len)
+{
+    uint8_t staged[256];
+    uint8_t encoded[264];
+    if (len + 2 > sizeof(staged))
+        return -1;
+    staged[0] = msg_type;
+    memcpy(staged + 1, payload, len);
+    staged[len + 1] = crc8(staged, len + 1);
+    size_t n = cobs_encode(staged, len + 2, encoded);
+    encoded[n++] = 0x00;
+    return (write(fd, encoded, n) == (ssize_t)n) ? 0 : -1;
+}
+
+typedef struct
+{
+    uint8_t accum[264];
+    size_t accum_len;
+    int overflow;
+} FrameDec;
+
+static int read_next_frame(int fd, FrameDec * dec, uint8_t * out_type, uint8_t * out_payload, size_t * out_len, int timeout_ms)
+{
+    double deadline = now_ms() + timeout_ms;
+    while (now_ms() < deadline)
+    {
+        int rem = (int)(deadline - now_ms());
+        if (rem <= 0)
+            break;
+        struct pollfd pfd = {fd, POLLIN, 0};
+        if (poll(&pfd, 1, rem) <= 0)
+            break;
+        uint8_t buf[256];
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n <= 0)
+            continue;
+        for (ssize_t i = 0; i < n; ++i)
+        {
+            uint8_t b = buf[i];
+            if (b == 0)
+            {
+                if (dec->overflow)
+                {
+                    dec->overflow = 0;
+                    dec->accum_len = 0;
+                }
+                else if (dec->accum_len > 0)
+                {
+                    uint8_t raw[264];
+                    size_t rlen = cobs_decode(dec->accum, dec->accum_len, raw, sizeof(raw));
+                    dec->accum_len = 0;
+                    if (rlen >= 3 && crc8(raw, rlen - 1) == raw[rlen - 1])
+                    {
+                        *out_type = raw[0];
+                        *out_len = rlen - 2;
+                        memcpy(out_payload, raw + 1, *out_len);
+                        return 1;
+                    }
+                }
+            }
+            else if (!dec->overflow)
+            {
+                if (dec->accum_len >= sizeof(dec->accum))
+                {
+                    dec->accum_len = 0;
+                    dec->overflow = 1;
+                }
+                else
+                {
+                    dec->accum[dec->accum_len++] = b;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+static speed_t speed_from_int(int baud)
 {
     switch (baud)
     {
-        case 115200:
-            return B115200;
-        case 230400:
-            return B230400;
-        case 460800:
-            return B460800;
-        case 921600:
-            return B921600;
-        default:
-            return -1;
+        case 115200: return B115200;
+        case 230400: return B230400;
+        case 460800: return B460800;
+        case 921600: return B921600;
+        default: return B921600;
     }
 }
 
@@ -84,367 +205,158 @@ static int open_port(const char * path, int baud)
 {
     int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0)
-    {
-        fprintf(stderr, "open %s: %s\n", path, strerror(errno));
         return -1;
-    }
-
-    struct termios tio;
-    if (tcgetattr(fd, &tio) != 0)
+    int bits = 0;
+    if (ioctl(fd, TIOCMGET, &bits) == 0)
     {
-        fprintf(stderr, "tcgetattr: %s\n", strerror(errno));
-        close(fd);
-        return -1;
+        bits &= ~(TIOCM_DTR | TIOCM_RTS);
+        ioctl(fd, TIOCMSET, &bits);
     }
-
-    cfmakeraw(&tio);
-    tio.c_cflag |= (CLOCAL | CREAD);
-    tio.c_cflag &= ~(PARENB | CSTOPB | CSIZE | CRTSCTS);
-    tio.c_cflag |= CS8;
-    tio.c_iflag &= ~(IXON | IXOFF | IXANY);
-    tio.c_cc[VMIN] = 0;
-    tio.c_cc[VTIME] = 0;
-
-    int sp = speed_from_int(baud);
-    if (sp < 0)
-    {
-        fprintf(stderr, "unsupported baud %d\n", baud);
-        close(fd);
-        return -1;
-    }
-    cfsetispeed(&tio, (speed_t)sp);
-    cfsetospeed(&tio, (speed_t)sp);
-
-    if (tcsetattr(fd, TCSANOW, &tio) != 0)
-    {
-        fprintf(stderr, "tcsetattr: %s\n", strerror(errno));
-        close(fd);
-        return -1;
-    }
+    struct termios tty;
+    memset(&tty, 0, sizeof(tty));
+    tcgetattr(fd, &tty);
+    speed_t sp = speed_from_int(baud);
+    cfsetispeed(&tty, sp);
+    cfsetospeed(&tty, sp);
+    tty.c_cflag = (tty.c_cflag & ~(PARENB | CSTOPB | CSIZE | CRTSCTS)) | CS8 | CREAD | CLOCAL;
+    tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+    tty.c_iflag &= ~(IXON | IXOFF | IXANY | IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
+    tty.c_oflag &= ~OPOST;
+    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VTIME] = 0;
+    tcsetattr(fd, TCSANOW, &tty);
     tcflush(fd, TCIOFLUSH);
     return fd;
 }
 
-static void build_cmd(uint8_t out[CMD_LEN], uint8_t robot_id, uint32_t ts)
-{
-    memset(out, 0, CMD_LEN);
-    out[0] = (uint8_t)((robot_id << 4) | MSG_COMMAND);
-    out[1] = (uint8_t)(ts);
-    out[2] = (uint8_t)(ts >> 8);
-    out[3] = (uint8_t)(ts >> 16);
-    out[4] = (uint8_t)(ts >> 24);
-}
-
-static void build_tel_req(uint8_t out[TEL_REQ_LEN], uint8_t robot_id, uint32_t ts)
-{
-    out[0] = (uint8_t)((robot_id << 4) | MSG_TELEMETRY_REQ);
-    out[1] = (uint8_t)(ts);
-    out[2] = (uint8_t)(ts >> 8);
-    out[3] = (uint8_t)(ts >> 16);
-    out[4] = (uint8_t)(ts >> 24);
-}
-
-static void write_all(int fd, const uint8_t * data, size_t len)
-{
-    size_t off = 0;
-    while (off < len)
-    {
-        ssize_t w = write(fd, data + off, len - off);
-        if (w > 0)
-        {
-            off += (size_t)w;
-        }
-        else if (w < 0 && (errno == EAGAIN || errno == EINTR))
-        {
-            struct pollfd pfd = {.fd = fd, .events = POLLOUT, .revents = 0};
-            poll(&pfd, 1, 5);
-        }
-        else
-        {
-            break;
-        }
-    }
-    tcdrain(fd);
-}
-
-/*
- * Wait for the USB dongle (CH340 + STC15) to emit its 6-byte TX-complete
- * status frame (02 00 00 00 00 00) before sending the next UART packet.
- */
-static void wait_dongle_tx_status(int fd, int max_wait_ms)
-{
-    const double deadline = now_ms() + (double)max_wait_ms;
-    int rcvd = 0;
-    uint8_t dump[32];
-
-    while (rcvd < STATUS_LEN)
-    {
-        double left = deadline - now_ms();
-        if (left <= 0)
-            break;
-
-        struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
-        int rc = poll(&pfd, 1, (int)left);
-        if (rc <= 0 || !(pfd.revents & POLLIN))
-            break;
-
-        ssize_t n = read(fd, dump, sizeof(dump));
-        if (n > 0)
-            rcvd += (int)n;
-    }
-    usleep(1500);
-    tcflush(fd, TCIFLUSH);
-}
-
-static uint32_t read_echo(const uint8_t * p)
-{
-    return (uint32_t)p[1] | ((uint32_t)p[2] << 8) | ((uint32_t)p[3] << 16) | ((uint32_t)p[4] << 24);
-}
-
-/*
- * Waits up to timeout_ms for a RobotTelemetry frame. Returns 1 and fills
- * *echo on success, 0 on timeout. Strips the (vestigial) 6-byte bridge
- * status code and rejects frames whose msg_type is not telemetry.
- */
-static int wait_telemetry(int fd, int timeout_ms, uint32_t * echo)
-{
-    uint8_t buf[MAX_REPLY];
-    size_t len = 0;
-    const double deadline = now_ms() + (double)timeout_ms;
-
-    for (;;)
-    {
-        double left = deadline - now_ms();
-        if (left <= 0)
-            return 0;
-
-        struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
-        int rc = poll(&pfd, 1, (int)left);
-        if (rc < 0)
-        {
-            if (errno == EINTR)
-                continue;
-            return 0;
-        }
-        if (rc == 0)
-            return 0;
-        if (!(pfd.revents & POLLIN))
-            return 0;
-
-        size_t room = sizeof(buf) - len;
-        if (room == 0)
-        {
-            memmove(buf, buf + 1, --len);
-            room = 1;
-        }
-        ssize_t n = read(fd, buf + len, room);
-        if (n <= 0)
-        {
-            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-                continue;
-            return 0;
-        }
-        len += (size_t)n;
-
-        for (;;)
-        {
-            if (len >= STATUS_LEN && memcmp(buf, STATUS_BYTES, STATUS_LEN) == 0)
-            {
-                memmove(buf, buf + STATUS_LEN, len - STATUS_LEN);
-                len -= STATUS_LEN;
-                continue;
-            }
-            if (len < TEL_LEN)
-                break;
-            if ((buf[0] & 0x0F) == MSG_TELEMETRY)
-            {
-                *echo = read_echo(buf);
-                return 1;
-            }
-            memmove(buf, buf + 1, --len);
-        }
-    }
-}
-
 static int cmp_double(const void * a, const void * b)
 {
-    double x = *(const double *)a;
-    double y = *(const double *)b;
-    return (x > y) - (x < y);
-}
-
-static void send_rate_setup(int fd)
-{
-    static const char at[] = "AT+RATE=3\r\n";
-    ssize_t ignored = write(fd, at, sizeof(at) - 1);
-    (void)ignored;
-    usleep(150000);
-    tcflush(fd, TCIFLUSH);
+    double da = *(const double *)a, db = *(const double *)b;
+    return (da > db) - (da < db);
 }
 
 int main(int argc, char ** argv)
 {
-    const char * port = "/dev/ttyUSB1";
-    int robot = 1;
+    const char * port = "/dev/ttyUSB0";
+    int baud = 921600;
+    int robot_id = 0;
     int count = 500;
-    int tel_interval = 1;
-    int gap_ms = 0;
-    int timeout_ms = 50;
-    int baud = 115200;
-    int do_init = 0;
-    int no_flush = 0;
+    int tel_interval = 5;
+    int timeout_ms = 25;
 
     int opt;
-    while ((opt = getopt(argc, argv, "p:r:n:I:w:t:b:iFh")) != -1)
+    while ((opt = getopt(argc, argv, "p:b:r:n:I:t:")) != -1)
     {
-        switch (opt)
-        {
-            case 'p':
-                port = optarg;
-                break;
-            case 'r':
-                robot = atoi(optarg);
-                break;
-            case 'n':
-                count = atoi(optarg);
-                break;
-            case 'I':
-                tel_interval = atoi(optarg);
-                break;
-            case 'w':
-                gap_ms = atoi(optarg);
-                break;
-            case 't':
-                timeout_ms = atoi(optarg);
-                break;
-            case 'b':
-                baud = atoi(optarg);
-                break;
-            case 'i':
-                do_init = 1;
-                break;
-            case 'F':
-                no_flush = 1;
-                break;
-            default:
-                printf(
-                  "usage: %s [-p port] [-r robot] [-n count] [-I tel_interval] [-w gap_ms] "
-                  "[-t timeout_ms] [-b baud] [-i] [-F]\n",
-                  argv[0]);
-                return 1;
-        }
-    }
-    if (count <= 0 || timeout_ms <= 0 || tel_interval < 0 || robot < 0 || robot > 14)
-    {
-        fprintf(stderr, "invalid arguments\n");
-        return 1;
+        if (opt == 'p') port = optarg;
+        else if (opt == 'b') baud = atoi(optarg);
+        else if (opt == 'r') robot_id = atoi(optarg);
+        else if (opt == 'n') count = atoi(optarg);
+        else if (opt == 'I') tel_interval = atoi(optarg);
+        else if (opt == 't') timeout_ms = atoi(optarg);
     }
 
     int fd = open_port(port, baud);
     if (fd < 0)
-        return 1;
-
-    if (do_init)
-        send_rate_setup(fd);
-    usleep(50000);
-    tcflush(fd, TCIFLUSH);
-
-    double * rtt = calloc((size_t)count, sizeof(double));
-    if (!rtt)
     {
-        fprintf(stderr, "out of memory\n");
+        perror("open_port");
+        return 1;
+    }
+
+    FrameDec dec = {0};
+    uint8_t ping[4] = {1, 0, 0, 0};
+    send_frame(fd, BS_MSG_PING, ping, sizeof(ping));
+    uint8_t ftype = 0, fpay[256];
+    size_t flen = 0;
+    if (!read_next_frame(fd, &dec, &ftype, fpay, &flen, 400) || ftype != BS_MSG_INFO)
+    {
+        fprintf(stderr, "No BaseInfo handshake on %s @ %d baud\n", port, baud);
         close(fd);
         return 1;
     }
+    printf("Connected to ESP32 Base Station (%s @ %d) ch=%u ready=%u\n", port, baud, fpay[2], fpay[1]);
 
-    int tel_reqs = 0;
-    int ok = 0;
-    int first_ok = -1;
-    const double start = now_ms();
+    double * rtts = (double *)calloc((size_t)count + 1, sizeof(double));
+    int rtt_n = 0, tx_ok = 0, retries_sum = 0, tel_req = 0;
+    uint16_t seq = 1;
+    double t_start = now_ms();
 
     for (int i = 0; i < count; ++i)
     {
-        uint8_t cmd[CMD_LEN];
-        build_cmd(cmd, (uint8_t)robot, wall_ms());
+        uint8_t rf_tx[36] = {0};
+        uint32_t ts = wall_ms();
+        uint16_t s = seq++;
+        rf_tx[0] = (uint8_t)(s & 0xFF);
+        rf_tx[1] = (uint8_t)(s >> 8);
+        rf_tx[2] = (uint8_t)robot_id;
+        rf_tx[3] = 0;
+        rf_tx[4] = 30;
+        rf_tx[5] = (uint8_t)((robot_id << 4) | MSG_COMMAND);
+        memcpy(&rf_tx[6], &ts, 4);
 
-        if (!no_flush)
-            tcflush(fd, TCIFLUSH);
-
-        write_all(fd, cmd, CMD_LEN);
-        wait_dongle_tx_status(fd, 18);
+        send_frame(fd, BS_MSG_RF_TX, rf_tx, sizeof(rf_tx));
+        if (read_next_frame(fd, &dec, &ftype, fpay, &flen, timeout_ms) && ftype == BS_MSG_RF_TX_STATUS)
+        {
+            if (fpay[3] == BS_TX_STATUS_OK)
+            {
+                tx_ok++;
+                retries_sum += fpay[4];
+            }
+        }
 
         if (tel_interval > 0 && ((i + 1) % tel_interval == 0))
         {
-            uint8_t req[TEL_REQ_LEN];
-            const uint32_t ts = wall_ms();
-            build_tel_req(req, (uint8_t)robot, ts);
+            tel_req++;
+            uint8_t req_tx[36] = {0};
+            uint16_t s2 = seq++;
+            uint32_t ts2 = wall_ms();
+            req_tx[0] = (uint8_t)(s2 & 0xFF);
+            req_tx[1] = (uint8_t)(s2 >> 8);
+            req_tx[2] = (uint8_t)robot_id;
+            req_tx[3] = BS_TX_FLAG_EXPECT_REPLY;
+            req_tx[4] = 5;
+            req_tx[5] = (uint8_t)((robot_id << 4) | MSG_TELEMETRY_REQ);
+            memcpy(&req_tx[6], &ts2, 4);
 
-            if (!no_flush)
-                tcflush(fd, TCIFLUSH);
-
-            const double t0 = now_ms();
-            write_all(fd, req, TEL_REQ_LEN);
-            tel_reqs++;
-
-            uint32_t echo = 0;
-            if (wait_telemetry(fd, timeout_ms, &echo) && echo == ts)
+            double t0 = now_ms();
+            send_frame(fd, BS_MSG_RF_TX, req_tx, sizeof(req_tx));
+            double dl = t0 + timeout_ms;
+            while (now_ms() < dl)
             {
-                if (first_ok < 0)
-                    first_ok = i;
-                rtt[ok++] = now_ms() - t0;
-                usleep(1500);
+                if (!read_next_frame(fd, &dec, &ftype, fpay, &flen, (int)(dl - now_ms())))
+                    break;
+                if (ftype == BS_MSG_RF_RX && flen >= 6 + 22 && (fpay[6] & 0x0F) == MSG_TELEMETRY &&
+                    (fpay[6] >> 4) == robot_id)
+                {
+                    rtts[rtt_n++] = now_ms() - t0;
+                    break;
+                }
             }
-            tcflush(fd, TCIFLUSH);
         }
-
-        if (gap_ms > 0)
-            usleep((useconds_t)gap_ms * 1000);
     }
 
-    const double elapsed = now_ms() - start;
-    close(fd);
-
-    printf("\n=== nRF24 C round-trip benchmark ===\n");
-    printf("port %s @ %d, robot %d, %d cmds, tel every %d cmd(s), gap %d ms\n",
-           port,
-           baud,
-           robot,
+    double elapsed_s = (now_ms() - t_start) / 1000.0;
+    printf("Done in %.2fs (%.1f cmds/s) | TX ACK: %d/%d (%.1f%%, avg retries=%.2f)\n",
+           elapsed_s,
+           count / elapsed_s,
+           tx_ok,
            count,
-           tel_interval,
-           gap_ms);
-    printf("elapsed    : %.2f s\n", elapsed / 1000.0);
-    printf("cmd rate   : %.1f cmds/s\n", (double)count * 1000.0 / elapsed);
-
-    if (tel_reqs == 0)
+           100.0 * tx_ok / count,
+           tx_ok ? (double)retries_sum / tx_ok : 0.0);
+    if (rtt_n > 0)
     {
-        free(rtt);
-        return 0;
+        qsort(rtts, (size_t)rtt_n, sizeof(double), cmp_double);
+        double sum = 0;
+        for (int i = 0; i < rtt_n; ++i) sum += rtts[i];
+        printf("Telemetry: %d/%d (%.1f%%) | RTT avg=%.2fms min=%.2fms p95=%.2fms max=%.2fms\n",
+               rtt_n,
+               tel_req,
+               100.0 * rtt_n / tel_req,
+               sum / rtt_n,
+               rtts[0],
+               rtts[(int)(0.95 * (rtt_n - 1))],
+               rtts[rtt_n - 1]);
     }
-    if (ok == 0)
-    {
-        printf("tel replies: 0/%d (0.00%%)\n", tel_reqs);
-        free(rtt);
-        return 2;
-    }
-
-    qsort(rtt, (size_t)ok, sizeof(double), cmp_double);
-    double sum = 0.0;
-    for (int i = 0; i < ok; ++i) sum += rtt[i];
-
-    const double p50 = rtt[ok / 2];
-    const double p90 = rtt[(int)((double)ok * 0.90)];
-    const double p99 = rtt[(int)((double)ok * 0.99) < ok ? (int)((double)ok * 0.99) : ok - 1];
-
-    printf("tel replies: %d/%d (%.2f%%)\n", ok, tel_reqs, 100.0 * ok / tel_reqs);
-    printf("tel rate   : %.1f replies/s\n", (double)ok * 1000.0 / elapsed);
-    printf("RTT min    : %.2f ms\n", rtt[0]);
-    printf("RTT p50    : %.2f ms\n", p50);
-    printf("RTT p90    : %.2f ms\n", p90);
-    printf("RTT p99    : %.2f ms\n", p99);
-    printf("RTT max    : %.2f ms\n", rtt[ok - 1]);
-    printf("RTT mean   : %.2f ms\n", sum / (double)ok);
-    printf("first ok   : cmd %d\n", first_ok);
-
-    free(rtt);
-    return ok == tel_reqs ? 0 : 3;
+    free(rtts);
+    close(fd);
+    return 0;
 }

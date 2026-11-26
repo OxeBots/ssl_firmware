@@ -68,6 +68,10 @@ RADIO_NEW_ID_INPUT = "radio_new_id_input"
 RADIO_SET_ID_BUTTON = "radio_set_id"
 RADIO_RESET_CHECK = "radio_reset_check"
 RADIO_RESET_BUTTON = "radio_reset"
+RADIO_CHANNEL_INPUT = "radio_channel_input"
+RADIO_SET_CHANNEL_BUTTON = "radio_set_channel"
+RADIO_SCAN_BUTTON = "radio_scan_spectrum"
+RADIO_BASE_STATUS = "radio_base_status"
 
 RADIO_MESSAGES_PANEL = "radio_messages_panel"
 RADIO_MESSAGES_TABLE = "radio_messages_table"
@@ -335,9 +339,45 @@ def _build_command_panel(on_send_motion, on_kick):
             )
 
 
-def _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, on_factory_reset):
+def _build_config_panel(
+    on_control_calibration,
+    on_mag_calibration,
+    on_set_id,
+    on_factory_reset,
+    on_scan_spectrum,
+    on_set_channel,
+):
     button_h = rendering.px(BUTTON_HEIGHT)
     with dpg.tab(label="Configuração", tag=RADIO_CONFIG_PANEL):
+        rendering.add_text("Base Station & Canal RF", "label", config.TEXT)
+        rendering.add_text("Canal: —", "tiny", config.TEXT_DIM, tag=RADIO_BASE_STATUS)
+        with dpg.group(horizontal=True):
+            rendering.add_text("Canal", "small", config.TEXT_DIM)
+            dpg.add_input_int(
+                tag=RADIO_CHANNEL_INPUT,
+                default_value=76,
+                width=rendering.px(NEW_ID_INPUT_WIDTH),
+                min_value=0,
+                max_value=125,
+                min_clamped=True,
+                max_clamped=True,
+                step=1,
+            )
+            dpg.add_button(
+                tag=RADIO_SET_CHANNEL_BUTTON,
+                label="Aplicar canal",
+                width=rendering.px(130),
+                height=button_h,
+                callback=on_set_channel,
+            )
+            dpg.add_button(
+                tag=RADIO_SCAN_BUTTON,
+                label="Escanear",
+                width=rendering.px(100),
+                height=button_h,
+                callback=on_scan_spectrum,
+            )
+        dpg.add_separator()
         rendering.add_text(
             "PERIGO: levante o robô e mantenha as rodas livres.",
             "small",
@@ -463,6 +503,14 @@ def build(on_disconnect, stop_usb):
             return
         _session.send_config(radio.CONFIG_FLAG_FACTORY_RESET)
 
+    def on_scan_spectrum(_sender, _app_data, _user_data=None):
+        if _session is not None:
+            _session.request_scan()
+
+    def on_set_channel(_sender, _app_data, _user_data=None):
+        if _session is not None:
+            _session.switch_channel(int(dpg.get_value(RADIO_CHANNEL_INPUT)), notify_robots=True)
+
     _build_header(on_disconnect_clicked)
     with dpg.group(horizontal=True):
         with rendering.panel("Controle por rádio", RADIO_DRIVE_PANEL, width=1, height=1):
@@ -470,7 +518,14 @@ def build(on_disconnect, stop_usb):
             with dpg.tab_bar(tag=RADIO_DRIVE_TABS):
                 _build_keyboard_tab()
                 _build_command_panel(on_send_motion, on_kick)
-                _build_config_panel(on_control_calibration, on_mag_calibration, on_set_id, on_factory_reset)
+                _build_config_panel(
+                    on_control_calibration,
+                    on_mag_calibration,
+                    on_set_id,
+                    on_factory_reset,
+                    on_scan_spectrum,
+                    on_set_channel,
+                )
         with dpg.group():
             _build_telemetry_panel()
             _build_messages_panel()
@@ -565,6 +620,8 @@ def _update_buttons(active):
         RADIO_KICK_BUTTON,
         RADIO_MAG_CAL_BUTTON,
         RADIO_DISCONNECT_BUTTON,
+        RADIO_SET_CHANNEL_BUTTON,
+        RADIO_SCAN_BUTTON,
     ):
         dpg.configure_item(tag, enabled=active)
     dpg.configure_item(RADIO_CONTROL_CAL_BUTTON, enabled=safety)
@@ -686,13 +743,33 @@ def _empty_snapshot():
         "rx_age_s": None,
         "rtt_ms": 0.0,
         "tx_count": 0,
+        "tx_ack_rate": 0.0,
+        "avg_retries": 0.0,
         "rx_count": 0,
+        "base_info": None,
+        "scan_result": None,
         "command": {"x": 0, "y": 0, "angle": 0, "vx": 0, "vy": 0, "w": 0},
         "pending_configs": 0,
         "error": "",
         "messages": [],
         "live": False,
     }
+
+
+def _update_base_status(snapshot):
+    info = snapshot.get("base_info")
+    if not info:
+        rendering.set_text(RADIO_BASE_STATUS, "Base Station: desconectada", config.TEXT_DIM)
+        return
+    ch = info["channel"]
+    ack = snapshot.get("tx_ack_rate", 0.0)
+    reinits = info.get("radio_reinit_count", 0)
+    text = f"Canal {ch} ({2400 + ch} MHz) · ACK {ack:.0f}% · Reinits {reinits}"
+    scan = snapshot.get("scan_result")
+    if scan:
+        best = scan["best_channel"]
+        text += f" · Scan: melhor ch {best}"
+    rendering.set_text(RADIO_BASE_STATUS, text, config.ACCENT)
 
 
 def update(session, layout):
@@ -705,5 +782,6 @@ def update(session, layout):
     _apply_layout(body_w, body_h)
     _update_header(snapshot, body_w)
     _update_telemetry(snapshot)
+    _update_base_status(snapshot)
     _update_messages(snapshot)
     _update_buttons(session is not None)

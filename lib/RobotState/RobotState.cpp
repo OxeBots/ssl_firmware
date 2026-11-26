@@ -1,7 +1,10 @@
 #include "RobotState.h"
 
+#include <sdkconfig.h>
+
 #include "NVSManager.h"
-#include "ssl_robot_protocol_bp.h"  // for ROBOT_ID_MAX
+#include "RadioAddressing.h"
+#include "ssl_robot_protocol_bp.h"
 
 static const char * TAG = "RobotState";
 
@@ -11,20 +14,12 @@ RobotState & RobotState::get_instance()
     return instance;
 }
 
-/**
- * @brief Initialize robot state — load robot ID from NVS.
- *
- * Attempts to load stored robot ID from NVS. If not found or error,
- * defaults to 0. Always returns ESP_OK (missing key is not an error).
- *
- * @return ESP_OK on success
- */
 esp_err_t RobotState::init()
 {
     int32_t stored_id = 0;
     esp_err_t err = NVSManager::load_i32(NVS_NS, NVS_KEY, &stored_id);
 
-    if (err == ESP_OK)
+    if (err == ESP_OK && (stored_id >= 0 && stored_id <= ROBOT_ID_MAX))
     {
         m_robot_id = static_cast<uint8_t>(stored_id);
         ESP_LOGI(TAG, "Loaded robot ID from NVS: %d", m_robot_id);
@@ -35,26 +30,28 @@ esp_err_t RobotState::init()
         ESP_LOGW(TAG, "No robot ID in NVS (err=%s) — defaulting to 0.", esp_err_to_name(err));
     }
 
-    return ESP_OK;  // Always succeed; missing key is not an error.
+    int32_t stored_ch = CONFIG_RADIO_CHANNEL;
+    err = NVSManager::load_i32(NVS_NS, NVS_KEY_CHANNEL, &stored_ch);
+    if (err == ESP_OK && stored_ch >= 0 &&
+        radio_addressing::is_valid_channel(static_cast<uint8_t>(stored_ch)))
+    {
+        m_radio_channel = static_cast<uint8_t>(stored_ch);
+        ESP_LOGI(TAG, "Loaded radio channel from NVS: %u", m_radio_channel);
+    }
+    else
+    {
+        m_radio_channel = CONFIG_RADIO_CHANNEL;
+        ESP_LOGI(TAG, "Using default radio channel: %u", m_radio_channel);
+    }
+
+    return ESP_OK;
 }
 
-/**
- * @brief Get current robot ID.
- * @return Robot ID (0-10 for valid robots, 15 for broadcast)
- */
 uint8_t RobotState::get_id() const
 {
     return m_robot_id;
 }
 
-/**
- * @brief Set robot ID and persist to NVS.
- *
- * Validates ID is within valid range (0-10 or 15 for broadcast).
- * Invalid IDs are rejected and not written to NVS.
- *
- * @param id Robot ID to set
- */
 void RobotState::set_id(uint8_t id)
 {
     if (id > ROBOT_ID_MAX && id != ROBOT_ID_BROADCAST)
@@ -72,28 +69,37 @@ void RobotState::set_id(uint8_t id)
     ESP_LOGI(TAG, "Robot ID set to %d (NVS write queued).", id);
 }
 
-/**
- * @brief Set error flag in error_flags bitmask.
- * @param flag Error flag bit to set
- */
+uint8_t RobotState::get_radio_channel() const
+{
+    return m_radio_channel;
+}
+
+void RobotState::set_radio_channel(uint8_t channel)
+{
+    if (!radio_addressing::is_valid_channel(channel))
+    {
+        ESP_LOGE(TAG,
+                 "Invalid radio channel %u (max=%u). Rejected.",
+                 channel,
+                 radio_addressing::MAX_CHANNEL);
+        return;
+    }
+
+    m_radio_channel = channel;
+    NVSManager::save_i32(NVS_NS, NVS_KEY_CHANNEL, static_cast<int32_t>(channel));
+    ESP_LOGI(TAG, "Radio channel set to %u (NVS write queued).", channel);
+}
+
 void RobotState::set_error(uint16_t flag)
 {
     m_error_flags |= flag;
 }
 
-/**
- * @brief Clear error flag from error_flags bitmask.
- * @param flag Error flag bit to clear
- */
 void RobotState::clear_error(uint16_t flag)
 {
     m_error_flags &= static_cast<uint16_t>(~flag);
 }
 
-/**
- * @brief Get current error flags bitmask.
- * @return 16-bit error flags bitmask
- */
 uint16_t RobotState::get_error_flags() const
 {
     return m_error_flags;

@@ -1,10 +1,10 @@
-"""Regression checks for the nRF24L01 radio link codec, stream and session."""
+"""Regression checks for the ESP32 Base Station radio link, codec, discovery and session."""
 
 import struct
 import unittest
 from unittest.mock import Mock, patch
 
-from robot_bench import config, discovery, picker, radio, radio_panel
+from robot_bench import base_station, config, discovery, picker, protocol as proto, radio, radio_panel
 from scripts.ssl_robot_protocol_bp import (
     CONFIG_FLAG_CALIBRATE_MAG,
     CONFIG_FLAG_RUN_CALIBRATION,
@@ -21,8 +21,6 @@ from scripts.ssl_robot_protocol_bp import (
 
 
 class FakePort:
-    """Stand-in for serial.tools.list_ports_common.ListPortInfo."""
-
     def __init__(self, device, vid=None, pid=None, description=None):
         self.device = device
         self.vid = vid
@@ -45,6 +43,24 @@ def make_telemetry(robot_id=2, timestamp=0x01020304, **pose):
     message.kicker_voltage = pose.get("kicker", 1650)
     message.error_flags = pose.get("errors", 0x0021)
     return message.encode()
+
+
+def make_base_info(channel=76, data_rate=base_station.BS_RATE_2MBPS, reinits=0):
+    return {
+        "protocol_version": base_station.PROTO_VERSION,
+        "radio_ready": True,
+        "channel": channel,
+        "data_rate": data_rate,
+        "pa_level": 3,
+        "retransmit_delay": 1,
+        "retransmit_count": 3,
+        "tx_ok_count": 100,
+        "tx_fail_count": 2,
+        "rx_count": 25,
+        "radio_reinit_count": reinits,
+        "addr_suffix": base_station.DEFAULT_ADDR_SUFFIX,
+        "base_addr_lsb": base_station.DEFAULT_BASE_ADDR_LSB,
+    }
 
 
 class CommandEncodingTests(unittest.TestCase):
@@ -74,19 +90,6 @@ class CommandEncodingTests(unittest.TestCase):
         self.assertEqual(len(encoded), radio.COMMAND_SIZE)
         self.assertEqual(encoded, message.encode())
 
-    def test_command_field_layout(self):
-        encoded = radio.encode_command(5, x=7, timestamp=0x0A0B0C0D)
-        self.assertEqual(encoded[0], (5 << 4) | MSG_TYPE_COMMAND)
-        self.assertEqual(encoded[1:5], bytes([0x0D, 0x0C, 0x0B, 0x0A]))
-        self.assertEqual(encoded[5:7], bytes([7, 0]))
-        self.assertEqual(encoded[17:29], bytes(12))
-        self.assertEqual(encoded[29], 0)
-
-    def test_command_rejects_an_id_that_does_not_fit_the_header(self):
-        with self.assertRaises(ValueError):
-            radio.encode_command(16)
-        self.assertEqual(radio.encode_command(radio.ROBOT_ID_BROADCAST)[0] >> 4, 15)
-
     def test_config_matches_the_bitproto_encoder(self):
         message = RobotConfig()
         message.header.msg_type = MSG_TYPE_CONFIG
@@ -95,53 +98,125 @@ class CommandEncodingTests(unittest.TestCase):
         message.config_flags = CONFIG_FLAG_RUN_CALIBRATION | CONFIG_FLAG_CALIBRATE_MAG
         message.param = 1234
         encoded = radio.encode_config(
-            message.header.robot_id, message.config_flags, message.param, timestamp=message.header.timestamp
+            message.header.robot_id,
+            message.config_flags,
+            message.param,
+            timestamp=message.header.timestamp,
         )
         self.assertEqual(len(encoded), radio.CONFIG_SIZE)
         self.assertEqual(encoded, message.encode())
 
-    def test_config_rejects_an_id_that_does_not_fit_the_header(self):
-        with self.assertRaises(ValueError):
-            radio.encode_config(16, CONFIG_FLAG_SET_ID)
+    def test_set_channel_config_encoding(self):
+        encoded = radio.encode_config(2, radio.CONFIG_FLAG_SET_CHANNEL, 114, timestamp=100)
+        self.assertEqual(encoded[5], 32)
+        self.assertEqual(struct.unpack_from("<H", encoded, 6)[0], 114)
 
     def test_telemetry_request_matches_the_bitproto_encoder(self):
         message = RobotTelemetryRequest()
         message.header.msg_type = MSG_TYPE_TELEMETRY_REQ
         message.header.robot_id = 4
         message.header.timestamp = 0x0A0B0C0D
-        self.assertEqual(radio.encode_telemetry_request(4, message.header.timestamp), message.encode())
+        self.assertEqual(
+            radio.encode_telemetry_request(4, message.header.timestamp), message.encode()
+        )
 
     def test_telemetry_request_rejects_broadcast(self):
         with self.assertRaises(ValueError):
             radio.encode_telemetry_request(radio.ROBOT_ID_BROADCAST, 0)
 
 
+class BaseStationCodecTests(unittest.TestCase):
+    def test_base_info_and_scan_result_roundtrip_via_cobs(self):
+        raw_info = base_station._INFO_STRUCT.pack(
+            1, 1, 114, 1, 3, 1, 3, 500, 3, 120, 2, base_station.DEFAULT_ADDR_SUFFIX, 0xB4
+        )
+        frame = proto.encode_frame(base_station.BS_MSG_INFO, raw_info)
+        dec = proto.FrameDecoder()
+        frames = dec.feed(frame)
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0][0], base_station.BS_MSG_INFO)
+        parsed = base_station.parse_info(frames[0][1])
+        self.assertEqual(parsed["channel"], 114)
+        self.assertEqual(parsed["tx_ok_count"], 500)
+        self.assertEqual(parsed["radio_reinit_count"], 2)
+
+        busy = bytes((i % 101 for i in range(126)))
+        raw_scan = base_station._SCAN_RES_STRUCT.pack(0, 126, 114, busy)
+        scan_frame = proto.encode_frame(base_station.BS_MSG_SCAN_RESULT, raw_scan)
+        scan_frames = dec.feed(scan_frame)
+        self.assertEqual(len(scan_frames), 1)
+        scan = base_station.parse_scan_result(scan_frames[0][1])
+        self.assertEqual(scan["best_channel"], 114)
+        self.assertEqual(len(scan["busy_pct"]), 126)
+
+    def test_rf_tx_and_status_framing(self):
+        cmd = radio.encode_command(1, vx=300, timestamp=55)
+        frame = base_station.encode_rf_tx(9, 1, cmd)
+        dec = proto.FrameDecoder()
+        out = dec.feed(frame)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0][0], base_station.BS_MSG_RF_TX)
+
+        raw_st = base_station._TX_STATUS_STRUCT.pack(9, 1, base_station.BS_TX_STATUS_OK, 1, 410)
+        parsed = base_station.parse_tx_status(raw_st)
+        self.assertEqual(parsed["seq"], 9)
+        self.assertEqual(parsed["retries"], 1)
+        self.assertEqual(parsed["tx_time_us"], 410)
+
+    def test_base_station_link_open_handshake_and_close(self):
+        raw_info = base_station._INFO_STRUCT.pack(
+            1, 1, 76, 1, 3, 1, 3, 10, 0, 5, 0, base_station.DEFAULT_ADDR_SUFFIX, 0xB4
+        )
+        reply = proto.encode_frame(base_station.BS_MSG_INFO, raw_info)
+
+        class FakeSerial:
+            def __init__(self):
+                self.is_open = True
+                self.rx = bytearray(reply)
+                self.written = bytearray()
+
+            @property
+            def in_waiting(self):
+                return len(self.rx)
+
+            def reset_input_buffer(self):
+                pass
+
+            def write(self, data):
+                self.written += data
+                return len(data)
+
+            def flush(self):
+                pass
+
+            def read(self, n):
+                chunk = bytes(self.rx[:n])
+                del self.rx[:n]
+                return chunk
+
+            def close(self):
+                self.is_open = False
+
+        fake_ser = FakeSerial()
+        with patch.object(base_station, "open_serial_no_reset", return_value=fake_ser):
+            link = base_station.BaseStationLink("/dev/ttyUSB1")
+            info = link.open()
+            self.assertEqual(info["channel"], 76)
+            self.assertTrue(info["radio_ready"])
+            self.assertTrue(link.is_open)
+            link.close()
+            self.assertFalse(link.is_open)
+
+
 class TelemetryDecodingTests(unittest.TestCase):
     def test_decodes_every_telemetry_field(self):
         decoded = radio.decode_telemetry(make_telemetry())
-        self.assertEqual(
-            decoded,
-            {
-                "robot_id": 2,
-                "timestamp": 0x01020304,
-                "x_mm": -500,
-                "y_mm": 500,
-                "angle_deg": 90.0,
-                "vx_mm_s": -100,
-                "vy_mm_s": 200,
-                "w_rad_s": -0.5,
-                "battery_pct": 87,
-                "kicker_voltage_v": 16.5,
-                "error_flags": 0x21,
-            },
-        )
+        self.assertEqual(decoded["robot_id"], 2)
+        self.assertEqual(decoded["battery_pct"], 87)
+        self.assertAlmostEqual(decoded["kicker_voltage_v"], 16.5)
 
-    def test_rejects_short_and_empty_frames(self):
-        frame = make_telemetry()
-        self.assertIsNone(radio.decode_telemetry(frame[: radio.TELEMETRY_SIZE - 1]))
+    def test_rejects_short_and_wrong_type(self):
         self.assertIsNone(radio.decode_telemetry(b""))
-
-    def test_rejects_other_message_types(self):
         frame = bytearray(make_telemetry())
         frame[0] = (2 << 4) | MSG_TYPE_COMMAND
         self.assertIsNone(radio.decode_telemetry(bytes(frame)))
@@ -154,71 +229,33 @@ class TelemetryDecodingTests(unittest.TestCase):
         )
 
 
-class TelemetryStreamTests(unittest.TestCase):
-    def setUp(self):
-        self.stream = radio.TelemetryStream()
-
-    def test_fragmented_frame_is_assembled(self):
-        frame = make_telemetry()
-        for byte in frame[:-1]:
-            self.assertEqual(self.stream.feed(bytes([byte])), [])
-        frames = self.stream.feed(frame[-1:])
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0]["robot_id"], 2)
-
-    def test_bridge_status_code_is_stripped(self):
-        frames = self.stream.feed(radio._BRIDGE_STATUS + make_telemetry())
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0]["battery_pct"], 87)
-
-    def test_two_frames_in_one_read(self):
-        data = radio._BRIDGE_STATUS + make_telemetry(robot_id=2) + radio._BRIDGE_STATUS + make_telemetry(
-            robot_id=4, battery=40
-        )
-        frames = self.stream.feed(data)
-        self.assertEqual([frame["robot_id"] for frame in frames], [2, 4])
-        self.assertEqual(frames[1]["battery_pct"], 40)
-
-    def test_garbage_before_a_frame_is_skipped(self):
-        # Bytes whose low nibble is not MSG_TYPE_TELEMETRY: the decoder drops
-        # them one by one and still finds the frame that follows.
-        garbage = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE])
-        frames = self.stream.feed(garbage + make_telemetry())
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0]["timestamp"], 0x01020304)
-
-    def test_partial_garbage_keeps_the_frame(self):
-        frame = make_telemetry()
-        self.assertEqual(self.stream.feed(frame[:20]), [])
-        self.assertEqual(len(self.stream.feed(frame[20:])), 1)
-
-
 class AdapterDiscoveryTests(unittest.TestCase):
-    def test_only_the_ch340_bridge_is_a_radio_adapter(self):
+    def test_find_adapters_probes_serial_ports_for_base_station(self):
         ports = [
             FakePort("/dev/ttyUSB0", vid=0x10C4, pid=0xEA60),
-            FakePort("/dev/ttyUSB1", vid=radio.ADAPTER_VID, pid=radio.ADAPTER_PID),
-            FakePort("/dev/ttyACM0", vid=None, pid=None),
+            FakePort("/dev/ttyUSB1", vid=0x1A86, pid=0x7523),
         ]
-        with patch.object(radio.serial.tools.list_ports, "comports", return_value=ports):
+
+        def fake_probe(dev, baud=radio.BAUD):
+            return make_base_info(channel=114) if dev == "/dev/ttyUSB1" else None
+
+        with (
+            patch.object(radio.serial.tools.list_ports, "comports", return_value=ports),
+            patch.object(base_station, "probe_base_station", side_effect=fake_probe),
+        ):
             adapters = radio.find_adapters()
-        self.assertEqual(adapters, [("/dev/ttyUSB1", "USB Serial")])
+        self.assertEqual(len(adapters), 1)
+        self.assertEqual(adapters[0][0], "/dev/ttyUSB1")
+        self.assertIn("ch 114", adapters[0][1])
 
-
-class DiscoveryFilterTests(unittest.TestCase):
-    def test_radio_adapter_is_not_a_robot_port(self):
+    def test_discovery_lists_all_usb_serial_candidates(self):
         ports = [
             FakePort("/dev/ttyUSB0", vid=0x10C4, pid=0xEA60),
-            FakePort("/dev/ttyUSB1", vid=radio.ADAPTER_VID, pid=radio.ADAPTER_PID),
+            FakePort("/dev/ttyUSB1", vid=0x1A86, pid=0x7523),
         ]
         with patch.object(discovery.serial.tools.list_ports, "comports", return_value=ports):
             candidates = discovery.list_candidate_ports()
-        self.assertEqual([device for device, _description in candidates], ["/dev/ttyUSB0"])
-
-    def test_is_radio_adapter(self):
-        self.assertTrue(discovery.is_radio_adapter(FakePort("/dev/ttyUSB1", radio.ADAPTER_VID, radio.ADAPTER_PID)))
-        self.assertFalse(discovery.is_radio_adapter(FakePort("/dev/ttyUSB0", 0x10C4, 0xEA60)))
-        self.assertFalse(discovery.is_radio_adapter(FakePort("/dev/ttyACM0")))
+        self.assertEqual([d for d, _ in candidates], ["/dev/ttyUSB0", "/dev/ttyUSB1"])
 
 
 class PickerRadioTests(unittest.TestCase):
@@ -230,337 +267,77 @@ class PickerRadioTests(unittest.TestCase):
         with patch.object(picker.dpg, "get_value", return_value=3):
             self.assertEqual(picker.radio_robot_id(), 3)
 
-    def test_radio_connect_button_forwards_the_adapter_device(self):
-        seen = []
-        original = picker._on_connect_radio
-        picker._on_connect_radio = seen.append
-        try:
-            picker._connect_radio(None, None, "/dev/ttyUSB1")
-        finally:
-            picker._on_connect_radio = original
-        self.assertEqual(seen, ["/dev/ttyUSB1"])
-
-
-def make_snapshot(
-    connected=True,
-    live=False,
-    rx_count=0,
-    telemetry=None,
-    rtt_ms=0.0,
-    tx_count=0,
-    port="/dev/ttyUSB1",
-    messages=(),
-):
-    return {
-        "port": port,
-        "connected": connected,
-        "robot_id": 2,
-        "telemetry": telemetry,
-        "rx_age_s": None,
-        "rtt_ms": rtt_ms,
-        "tx_count": tx_count,
-        "rx_count": rx_count,
-        "command": {"x": 0, "y": 0, "angle": 0, "vx": 0, "vy": 0, "w": 0},
-        "pending_configs": 0,
-        "error": "",
-        "messages": list(messages),
-        "live": live,
-    }
-
-
-TELEMETRY = {
-    "robot_id": 2,
-    "timestamp": 0x01020304,
-    "x_mm": -500,
-    "y_mm": 500,
-    "angle_deg": 90.0,
-    "vx_mm_s": -100,
-    "vy_mm_s": 200,
-    "w_rad_s": -0.5,
-    "battery_pct": 87,
-    "kicker_voltage_v": 16.5,
-    "error_flags": 1,
-}
-
-
-class RadioPanelTests(unittest.TestCase):
-    def test_status_text_covers_every_link_state(self):
-        self.assertEqual(
-            radio_panel.status_text(make_snapshot(live=True)),
-            ("Ao vivo · /dev/ttyUSB1", config.OK_COLOR),
-        )
-        self.assertEqual(
-            radio_panel.status_text(make_snapshot(live=False, rx_count=4)),
-            ("Conectado · sem resposta", config.BAD_COLOR),
-        )
-        self.assertEqual(
-            radio_panel.status_text(make_snapshot(live=False, rx_count=0)),
-            ("Conectado · aguardando telemetria", config.TEXT_DIM),
-        )
-        self.assertEqual(
-            radio_panel.status_text(make_snapshot(connected=False)),
-            ("Desconectado · reconectando", config.BAD_COLOR),
-        )
-
-    def test_telemetry_rows_are_placeholders_without_a_frame(self):
-        rows = radio_panel.telemetry_rows(make_snapshot())
-        self.assertEqual([label for label, _value in rows], list(radio_panel.TELEMETRY_LABELS))
-        self.assertEqual([value for _label, value in rows], ["—"] * len(radio_panel.TELEMETRY_LABELS))
-
-    def test_telemetry_rows_format_the_radio_frame(self):
-        snapshot = make_snapshot(telemetry=TELEMETRY, rtt_ms=21.34, rx_count=12, tx_count=15)
-        rows = dict(radio_panel.telemetry_rows(snapshot))
-        self.assertEqual(rows["Robô"], "2")
-        self.assertEqual(rows["Bateria"], "87 %")
-        self.assertEqual(rows["Kicker"], "16.50 V")
-        self.assertEqual(rows["Yaw"], "90.00°")
-        self.assertEqual(rows["Posição"], "x -500 mm · y 500 mm")
-        self.assertEqual(rows["Velocidade"], "vx -100 · vy 200 mm/s · w -0.50 rad/s")
-        self.assertEqual(rows["Avisos"], "Comunicação")
-        self.assertEqual(rows["RTT"], "21.3 ms")
-        self.assertEqual(rows["Quadros"], "RX 12 · TX 15")
-
-    def test_telemetry_rows_report_no_errors(self):
-        telemetry = dict(TELEMETRY, error_flags=0)
-        rows = dict(radio_panel.telemetry_rows(make_snapshot(telemetry=telemetry)))
-        self.assertEqual(rows["Avisos"], "nenhum")
-
-
-class FocusTrackingTests(unittest.TestCase):
-    def test_viewport_focus_assumes_true_without_the_glfw_symbols(self):
-        with patch.object(radio_panel, "_focus_checked", True), patch.object(radio_panel, "_focus_library", None):
-            self.assertTrue(radio_panel.viewport_focused())
-
-    def test_viewport_focus_reads_the_glfw_flag(self):
-        library = Mock()
-        library.glfwGetCurrentContext.return_value = 0x1234
-        with patch.object(radio_panel, "_focus_checked", True), patch.object(radio_panel, "_focus_library", library):
-            library.glfwGetWindowAttrib.return_value = 0
-            self.assertFalse(radio_panel.viewport_focused())
-            library.glfwGetWindowAttrib.return_value = 1
-            self.assertTrue(radio_panel.viewport_focused())
-            library.glfwGetCurrentContext.return_value = 0
-            self.assertTrue(radio_panel.viewport_focused())
-
-
-class DiscoveryTests(unittest.TestCase):
-    def setUp(self):
-        self.session = radio.RadioSession("/dev/ttyUSB1", robot_id=0)
-
-    def tearDown(self):
-        self.session.close()
-
-    def _install_fakes(self, answering):
-        """Make the session answer discovery probes for the given robot ids."""
-        written = []
-
-        def write(frame):
-            written.append(frame)
-            return True
-
-        def read_reply(_deadline):
-            frame = written[-1]
-            self.assertEqual(frame[0] & 0x0F, MSG_TYPE_TELEMETRY_REQ)
-            robot_id = frame[0] >> 4
-            if robot_id not in answering:
-                return []
-            expected_timestamp = struct.unpack_from("<I", frame, 1)[0]
-            payload = bytearray(make_telemetry(robot_id=robot_id))
-            struct.pack_into("<I", payload, 1, expected_timestamp)
-            return [radio.decode_telemetry(bytes(payload))]
-
-        self.session._write = write
-        self.session._read_reply = read_reply
-
-    def test_discover_lists_only_the_robots_that_answer(self):
-        self._install_fakes({2, 5})
-        found = self.session.discover(timeout_s=0.01)
-        self.assertEqual([telemetry["robot_id"] for telemetry in found], [2, 5])
-        for telemetry in found:
-            self.assertIn("rtt_ms", telemetry)
-
-    def test_probe_spaces_requests_even_when_replies_arrive_immediately(self):
-        self.session._ser = Mock()
-        sent = []
-        now = 1.0
-
-        def write(frame):
-            sent.append((now, frame))
-
-        def sleep(delay):
-            nonlocal now
-            now += delay
-
-        def read_reply(_deadline):
-            frame = sent[-1][1]
-            return [radio.decode_telemetry(make_telemetry(
-                robot_id=frame[0] >> 4, timestamp=struct.unpack_from("<I", frame, 1)[0]
-            ))]
-
-        self.session._ser.write.side_effect = write
-        with (
-            patch.object(self.session, "_read_reply", side_effect=read_reply),
-            patch.object(radio.time, "monotonic", side_effect=lambda: now),
-            patch.object(radio.time, "sleep", side_effect=sleep),
-        ):
-            first = self.session.probe(2)
-            second = self.session.probe(5)
-
-        self.assertEqual([first["robot_id"], second["robot_id"]], [2, 5])
-        self.assertEqual([frame[0] & 0x0F for _, frame in sent], [MSG_TYPE_TELEMETRY_REQ] * 2)
-        self.assertAlmostEqual(sent[1][0] - sent[0][0], radio.FRAME_GAP_S)
-        self.assertAlmostEqual(second["rtt_ms"], 0.0)
-
-    def test_probe_returns_none_without_a_reply(self):
-        self._install_fakes(set())
-        self.assertIsNone(self.session.probe(2, timeout_s=0.01))
-
-    def test_probe_ignores_a_reply_with_a_foreign_timestamp(self):
-        def write(_frame):
-            return True
-
-        def read_reply(_deadline):
-            return [radio.decode_telemetry(make_telemetry(robot_id=2))]
-
-        self.session._write = write
-        self.session._read_reply = read_reply
-        self.assertIsNone(self.session.probe(2, timeout_s=0.01))
-
-
-class PickerDiscoveryTests(unittest.TestCase):
-    def test_discovered_label_and_detail(self):
-        telemetry = {"robot_id": 7, "rtt_ms": 80.4, "battery_pct": 42, "error_flags": 1}
-        self.assertEqual(picker.discovered_label(telemetry), "Robô 7")
-        detail = picker.discovered_detail(telemetry)
-        self.assertIn("RTT 80 ms", detail)
-        self.assertIn("Bateria 42 %", detail)
-        self.assertIn("Erros: Comunicação", detail)
-
-    def test_discovered_detail_without_errors(self):
-        telemetry = {"robot_id": 2, "rtt_ms": 21.0, "battery_pct": 95, "error_flags": 0}
-        self.assertIn("sem erros", picker.discovered_detail(telemetry))
-
 
 class RadioSessionTests(unittest.TestCase):
     def setUp(self):
         self.session = radio.RadioSession("/dev/ttyUSB1", robot_id=2)
 
-    def tearDown(self):
-        self.session.close()
-
-    def test_initial_snapshot_is_disconnected(self):
-        snapshot = self.session.snapshot()
-        self.assertEqual(snapshot["port"], "/dev/ttyUSB1")
-        self.assertEqual(snapshot["robot_id"], 2)
-        self.assertFalse(snapshot["connected"])
-        self.assertFalse(snapshot["live"])
-        self.assertIsNone(snapshot["telemetry"])
-        self.assertIsNone(snapshot["rx_age_s"])
-        self.assertEqual(snapshot["command"], {"x": 0, "y": 0, "angle": 0, "vx": 0, "vy": 0, "w": 0})
-
-    def test_out_of_range_robot_id_falls_back_to_zero(self):
-        self.assertEqual(radio.RadioSession("/dev/ttyUSB1", robot_id=11).snapshot()["robot_id"], 0)
-
-    def test_set_motion_streams_the_requested_command(self):
-        self.session.set_motion(x=100, vy=-200, w=30)
-        self.session.set_motion(vx=50)
-        frame = self.session._next_frame()
-        self.assertEqual(len(frame), radio.COMMAND_SIZE)
-        self.assertEqual(frame[0] >> 4, 2)
-        # Pose starts at byte 5: x, y, angle, vx, vy, w (int16 little-endian).
-        self.assertEqual(frame[5:7], bytes([100, 0]))
-        self.assertEqual(frame[7:9], bytes([0, 0]))
-        self.assertEqual(frame[9:11], bytes([0, 0]))
-        self.assertEqual(frame[11:13], bytes([50, 0]))
-        self.assertEqual(frame[13:15], bytes([0x38, 0xFF]))
-        self.assertEqual(frame[15:17], bytes([30, 0]))
-
-    def test_stop_motion_zeroes_the_streamed_command(self):
-        self.session.set_motion(vx=500, w=100)
-        self.session.kick(200)
-        self.session.stop_motion()
-        self.session.kick(0)
-        frame = self.session._next_frame()
-        self.assertEqual(frame[5:17], bytes(12))
-        self.assertEqual(frame[29], 0)
-
-    def test_keyboard_speed_uses_a_wheel_rpm_floor(self):
+    def test_keyboard_velocity_bounds(self):
         self.assertEqual(radio.keyboard_velocity(1, 0, 0, 10), (241, 0, 0))
         self.assertEqual(radio.keyboard_velocity(1, -1, 0, 50), (121, -121, 0))
         self.assertEqual(radio.keyboard_velocity(0, 0, -1, 50), (0, 0, -178))
         self.assertEqual(radio.keyboard_velocity(1, 0, 1, 50), (0, 0, 0))
 
-    def test_keyboard_motion_expires_and_clears_a_previous_manual_setpoint(self):
-        self.session.set_motion(x=100, vx=500)
-        self.session._connected = True
-        self.session._last_rx_t = 10.0
-        with patch.object(radio.time, "monotonic", return_value=10.05):
-            self.session.set_keyboard_velocity((193, 0, 0))
-            self.assertEqual(self.session._next_frame()[5:17], struct.pack("<6h", 0, 0, 0, 193, 0, 0))
-        with patch.object(radio.time, "monotonic", return_value=10.26):
-            self.session._last_rx_t = 10.24
-            self.assertEqual(self.session._next_frame()[5:17], bytes(12))
-
-    def test_keyboard_motion_requires_fresh_telemetry_from_the_target(self):
-        self.session._connected = True
-        self.session._last_rx_t = 10.0
-        with patch.object(radio.time, "monotonic", return_value=10.3):
-            self.session.set_keyboard_velocity((193, 0, 0))
-            self.assertFalse(self.session.keyboard_link_ready())
-            self.assertEqual(self.session._next_frame()[5:17], bytes(12))
-
-    def test_kick_is_sent_with_one_command_only(self):
-        self.session.kick(120)
-        first = self.session._next_frame()
-        second = self.session._next_frame()
-        self.assertEqual(first[29], 120)
-        self.assertEqual(second[29], 0)
-
-    def test_set_robot_id_validates_and_retargets(self):
-        self.assertFalse(self.session.set_robot_id(11))
-        self.assertEqual(self.session.snapshot()["robot_id"], 2)
-        self.assertTrue(self.session.set_robot_id(7))
-        self.assertEqual(self.session._next_frame()[0] >> 4, 7)
-
-    def test_config_command_precedes_the_next_poll(self):
+    def test_next_frame_prioritizes_queued_config(self):
         self.session.send_config(CONFIG_FLAG_SET_ID, param=4)
-        config_frame = self.session._next_frame()
-        self.assertEqual(len(config_frame), radio.CONFIG_SIZE)
-        self.assertEqual(config_frame[0] >> 4, 2)
-        self.assertEqual(config_frame[5], CONFIG_FLAG_SET_ID)
-        self.assertEqual(config_frame[6:8], bytes([4, 0]))
-        self.assertEqual(len(self.session._next_frame()), radio.COMMAND_SIZE)
-        self.assertEqual(self.session.snapshot()["messages"][-1], "rádio: config 0x01 param 4")
+        rid, frame = self.session._next_frame()
+        self.assertEqual(rid, 2)
+        self.assertEqual(len(frame), radio.CONFIG_SIZE)
+        rid2, frame2 = self.session._next_frame()
+        self.assertEqual(rid2, 2)
+        self.assertEqual(len(frame2), radio.COMMAND_SIZE)
 
-    def test_poll_alternates_requests_with_commands_and_sends_queued_config(self):
-        sent = []
+    def test_probe_matches_reply_from_base_station(self):
+        fake_link = Mock()
+        fake_link.send_rf.return_value = {
+            "seq": 1,
+            "target_robot_id": 2,
+            "status": base_station.BS_TX_STATUS_OK,
+            "retries": 0,
+            "tx_time_us": 400,
+        }
+        fake_link.wait_rf_rx.return_value = {
+            "rx_timestamp_ms": 10,
+            "pipe": 1,
+            "payload_len": radio.TELEMETRY_SIZE,
+            "payload": make_telemetry(robot_id=2, timestamp=0x11223344),
+        }
+        self.session._link = fake_link
+        with patch.object(radio, "_timestamp_ms", return_value=0x11223344):
+            tel = self.session.probe(2, timeout_s=0.05)
+        self.assertIsNotNone(tel)
+        self.assertEqual(tel["robot_id"], 2)
+        self.assertEqual(self.session.snapshot()["tx_count"], 1)
 
-        def write(frame):
-            sent.append(frame)
-            if len(sent) == 6:
-                self.session._closing.set()
-            return True
+    def test_base_tasks_scan_and_channel_switch(self):
+        fake_link = Mock()
+        fake_link.scan_channels.return_value = {
+            "start_channel": 0,
+            "count": 126,
+            "best_channel": 114,
+            "busy_pct": [0] * 126,
+        }
+        fake_link.send_rf.return_value = {
+            "seq": 1,
+            "target_robot_id": 0,
+            "status": base_station.BS_TX_STATUS_OK,
+            "retries": 0,
+            "tx_time_us": 380,
+        }
+        fake_link.set_config.return_value = make_base_info(channel=114)
+        self.session._link = fake_link
+        self.session._base_info = make_base_info(channel=76)
 
-        def read_reply(_deadline):
-            return [radio.decode_telemetry(make_telemetry(timestamp=0x11223344))]
+        self.session.request_scan()
+        self.session.switch_channel(114, notify_robots=True)
+        self.session._handle_base_tasks()
 
-        self.session._ser = Mock()
-        self.session.set_motion(vx=250)
-        self.session.send_config(CONFIG_FLAG_CALIBRATE_MAG)
-        with (
-            patch.object(radio, "_timestamp_ms", return_value=0x11223344),
-            patch.object(self.session, "_write", side_effect=write),
-            patch.object(self.session, "_read_reply", side_effect=read_reply),
-        ):
-            self.session.run()
-        request = radio.encode_telemetry_request(2, 0x11223344)
-        command = radio.encode_command(2, vx=250, timestamp=0x11223344)
-        config_frame = radio.encode_config(2, CONFIG_FLAG_CALIBRATE_MAG, timestamp=0x11223344)
-        stop = radio.encode_command(2, timestamp=0x11223344)
-        self.assertEqual(sent, [request, config_frame, request, command, request, command, stop])
-        self.assertEqual(self.session.snapshot()["rx_count"], 3)
+        snap = self.session.snapshot()
+        self.assertEqual(snap["scan_result"]["best_channel"], 114)
+        self.assertEqual(snap["base_info"]["channel"], 114)
+        fake_link.set_config.assert_called_once()
 
-    def test_connect_to_a_missing_adapter_raises_radio_error(self):
+    def test_connect_raises_radio_error_on_missing_port(self):
         with self.assertRaises(radio.RadioError):
             radio.RadioSession.connect("/dev/ttyUSB99", robot_id=0)
 

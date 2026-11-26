@@ -2,6 +2,7 @@
 
 import glob
 import os
+import shutil
 import urllib.request
 from os.path import basename, exists, getmtime, join, splitext
 
@@ -33,9 +34,23 @@ def ensure_bitproto_runtime(env, output_dir):
         print("bitproto runtime files already present. Skipping download.")
         return
 
+    # Reuse cached runtime files from sibling PlatformIO environments before hitting GitHub.
+    pio_build_root = join(env.subst("$PROJECT_DIR"), ".pio", "build")
+    for filename in files:
+        dst = join(output_dir, filename)
+        if exists(dst):
+            continue
+        for cached in glob.glob(join(pio_build_root, "*", "proto_gen", filename)):
+            if exists(cached):
+                shutil.copyfile(cached, dst)
+                print(f"Reused cached {filename} from {cached}")
+                break
+
     # Download missing files (or all if some missing)
     for filename in files:
         dst = join(output_dir, filename)
+        if exists(dst):
+            continue
         url = f"{base_url}/{filename}"
         print(f"...Downloading {filename} version {version} from GitHub...")
         try:

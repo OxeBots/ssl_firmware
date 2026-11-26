@@ -11,6 +11,7 @@
 #include "CommandInbox.h"
 #include "HealthMonitor.h"
 #include "NRF24L01.h"
+#include "RadioAddressing.h"
 #include "RobotPositionController.h"
 #include "RobotVelocityController.h"
 #include "RuntimeTypes.h"
@@ -72,6 +73,8 @@ class ProtocolHandler
     // control loop and status consumers read it from other tasks.
     static constexpr uint64_t BASE_STATION_LINK_TIMEOUT_US = 2000000;
     std::atomic<uint64_t> m_last_base_station_rx_us = 0;
+    uint64_t m_last_observed_rx_us = 0;
+    radio_addressing::ChannelHunter m_channel_hunter;
     // Drop identical back-to-back downlink retransmissions from the base
     // station within this short window when Pipe 1 acknowledgement is off.
     static constexpr uint64_t RX_DEDUP_WINDOW_US = 50000;

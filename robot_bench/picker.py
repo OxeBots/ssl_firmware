@@ -212,14 +212,14 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
             show=False,
         )
         rendering.add_text(
-            "Adaptador nRF24L01 não encontrado (USB).",
+            "ESP32 Base Station não encontrada (USB).",
             "title",
             config.TEXT,
             tag="picker_radio_empty",
             show=False,
         )
         rendering.add_text(
-            "Conecte o adaptador USB do rádio (CH340).",
+            "Conecte a ESP32 Base Station na USB (firmware env:base_station).",
             "small",
             config.TEXT_DIM,
             tag="picker_radio_hint",
@@ -258,7 +258,9 @@ def update(
     """Refresh the scanned ports, the radio adapters and the discovered robots."""
     global _rows_built, _radio_devices, _radio_discovered
     with lock:
-        entries = sorted_entries(scan_results)[:ROW_COUNT]
+        entries = [
+            (dev, info) for dev, info in sorted_entries(scan_results) if info["status"] != "base_station"
+        ][:ROW_COUNT]
     if len(entries) != _rows_built:
         for index in range(_rows_built):
             dpg.delete_item(f"picker_row_{index}")

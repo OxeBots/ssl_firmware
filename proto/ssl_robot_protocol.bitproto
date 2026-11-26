@@ -77,6 +77,9 @@ const CONFIG_FLAG_RESET_NVS = 8;
 // Full NVS erase — all namespaces, all keys
 const CONFIG_FLAG_FACTORY_RESET = 16;
 
+// Switch robot RF channel (new channel 0..125 in RobotConfig.param, persisted to NVS)
+const CONFIG_FLAG_SET_CHANNEL = 32;
+
 // ---------------------------------------------------------------------------
 // Error flag constants (bitmask for error_flags field in RobotTelemetry)
 // ---------------------------------------------------------------------------

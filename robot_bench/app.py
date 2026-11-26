@@ -567,6 +567,8 @@ def run_gui(state, args):
         # The port used by the running USB session must not be probed: the probe
         # opens it and toggles the modem lines, which resets the robot.
         busy_port = state.reader.requested_port if state.reader is not None else None
+        busy_radio = radio_state["session"].port if radio_state["session"] is not None else None
+        keep_ports = {p for p in (busy_port, busy_radio) if p}
         with scan_lock:
             scan_results.clear()
             if busy_port:
@@ -575,15 +577,27 @@ def run_gui(state, args):
                     "status": "firmware",
                     "detail": "",
                 }
+            if busy_radio:
+                scan_results[busy_radio] = {
+                    "desc": "Base Station conectada",
+                    "status": "base_station",
+                    "detail": "Base Station conectada",
+                }
         scan_active = threading.Event()
         scan_active.set()
         state.scanner = PortScanner(
-            scan_results, scan_lock, scan_active, keep={busy_port} if busy_port else ()
+            scan_results, scan_lock, scan_active, keep=keep_ports
         )
         state.scanner.start()
 
     def scan_radio_devices():
-        radio_state["devices"] = radio.find_adapters()
+        with scan_lock:
+            devices = [
+                (dev, info.get("detail") or info.get("desc") or "ESP32 Base Station")
+                for dev, info in sorted(scan_results.items())
+                if info.get("status") == "base_station"
+            ]
+        radio_state["devices"] = devices
         if not radio_state["devices"]:
             radio_state["discovered_device"] = None
 

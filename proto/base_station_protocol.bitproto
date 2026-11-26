@@ -1,0 +1,153 @@
+// base_station_protocol.bitproto
+// Binary UART0 protocol between host PC (ROS 2 / Robot Bench / test scripts)
+// and the ESP32 DevKit Base Station firmware (env:base_station).
+//
+// Wire framing (outside bitproto): each frame is
+//   COBS_encode( msg_type (1 byte) | bitproto message | crc8 ) followed by 0x00.
+// Message type IDs (0x80..0x8F) are disjoint from serial_debug_protocol.bitproto
+// (0x01..0x0E) so USB auto-discovery can distinguish Base Station vs Robot ports.
+
+proto base_station_protocol;
+
+// ---------------------------------------------------------------------------
+// Protocol version and message type constants
+// ---------------------------------------------------------------------------
+
+const BS_PROTO_VERSION = 1;
+
+// Host PC -> Base Station (0x80..0x87)
+const BS_MSG_PING       = 128;  // 0x80: Handshake / auto-discovery probe
+const BS_MSG_GET_INFO   = 129;  // 0x81: Request BaseInfo snapshot
+const BS_MSG_SET_CONFIG = 130;  // 0x82: Apply (and optionally persist) RF config
+const BS_MSG_SCAN_REQ   = 131;  // 0x83: Sweep RPD carrier detect across RF channels
+const BS_MSG_RF_TX      = 132;  // 0x84: Transmit one RF packet to robot_id or broadcast
+
+// Base Station -> Host PC (0x88..0x8F)
+const BS_MSG_INFO         = 136;  // 0x88: Current RF config and counters
+const BS_MSG_RF_TX_STATUS = 137;  // 0x89: Per-packet RF transmission outcome
+const BS_MSG_RF_RX        = 138;  // 0x8A: Received RF payload (e.g. RobotTelemetry)
+const BS_MSG_SCAN_RESULT  = 139;  // 0x8B: RPD occupancy percentage per scanned channel
+const BS_MSG_LOG          = 140;  // 0x8C: Structured firmware log line
+
+// ---------------------------------------------------------------------------
+// RF transmit flags (BaseRfTx.tx_flags)
+// ---------------------------------------------------------------------------
+
+// Transmit using W_TX_PAYLOAD_NO_ACK (always forced for ROBOT_ID_BROADCAST)
+const BS_TX_FLAG_NO_ACK       = 1;
+
+// Hint that an uplink reply (e.g. RobotTelemetry) is expected immediately after TX
+const BS_TX_FLAG_EXPECT_REPLY = 2;
+
+// ---------------------------------------------------------------------------
+// RF transmit status codes (BaseRfTxStatus.status)
+// ---------------------------------------------------------------------------
+
+const BS_TX_STATUS_OK          = 0;  // Unicast hardware Auto-ACK received (TX_DS)
+const BS_TX_STATUS_MAX_RT      = 1;  // Max retransmissions reached without ACK
+const BS_TX_STATUS_NO_ACK_SENT = 2;  // Broadcast / NO_ACK frame transmitted
+const BS_TX_STATUS_RADIO_ERR   = 3;  // Radio not ready, invalid payload, or TX timeout
+const BS_TX_STATUS_QUEUE_FULL  = 4;  // Internal queue busy
+
+// ---------------------------------------------------------------------------
+// RF data rates (match rf24_datarate_e in esp-idf-mirf)
+// ---------------------------------------------------------------------------
+
+const BS_RATE_1MBPS   = 0;
+const BS_RATE_2MBPS   = 1;
+const BS_RATE_250KBPS = 2;
+
+// ---------------------------------------------------------------------------
+// Messages: Host PC -> Base Station
+// ---------------------------------------------------------------------------
+
+// Size: 4 bytes
+message BasePing {
+    uint32 seq = 1;
+}
+
+// Size: 1 byte
+message BaseEmpty {
+    uint8 reserved = 1;
+}
+
+// Size: 11 bytes
+message BaseRadioConfig {
+    uint8    channel          = 1;  // 0..125 (2400 + channel MHz)
+    uint8    data_rate        = 2;  // BS_RATE_*
+    uint8    pa_level         = 3;  // 0=MIN, 1=LOW, 2=HIGH, 3=MAX
+    uint8    retransmit_delay = 4;  // 0..15 ((val + 1) * 250 us)
+    uint8    retransmit_count = 5;  // 0..15
+    uint8    persist_nvs      = 6;  // 1 = save to NVS, 0 = RAM only
+    uint8[4] addr_suffix      = 7;  // Shared 4 MSBytes ({0xC6, 0x9A, 0xD3, 0xE5})
+    uint8    base_addr_lsb    = 8;  // Base station uplink LSByte (default 0xB4)
+}
+
+// Size: 3 bytes
+message BaseScanRequest {
+    uint8 start_channel       = 1;  // 0..125
+    uint8 end_channel         = 2;  // 0..125
+    uint8 samples_per_channel = 3;  // RPD samples per channel (e.g. 32..64)
+}
+
+// Size: 36 bytes
+message BaseRfTx {
+    uint16    seq             = 1;  // Host sequence number echoed in BaseRfTxStatus
+    uint8     target_robot_id = 2;  // 0..10 unicast, 15 broadcast
+    uint8     tx_flags        = 3;  // Bitmask of BS_TX_FLAG_*
+    uint8     payload_len     = 4;  // 1..31
+    uint8[31] payload         = 5;  // Raw ssl_robot_protocol frame bytes
+}
+
+// ---------------------------------------------------------------------------
+// Messages: Base Station -> Host PC
+// ---------------------------------------------------------------------------
+
+// Size: 26 bytes
+message BaseInfo {
+    uint8    protocol_version   = 1;  // BS_PROTO_VERSION
+    uint8    radio_ready        = 2;  // 1 if nRF24L01+ initialized and healthy
+    uint8    channel            = 3;  // Active RF channel (0..125)
+    uint8    data_rate          = 4;  // Active BS_RATE_*
+    uint8    pa_level           = 5;  // Active PA level (0..3)
+    uint8    retransmit_delay   = 6;  // Active ARD (0..15)
+    uint8    retransmit_count   = 7;  // Active ARC (0..15)
+    uint32   tx_ok_count        = 8;  // Successful TX count (ACK or NO_ACK sent)
+    uint32   tx_fail_count      = 9;  // Failed TX count (MAX_RT or radio error)
+    uint32   rx_count           = 10; // Total RF packets received on uplink pipe
+    uint16   radio_reinit_count = 11; // Automatic watchdog recovery count
+    uint8[4] addr_suffix        = 12; // Shared 4 MSBytes
+    uint8    base_addr_lsb      = 13; // Base station uplink LSByte
+}
+
+// Size: 7 bytes
+message BaseRfTxStatus {
+    uint16 seq             = 1;  // Echoed BaseRfTx.seq
+    uint8  target_robot_id = 2;  // Echoed BaseRfTx.target_robot_id
+    uint8  status          = 3;  // BS_TX_STATUS_*
+    uint8  retries         = 4;  // Hardware ARC_CNT (0..15)
+    uint16 tx_time_us      = 5;  // Measured RF TX duration in microseconds
+}
+
+// Size: 37 bytes
+message BaseRfRx {
+    uint32    rx_timestamp_ms = 1;  // Base station uptime ms at RX
+    uint8     pipe            = 2;  // nRF24L01+ RX pipe index
+    uint8     payload_len     = 3;  // 1..31
+    uint8[31] payload         = 4;  // Raw ssl_robot_protocol payload bytes
+}
+
+// Size: 129 bytes
+message BaseScanResult {
+    uint8      start_channel = 1;  // First scanned channel (0..125)
+    uint8      count         = 2;  // Number of valid entries in busy_pct (1..126)
+    uint8      best_channel  = 3;  // Recommended quietest channel
+    uint8[126] busy_pct      = 4;  // 0..100% carrier detection rate per channel
+}
+
+// Size: 98 bytes
+message BaseLog {
+    uint8     level    = 1;  // ESP log level (1=E, 2=W, 3=I, 4=D)
+    uint8     text_len = 2;  // Valid bytes in text (0..96)
+    uint8[96] text     = 3;  // ASCII log message without newline
+}

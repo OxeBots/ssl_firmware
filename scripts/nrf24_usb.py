@@ -1,44 +1,19 @@
+"""Interactive & CLI tool for controlling SSL robots via the ESP32 Base Station.
+
+Speaks COBS+CRC8 Bitproto (proto/base_station_protocol.bitproto) over UART0 @ 921600 baud.
+"""
+
 import argparse
-import glob
 import os
-import subprocess
 import sys
 import time
 
-import serial
-import serial.tools.list_ports
-
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIR)
-for _pio_sp in glob.glob(os.path.expanduser("~/.platformio/penv/lib/python*/site-packages")):
-    if _pio_sp not in sys.path:
-        sys.path.append(_pio_sp)
+_REPO_ROOT = os.path.dirname(_SCRIPT_DIR)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-try:
-    import ssl_robot_protocol_bp
-except ImportError:
-    print("Generating Python bitproto module...")
-    try:
-        subprocess.run(["bitproto", "py", "proto/ssl_robot_protocol.bitproto", "."], check=True)
-        import ssl_robot_protocol_bp
-    except Exception as e:
-        print(
-            f"Failed to generate bitproto python module. Ensure bitproto is installed: pip install bitproto. Error: {e}"
-        )
-        sys.exit(1)
-
-MSG_TYPE_COMMAND = ssl_robot_protocol_bp.MSG_TYPE_COMMAND
-MSG_TYPE_CONFIG = ssl_robot_protocol_bp.MSG_TYPE_CONFIG
-MSG_TYPE_TELEMETRY = ssl_robot_protocol_bp.MSG_TYPE_TELEMETRY
-MSG_TYPE_TELEMETRY_REQ = getattr(ssl_robot_protocol_bp, "MSG_TYPE_TELEMETRY_REQ", 3)
-ROBOT_ID_BROADCAST = ssl_robot_protocol_bp.ROBOT_ID_BROADCAST
-ROBOT_ID_MAX = ssl_robot_protocol_bp.ROBOT_ID_MAX
-
-CONFIG_FLAG_SET_ID = ssl_robot_protocol_bp.CONFIG_FLAG_SET_ID
-CONFIG_FLAG_RUN_CALIBRATION = ssl_robot_protocol_bp.CONFIG_FLAG_RUN_CALIBRATION
-CONFIG_FLAG_CALIBRATE_MAG = ssl_robot_protocol_bp.CONFIG_FLAG_CALIBRATE_MAG
-CONFIG_FLAG_FACTORY_RESET = ssl_robot_protocol_bp.CONFIG_FLAG_FACTORY_RESET
+from robot_bench import base_station, radio  # noqa: E402
 
 
 class Colors:
@@ -46,570 +21,186 @@ class Colors:
     GREEN = "\033[92m"
     YELLOW = "\033[93m"
     BLUE = "\033[94m"
-    MAGENTA = "\033[95m"
     CYAN = "\033[96m"
     BOLD = "\033[1m"
     RESET = "\033[0m"
 
 
-def _make_header(msg_type, robot_id, timestamp=None):
-    """Construct a populated Header sub-message."""
-    if timestamp is None:
-        timestamp = int(time.time() * 1000) & 0xFFFFFFFF  # uint32
-    hdr = ssl_robot_protocol_bp.Header()
-    hdr.msg_type = msg_type
-    hdr.robot_id = robot_id
-    hdr.timestamp = timestamp
-    return hdr
-
-
-class NRF24L01Controller:
-    def __init__(self, port="/dev/ttyUSB0", baudrate=115200, timeout=0.1):
-        """
-        Initializes the serial connection.
-        Note: This __init__ expects a specific port.
-        Use the auto_connect() static method to find and connect automatically.
-        """
-        self.ser = serial.Serial(
-            port=port,
-            baudrate=baudrate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=timeout,
-        )
-        if self.ser.is_open:
-            print(f"{Colors.GREEN}Connected to {port} at {baudrate} baud{Colors.RESET}")
-
-    @staticmethod
-    def auto_connect(baudrate=115200, timeout=2):
-        """
-        Find the nRF24L01 USB adapter by its VID/PID and return an
-        initialized controller instance.
-        """
-        # These IDs are from dmesg output:
-        # idVendor=1a86, idProduct=7523
-        TARGET_VID, TARGET_PID = 0x1A86, 0x7523
-        print(f"{Colors.BLUE}Searching for nRF24L01 device (VID:{TARGET_VID:x}, PID:{TARGET_PID:x})...{Colors.RESET}")
-        for port in serial.tools.list_ports.comports():
-            if port.vid == TARGET_VID and port.pid == TARGET_PID:
-                print(f"{Colors.GREEN}Found device at: {port.device}{Colors.RESET}")
-                try:
-                    return NRF24L01Controller(port=port.device, baudrate=baudrate, timeout=timeout)
-                except serial.SerialException as e:
-                    print(f"{Colors.RED}Error connecting to {port.device}: {e}{Colors.RESET}")
-                    return None
-        print(f"\n{Colors.RED}Error: Could not find nRF24L01 USB adapter.{Colors.RESET}")
-        return None
-
-    @staticmethod
-    def decode_gb2312(hex_string):
-        """Decode GB2312 Chinese text from hex string"""
-        try:
-            byte_data = bytearray(int(x, 16) for x in hex_string.strip().split())
-            return byte_data.decode("gb2312")
-        except Exception as e:
-            return f"Decoding error: {e}"
-
-    @staticmethod
-    def translate_chinese(text):
-        """Translate common Chinese (GB2312) terms from the USB dongle into English."""
-        translations = {
-            "通讯波特率设置成功": "Baud rate setting successful",
-            "通讯频率设置成功": "Communication frequency setting successful",
-            "传输速率设置成功": "Data rate setting successful",
-            "CRC校验模式设置成功": "CRC check mode setting successful",
-            "校验模式设置成功": "Check mode setting successful",
-            "地址设置成功": "Address setting successful",
-            "系统信息": "System Information",
-            "本地接收地址0": "Local Receive Address (Pipe 0)",
-            "本地接收地址": "Local Receive Address (RX)",
-            "目标地址": "Target Address (TX)",
-            "空中传输速率": "Air Data Rate",
-            "低噪声放大增益": "Low Noise Amplifier Gain",
-            "通讯频率": "Communication Frequency",
-            "校验模式": "Check Mode",
-            "发射功率": "Transmit Power",
-            "传输速率": "Data Rate",
-            "波特率": "Baud Rate",
-            "CRC校验": "CRC Check",
-            "设置成功": "Setting successful",
-            "成功": "successful",
-            "开启": "Enabled",
-            "关闭": "Disabled",
-            "校验": " Check",
-            "位": "-bit ",
-            "：     ": ": ",
-            "：": ": ",
-            "！！": "!",
-            "！": "!",
-        }
-        for cn, en in translations.items():
-            text = text.replace(cn, en)
-        return text
-
-    def send_at_command(self, command, wait_time=0.1, verbose=True):
-        """Send AT command and read response"""
-        if verbose:
-            print(f"{Colors.BLUE}>>> {command}{Colors.RESET}")
-
-        self.ser.reset_input_buffer()
-        self.ser.write((command + "\r\n").encode("ascii"))
-        self.ser.flush()
-
-        time.sleep(wait_time)
-
-        response = b""
-        start_time = time.time()
-        while time.time() - start_time < 5:
-            if self.ser.in_waiting > 0:
-                response += self.ser.read(self.ser.in_waiting)
-                time.sleep(0.1)
-            elif response and time.time() - start_time > 0.5:
-                break
-
-        if response:
-            hex_str = " ".join(f"{b:02x}" for b in response)
-            decoded = self.decode_gb2312(hex_str)
-            if decoded.startswith("Decoding error"):
-                if verbose:
-                    print(f"{Colors.RED}<<< {decoded}{Colors.RESET}")
-                return decoded
-            translated = self.translate_chinese(decoded)
-            if verbose:
-                print(f"{Colors.GREEN}<<< {translated.strip()}{Colors.RESET}")
-            return translated
-        if verbose:
-            print(f"{Colors.YELLOW}<<< No response{Colors.RESET}")
-        return ""
-
-    @staticmethod
-    def _decode_hex_csv_ascii(val_str):
-        """Convert '0x45,0x53,0x50,0x33,0x32' to ' (\"ESP32\")' if printable ASCII."""
-        try:
-            parts = [int(x.strip(), 16) for x in val_str.split(",")]
-            if len(parts) == 5 and all(32 <= b <= 126 for b in parts):
-                return f' ("{"".join(chr(b) for b in parts)}")'
-        except Exception:
-            pass
-        return ""
-
-    def get_system_info(self):
-        """Query AT? on the USB dongle and display a cleanly formatted system table."""
-        response = self.send_at_command("AT?", verbose=False)
-        if not response:
-            print(f"{Colors.RED}No response to AT? from USB dongle.{Colors.RESET}")
-            return
-        print("\n" + "=" * 62)
-        print(f"{Colors.BOLD} USB NRF24L01+ DONGLE SYSTEM INFORMATION (AT?){Colors.RESET}")
-        print("=" * 62)
-        for line in response.splitlines():
-            line = line.strip()
-            if not line or line.startswith("System Information"):
+def connect_base(port=None, baud=base_station.DEFAULT_BAUD):
+    if port:
+        link = base_station.BaseStationLink(port, baud=baud)
+        info = link.open()
+        return link, info
+    adapters = radio.find_adapters(baud=baud)
+    if not adapters:
+        details = []
+        for p in sorted(radio.serial.tools.list_ports.comports(), key=lambda x: x.device):
+            if not any(tok in p.device for tok in ("ttyUSB", "ttyACM", "usbserial", "usbmodem", "COM")):
                 continue
-            if line == "OK":
-                print(f"  {'Status':28}: {Colors.GREEN}OK{Colors.RESET}")
-                continue
-            if ":" in line:
-                key, value = line.split(":", 1)
-                key = key.strip()
-                value = value.strip()
-                if "0x" in value:
-                    value += self._decode_hex_csv_ascii(value)
-                print(f"  {Colors.CYAN}{key:28}{Colors.RESET}: {Colors.GREEN}{value}{Colors.RESET}")
-            else:
-                print(f"  {line}")
-        print("=" * 62)
-
-    def set_receive_address(self, address_bytes):
-        """Set receive pipe address using AT+RXA command"""
-        if len(address_bytes) != 5:
-            return False
-        addr_str = ",".join(f"0x{b:02X}" for b in address_bytes)
-        return "successful" in self.send_at_command(f"AT+RXA={addr_str}", wait_time=3).lower()
-
-    def set_transmit_address(self, address_bytes):
-        """Set transmit pipe address using AT+TXA command"""
-        if len(address_bytes) != 5:
-            return False
-        addr_str = ",".join(f"0x{b:02X}" for b in address_bytes)
-        return "successful" in self.send_at_command(f"AT+TXA={addr_str}", wait_time=3).lower()
-
-    def set_addresses(self, rx_address, tx_address):
-        """Set both receive and transmit addresses"""
-        print(
-            f"\n{Colors.BLUE}Setting RX: {[hex(x) for x in rx_address]}  "
-            f"TX: {[hex(x) for x in tx_address]}{Colors.RESET}"
-        )
-        return self.set_receive_address(rx_address) and self.set_transmit_address(tx_address)
-
-    def set_frequency(self, frequency_ghz):
-        """Set operating frequency in GHz (e.g., 2.404 for 2.404GHz)"""
-        if not 2.400 <= frequency_ghz <= 2.525:
-            return False
-        return "successful" in self.send_at_command(f"AT+FREQ={frequency_ghz:.3f}").lower()
-
-    def set_data_rate(self, rate):
-        """Set data rate (1=250Kbps, 2=1Mbps, 3=2Mbps)"""
-        if rate not in [1, 2, 3]:
-            return False
-        rates = {1: "250Kbps", 2: "1Mbps", 3: "2Mbps"}
-        print(f"\n{Colors.BLUE}Setting data rate to {rates[rate]}{Colors.RESET}")
-        return "successful" in self.send_at_command(f"AT+RATE={rate}").lower()
-
-    def set_baudrate(self, new_baud):
-        """Change baud rate (1-7 for different rates)"""
-        baud_rates = {
-            1: 4800,
-            2: 9600,
-            3: 14400,
-            4: 19200,
-            5: 38400,
-            6: 57600,
-            7: 115200,
-        }
-        if new_baud not in baud_rates:
-            print(f"{Colors.RED}Error: Invalid baud rate code: {new_baud}{Colors.RESET}")
-            return False
-        print(f"\n{Colors.BLUE}Setting baud rate to {baud_rates[new_baud]}{Colors.RESET}")
-        if "successful" in self.send_at_command(f"AT+BAUD={new_baud}").lower():
-            print(f"{Colors.GREEN}✓ Baud rate changed to {baud_rates[new_baud]}{Colors.RESET}")
-            return True
-        print(f"{Colors.RED}✗ Baud rate change failed{Colors.RESET}")
-        return False
-
-    # Protocol-specific commands for robot control
-
-    def send_data(self, raw_bytes):
-        """
-        Send raw bytes to the USB dongle.
-        The dongle counts UART bytes, prepends the length in the RF packet,
-        and fires it over the air — do NOT zero-pad or add a length prefix here.
-        """
-        self.ser.reset_input_buffer()
-        self.ser.write(raw_bytes)
-        self.ser.flush()
-
-    def wait_dongle_tx_complete(self, timeout=0.018, settle_sec=0.0015):
-        """
-        Wait for the USB dongle (CH340 + STC15) to finish its RF TX cycle and
-        output its 6-byte status frame (02 00 00 00 00 00) over UART.
-        """
-        t0 = time.perf_counter()
-        rcvd = 0
-        while rcvd < 6 and (time.perf_counter() - t0) < timeout:
-            waiting = self.ser.in_waiting
-            if waiting > 0:
-                rcvd += len(self.ser.read(waiting))
-            else:
-                time.sleep(0.0005)
-        if settle_sec > 0:
-            time.sleep(settle_sec)
-        self.ser.reset_input_buffer()
-
-    def send_command(self, robot_id, x=0, y=0, angle=0, vx=0, vy=0, w=0, kick=0, timestamp=None, wait_tx=True):
-        """
-        Build and send a RobotCommand (30B, fire-and-forget).
-        """
-        if timestamp is None:
-            timestamp = int(time.time() * 1000) & 0xFFFFFFFF
-
-        cmd = ssl_robot_protocol_bp.RobotCommand()
-        cmd.header = _make_header(MSG_TYPE_COMMAND, robot_id, timestamp)
-        cmd.target_pose.x = x
-        cmd.target_pose.y = y
-        cmd.target_pose.angle = angle
-        cmd.target_pose.x_v = vx
-        cmd.target_pose.y_v = vy
-        cmd.target_pose.angular_vel = w
-        cmd.kick_velocity = kick
-
-        encoded = cmd.encode()
-        self.send_data(encoded)
-        if wait_tx:
-            self.wait_dongle_tx_complete()
-        return timestamp
-
-    def send_telemetry_request(self, robot_id, timestamp=None):
-        """
-        Build and send a 5-byte RobotTelemetryRequest.
-        """
-        if timestamp is None:
-            timestamp = int(time.time() * 1000) & 0xFFFFFFFF
-        hdr = _make_header(MSG_TYPE_TELEMETRY_REQ, robot_id, timestamp)
-        if hasattr(ssl_robot_protocol_bp, "RobotTelemetryRequest"):
-            req = ssl_robot_protocol_bp.RobotTelemetryRequest()
-            req.header = hdr
-            self.send_data(req.encode())
-        else:
-            self.send_data(hdr.encode())
-        return timestamp
-
-    def send_config(self, robot_id, config_flags, param=0):
-        """
-        Send a RobotConfig message.
-
-        :param robot_id:      Target robot ID or ROBOT_ID_BROADCAST.
-        :param config_flags:  Bitmask of CONFIG_FLAG_* constants.
-        :param param:         Auxiliary value (e.g. new ID for CONFIG_FLAG_SET_ID).
-
-        Examples:
-            device.send_config(0, CONFIG_FLAG_SET_ID, param=3)   # assign ID 3 to robot 0
-            device.send_config(ROBOT_ID_BROADCAST, CONFIG_FLAG_RUN_CALIBRATION)
-        """
-        cfg = ssl_robot_protocol_bp.RobotConfig()
-        cfg.header = _make_header(MSG_TYPE_CONFIG, robot_id)
-        cfg.config_flags = config_flags
-        cfg.param = param
-
-        print(f"{Colors.CYAN}[CONFIG] robot_id={robot_id} flags=0x{config_flags:02X} param={param}{Colors.RESET}")
-        self.send_data(cfg.encode())
-
-    def receive_data(self, timeout=0.5):
-        """
-        Receive a RobotTelemetry packet.
-
-        Strips the dongle's 6-byte TX-complete status code (02 00 00 00 00 00),
-        peeks header.msg_type to discard non-telemetry frames, then decodes.
-
-        Returns a decoded RobotTelemetry on success, or None on timeout/error.
-        """
-        start_time = time.time()
-        buffer = bytearray()
-        expected_len = ssl_robot_protocol_bp.RobotTelemetry.BYTES_LENGTH
-
-        while time.time() - start_time < timeout:
-            if self.ser.in_waiting > 0:
-                buffer.extend(self.ser.read(self.ser.in_waiting))
-
-                # Strip dongle TX-complete status codes
-                while len(buffer) >= 6 and buffer.startswith(b"\x02\x00\x00\x00\x00\x00"):
-                    buffer = buffer[6:]
-
-                if len(buffer) >= expected_len:
-                    packet = bytearray(buffer[:expected_len])
-
-                    raw_msg_type = packet[0] & 0x0F
-                    if raw_msg_type != MSG_TYPE_TELEMETRY:
-                        buffer = buffer[expected_len:]
-                        continue
-
-                    try:
-                        telemetry = ssl_robot_protocol_bp.RobotTelemetry()
-                        telemetry.decode(packet)
-                        print(
-                            f"\r{Colors.GREEN}✓ [RX] Robot {telemetry.header.robot_id} | "
-                            f"ts={telemetry.header.timestamp} | "
-                            f"Batt={telemetry.battery_percentage}% | "
-                            f"Kicker={telemetry.kicker_voltage / 100:.2f}V{Colors.RESET}" + " " * 10
-                        )
-                        return telemetry
-                    except Exception as e:
-                        print(f"\n{Colors.RED}[RX] Decode error: {e}{Colors.RESET}")
-
-                    buffer = buffer[expected_len:]
-            else:
-                time.sleep(0.001)
-
-        return None
-
-    def close(self):
-        """Close serial connection"""
-        if self.ser.is_open:
-            self.ser.close()
-            print(f"{Colors.BLUE}Serial connection closed{Colors.RESET}")
-
-
-class CLIController:
-    """A blocking, synchronous CLI command loop for testing the Bitproto protocol"""
-
-    def __init__(self, device):
-        self.device = device
-        self.running = True
-
-    def _print_help(self):
-        print(f"""
-{Colors.BOLD}Commands:{Colors.RESET}
-  {{x:<mm>, y:<mm>, vx:<mm/s>, vy:<mm/s>, w:<0.01rad/s>, kick:<0-255>, id:<robot_id>}} — send RobotCommand
-  tel <robot_id>                                         — send RobotTelemetryRequest (5B) and await Telemetry
-  set_id <target_id> <new_id>                            — assign new robot ID
-  calibrate [<robot_id>|broadcast]                       — wheel + IMU calibration + PID tuning
-  calibrate_mag [<robot_id>|broadcast]                   — mag calibration
-  factory_reset [<robot_id>|broadcast]                   — full NVS erase + reboot
-  info                                                   — display USB dongle AT? system info
-  help                                                   — show this help
-  q / quit                                               — exit
-""")
-
-    def _parse_robot_id(self, token):
-        return ROBOT_ID_BROADCAST if token.lower() == "broadcast" else int(token)
-
-    def start(self):
-        print(f"\n{Colors.BOLD}=== ROBOT CLI CONTROL ==={Colors.RESET}")
-        self._print_help()
-
-        while self.running:
             try:
-                raw = input(f"\n{Colors.BLUE}Cmd > {Colors.RESET}").strip()
-                if not raw:
-                    continue
-                if raw.lower() in ["q", "quit", "exit"]:
-                    break
-                if raw.lower() == "help":
-                    self._print_help()
-                    continue
-                if raw.lower() == "info":
-                    self.device.get_system_info()
-                    continue
+                base_station.probe_base_station(p.device, baud=baud, timeout_s=0.25)
+                details.append(f"{p.device}: sem resposta ao PING")
+            except OSError as exc:
+                details.append(f"{p.device}: {exc} (feche outro processo usando a porta, ex: nrf24_bridge_node)")
+        suffix = f" Portas verificadas: {'; '.join(details)}" if details else " Nenhuma porta /dev/ttyUSB* ou /dev/ttyACM* visível no container."
+        raise base_station.BaseStationError(
+            f"Nenhuma ESP32 Base Station encontrada nas portas USB.{suffix}"
+        )
+    link = base_station.BaseStationLink(adapters[0][0], baud=baud)
+    info = link.open()
+    return link, info
 
-                if raw.startswith("tel"):
-                    parts = raw.split()
-                    rid = self._parse_robot_id(parts[1]) if len(parts) > 1 else 0
-                    t0 = time.perf_counter()
-                    self.device.send_telemetry_request(rid)
-                    tel = self.device.receive_data(timeout=0.150)
-                    if tel is None:
-                        print(f"{Colors.RED}✗ [TIMEOUT] No telemetry reply from Robot {rid}{Colors.RESET}")
-                    else:
-                        rtt = (time.perf_counter() - t0) * 1000.0
-                        print(f"{Colors.CYAN}  (RTT = {rtt:.2f} ms){Colors.RESET}")
-                    continue
 
-                # Config shortcuts
-                if raw.startswith("set_id"):
-                    parts = raw.split()
-                    if len(parts) < 3:
-                        print("Usage: set_id <target_id> <new_id>")
-                        continue
-                    self.device.send_config(
-                        self._parse_robot_id(parts[1]),
-                        CONFIG_FLAG_SET_ID,
-                        param=int(parts[2]),
-                    )
-                    continue
+def print_info(info, port, baud):
+    rate = base_station.RATE_NAMES.get(info["data_rate"], "?")
+    print(f"\n{Colors.BOLD}=== ESP32 BASE STATION ({port} @ {baud} baud) ==={Colors.RESET}")
+    print(f"  Protocolo : v{info['protocol_version']} | Rádio: {'OK' if info['radio_ready'] else 'ERRO'}")
+    print(f"  Canal RF  : {info['channel']} ({2400 + info['channel']} MHz) | Taxa: {rate} | PA: {info['pa_level']}")
+    print(
+        f"  Retries   : ARD={info['retransmit_delay']} ({(info['retransmit_delay'] + 1) * 250} us)"
+        f" | ARC={info['retransmit_count']}"
+    )
+    print(
+        f"  Contadores: TX OK={info['tx_ok_count']} | TX Fail={info['tx_fail_count']}"
+        f" | RX={info['rx_count']} | Reinits={info['radio_reinit_count']}\n"
+    )
 
-                if raw.startswith("calibrate_mag"):
-                    parts = raw.split()
-                    rid = self._parse_robot_id(parts[1]) if len(parts) > 1 else 0
-                    self.device.send_config(rid, CONFIG_FLAG_CALIBRATE_MAG)
-                    continue
 
-                if raw.startswith("calibrate"):
-                    parts = raw.split()
-                    rid = self._parse_robot_id(parts[1]) if len(parts) > 1 else 0
-                    self.device.send_config(rid, CONFIG_FLAG_RUN_CALIBRATION)
-                    continue
+def print_scan(scan):
+    print(f"\n{Colors.BOLD}=== SCAN RPD (melhor canal: {scan['best_channel']} / {2400 + scan['best_channel']} MHz) ==={Colors.RESET}")
+    for i, pct in enumerate(scan["busy_pct"]):
+        ch = scan["start_channel"] + i
+        if pct == 0 and ch != scan["best_channel"] and ch % 10 != 0:
+            continue
+        color = Colors.RED if pct >= 50 else (Colors.YELLOW if pct >= 15 else Colors.GREEN)
+        tag = f" {Colors.CYAN}<-- RECOMENDADO{Colors.RESET}" if ch == scan["best_channel"] else ""
+        print(f"  ch {ch:3d} ({2400 + ch} MHz) [{pct:3d}%] {color}{'#' * (pct // 5)}{Colors.RESET}{tag}")
+    print()
 
-                if raw.startswith("factory_reset"):
-                    parts = raw.split()
-                    rid = self._parse_robot_id(parts[1]) if len(parts) > 1 else 0
-                    self.device.send_config(rid, CONFIG_FLAG_FACTORY_RESET)
-                    continue
 
-                # Motion command (fire-and-forget — use 'tel <id>' for telemetry)
-                x, y, vx, vy, w, kick, robot_id = 0, 0, 0, 0, 0, 0, 0
-                for p in raw.strip("{}[] ").split(","):
-                    if ":" in p:
-                        k, v = p.split(":", 1)
-                        k, v = k.strip(" \"'").lower(), v.strip()
-                        if k == "x":
-                            x = int(v)
-                        elif k == "y":
-                            y = int(v)
-                        elif k == "vx":
-                            vx = int(v)
-                        elif k == "vy":
-                            vy = int(v)
-                        elif k == "w":
-                            w = int(v)
-                        elif k == "kick":
-                            kick = int(v)
-                        elif k == "id":
-                            robot_id = self._parse_robot_id(v)
+def send_telemetry_request(link, robot_id, timeout_s=0.05):
+    ts = int(time.time() * 1000) & 0xFFFFFFFF
+    req = radio.encode_telemetry_request(robot_id, ts)
+    link.clear_rx()
+    t0 = time.monotonic()
+    tx_st = link.send_rf(robot_id, req, tx_flags=base_station.BS_TX_FLAG_EXPECT_REPLY, timeout_s=0.03)
+    if tx_st is None or tx_st["status"] != base_station.BS_TX_STATUS_OK:
+        return None, tx_st, 0.0
+    deadline = t0 + timeout_s
+    while time.monotonic() < deadline:
+        rx = link.wait_rf_rx(timeout_s=max(0.002, deadline - time.monotonic()))
+        if rx is None:
+            break
+        tel = radio.decode_telemetry(rx["payload"])
+        if tel is not None and tel["robot_id"] == robot_id:
+            return tel, tx_st, (time.monotonic() - t0) * 1000.0
+    return None, tx_st, 0.0
 
-                timestamp = self.device.send_command(robot_id, x=x, y=y, vx=vx, vy=vy, w=w, kick=kick)
-                id_label = "BROADCAST" if robot_id == ROBOT_ID_BROADCAST else str(robot_id)
-                print(
-                    f"{Colors.CYAN}→ [CMD SENT] robot={id_label} ts={timestamp} "
-                    f"x={x} y={y} vx={vx} vy={vy} w={w} kick={kick}{Colors.RESET}"
-                )
 
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                print(f"{Colors.RED}Error: {e}{Colors.RESET}")
+def switch_channel(link, new_channel, notify_robots=True):
+    info = link.get_info()
+    if info is None:
+        print(f"{Colors.RED}Falha ao ler info da Base Station.{Colors.RESET}")
+        return False
+    if notify_robots:
+        for rid in range(radio.ROBOT_ID_MAX + 1):
+            cfg = radio.encode_config(rid, radio.CONFIG_FLAG_SET_CHANNEL, new_channel)
+            st = link.send_rf(rid, cfg, timeout_s=0.025)
+            if st and st["status"] == base_station.BS_TX_STATUS_OK:
+                print(f"{Colors.GREEN}  ✓ Robô {rid} confirmou troca para ch {new_channel}{Colors.RESET}")
+        bcast = radio.encode_config(radio.ROBOT_ID_BROADCAST, radio.CONFIG_FLAG_SET_CHANNEL, new_channel)
+        for _ in range(3):
+            link.send_rf(radio.ROBOT_ID_BROADCAST, bcast, tx_flags=base_station.BS_TX_FLAG_NO_ACK, timeout_s=0.025)
+    updated = link.set_config(
+        channel=new_channel,
+        data_rate=info["data_rate"],
+        pa_level=info["pa_level"],
+        retransmit_delay=info["retransmit_delay"],
+        retransmit_count=info["retransmit_count"],
+        persist_nvs=True,
+    )
+    if updated:
+        print(f"{Colors.GREEN}✓ Base Station agora no canal {updated['channel']} ({2400 + updated['channel']} MHz){Colors.RESET}")
+        return True
+    return False
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="nRF24L01 Wireless Module Controller",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("-p", "--port", type=str, default="auto", help="Serial port device.")
-    parser.add_argument("-b", "--baud", type=int, default=115200, help="Serial baud rate.")
-    parser.add_argument(
-        "-f",
-        "--freq",
-        type=float,
-        default=2.401,
-        help="Communication frequency in GHz.",
-    )
-    parser.add_argument(
-        "-r",
-        "--rate",
-        type=int,
-        default=3,
-        choices=[1, 2, 3],
-        help="Air data rate: 1=250Kbps, 2=1Mbps, 3=2Mbps",
-    )
-    parser.add_argument("-a", "--address", type=str, default="ESP32", help="5-byte address string.")
-    parser.add_argument(
-        "--skip-config",
-        action="store_true",
-        help="Skip sending AT config commands to the USB adapter.",
-    )
+    parser = argparse.ArgumentParser(description="CLI da ESP32 Base Station nRF24L01+")
+    parser.add_argument("-p", "--port", default=None, help="Porta serial (padrão: auto-detecção)")
+    parser.add_argument("-b", "--baud", type=int, default=base_station.DEFAULT_BAUD)
+    parser.add_argument("--info", action="store_true", help="Exibe informações da Base Station")
+    parser.add_argument("--scan", action="store_true", help="Escaneia espectro RPD (0..125)")
+    parser.add_argument("--set-channel", type=int, default=None, help="Migra robôs + Base para canal 0..125")
+    parser.add_argument("--auto-channel", action="store_true", help="Escaneia e migra para o melhor canal")
+    parser.add_argument("--tel", type=int, default=None, help="Solicita telemetria de um robot_id")
+    parser.add_argument("--id", type=int, default=0, help="Robot ID alvo para comandos")
+    parser.add_argument("--vx", type=int, default=None, help="Envia comando de velocidade vx (mm/s)")
+    parser.add_argument("--vy", type=int, default=0)
+    parser.add_argument("--w", type=int, default=0)
+    parser.add_argument("--kick", type=int, default=0)
+    parser.add_argument("--set-id", type=int, default=None, help="Altera ID do robô --id para novo ID")
+    parser.add_argument("--calibrate", action="store_true")
+    parser.add_argument("--factory-reset", action="store_true")
     args = parser.parse_args()
 
-    device = None
     try:
-        print(f"{Colors.BOLD}=== nRF24L01 Wireless Module Controller ==={Colors.RESET}\n")
+        link, info = connect_base(args.port, args.baud)
+    except Exception as exc:
+        print(f"{Colors.RED}Erro: {exc}{Colors.RESET}")
+        sys.exit(1)
 
-        device = (
-            NRF24L01Controller.auto_connect(baudrate=args.baud)
-            if args.port.lower() == "auto"
-            else NRF24L01Controller(port=args.port, baudrate=args.baud)
-        )
-
-        if not device:
-            return
-
-        if not args.skip_config:
-            print(f"\n{Colors.BOLD}CONFIGURING MODULE:{Colors.RESET}")
-            if len(args.address) != 5:
-                print(f"{Colors.RED}Error: Address must be exactly 5 characters.{Colors.RESET}")
-                return
-            rx_address_bytes = [ord(c) for c in "ADMIN"]
-            tx_address_bytes = list(args.address.encode("ascii"))
-            device.set_addresses(rx_address_bytes, tx_address_bytes)
-            device.set_frequency(2.400 + 76 * 0.001)
-            device.set_data_rate(args.rate)
-            device.get_system_info()
-            # device.set_baudrate(7)
-        else:
-            print(f"\n{Colors.YELLOW}Skipping USB Adapter AT-Configuration...{Colors.RESET}")
-
-        CLIController(device).start()
-
-    except KeyboardInterrupt:
-        print(f"\n{Colors.YELLOW}Stopped by user{Colors.RESET}")
-    except serial.SerialException as e:
-        print(f"\n{Colors.RED}Serial Error: {e}{Colors.RESET}")
-        print(f"{Colors.YELLOW}Hint: Try 'sudo usermod -a -G dialout $USER'{Colors.RESET}")
-    except Exception as e:
-        print(f"{Colors.RED}An unexpected error occurred: {e}{Colors.RESET}")
+    try:
+        if args.info or not any(
+            x is not None and x is not False
+            for x in (
+                args.scan,
+                args.set_channel,
+                args.auto_channel,
+                args.tel,
+                args.vx,
+                args.set_id,
+                args.calibrate,
+                args.factory_reset,
+            )
+        ):
+            print_info(info, link.port, link.baud)
+        if args.scan:
+            scan = link.scan_channels(0, 125, 32)
+            if scan:
+                print_scan(scan)
+        if args.auto_channel:
+            scan = link.scan_channels(0, 125, 32)
+            if scan:
+                print_scan(scan)
+                switch_channel(link, scan["best_channel"], notify_robots=True)
+        if args.set_channel is not None:
+            switch_channel(link, args.set_channel, notify_robots=True)
+        if args.tel is not None:
+            tel, tx_st, rtt = send_telemetry_request(link, args.tel)
+            if tel:
+                print(
+                    f"{Colors.GREEN}✓ Robô {tel['robot_id']} | RTT={rtt:.2f}ms | "
+                    f"Batt={tel['battery_pct']}% | Kicker={tel['kicker_voltage_v']:.2f}V | "
+                    f"Err=0x{tel['error_flags']:04X}{Colors.RESET}"
+                )
+            else:
+                print(f"{Colors.RED}✗ Sem resposta do robô {args.tel} (tx={tx_st}){Colors.RESET}")
+        if args.vx is not None:
+            cmd = radio.encode_command(args.id, vx=args.vx, vy=args.vy, w=args.w, kick=args.kick)
+            st = link.send_rf(args.id, cmd)
+            print(f"CMD -> robô {args.id}: {st}")
+        if args.set_id is not None:
+            cfg = radio.encode_config(args.id, radio.CONFIG_FLAG_SET_ID, args.set_id)
+            print(f"SET_ID {args.id}->{args.set_id}: {link.send_rf(args.id, cfg)}")
+        if args.calibrate:
+            cfg = radio.encode_config(args.id, radio.CONFIG_FLAG_RUN_CALIBRATION, 0)
+            print(f"CALIBRATE robô {args.id}: {link.send_rf(args.id, cfg)}")
+        if args.factory_reset:
+            cfg = radio.encode_config(args.id, radio.CONFIG_FLAG_FACTORY_RESET, 0)
+            print(f"FACTORY_RESET robô {args.id}: {link.send_rf(args.id, cfg)}")
     finally:
-        if device and device.ser.is_open:
-            device.close()
+        link.close()
 
 
 if __name__ == "__main__":

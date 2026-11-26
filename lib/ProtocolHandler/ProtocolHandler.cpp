@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <esp_system.h>
 #include <esp_timer.h>
+#include <sdkconfig.h>
 
 #include <cstring>
 
@@ -56,7 +57,16 @@ void ProtocolHandler::init(NRF24L01 * radio,
     configASSERT(m_command_inbox.init());
     m_velocity_controller.init(*kinematics);
     m_safety_supervisor.mark_self_test_complete(true);
-    ESP_LOGI(TAG, "ProtocolHandler initialized.");
+    m_channel_hunter = radio_addressing::ChannelHunter(
+      RobotState::get_instance().get_radio_channel(),
+      static_cast<uint64_t>(CONFIG_RADIO_CHANNEL_HUNT_TRIGGER_MS) * 1000ULL,
+      static_cast<uint64_t>(CONFIG_RADIO_CHANNEL_HUNT_DWELL_MS) * 1000ULL);
+    m_last_observed_rx_us = 0;
+    ESP_LOGI(TAG,
+             "ProtocolHandler initialized (ch=%u, hunt_trigger=%dms, hunt_dwell=%dms).",
+             RobotState::get_instance().get_radio_channel(),
+             CONFIG_RADIO_CHANNEL_HUNT_TRIGGER_MS,
+             CONFIG_RADIO_CHANNEL_HUNT_DWELL_MS);
 }
 
 LifecycleState ProtocolHandler::get_lifecycle() const
@@ -436,6 +446,21 @@ void ProtocolHandler::update()
         }
     }
     const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+    const uint64_t latest_rx_us = m_last_base_station_rx_us.load(std::memory_order_relaxed);
+    if (latest_rx_us != m_last_observed_rx_us)
+    {
+        m_last_observed_rx_us = latest_rx_us;
+        m_channel_hunter.on_packet_received(latest_rx_us);
+    }
+    if (m_radio != nullptr)
+    {
+        uint8_t next_ch = 0;
+        if (m_channel_hunter.tick(now_us, calibrating_motors, &next_ch))
+        {
+            ESP_LOGW(TAG, "Link quiet — hunting base station on channel %u.", next_ch);
+            m_radio->set_channel(next_ch);
+        }
+    }
     if (calibrating_motors)
     {
         // Calibration owns the wheel targets until it leaves the motors stopped.
@@ -527,8 +552,36 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         }
         else
         {
-            ESP_LOGI(TAG, "Robot ID: %d → %d", my_id, new_id);
+            ESP_LOGI(TAG, "Robot ID: %d -> %d", my_id, new_id);
             state.set_id(new_id);
+            if (m_radio != nullptr)
+            {
+                const std::array<uint8_t, 5> new_addr = radio_addressing::make_robot_address(new_id);
+                m_radio->set_rx_address(new_addr.data());
+            }
+        }
+    }
+
+    // SET radio channel (persisted to NVS and applied live)
+    if (cfg.config_flags & CONFIG_FLAG_SET_CHANNEL)
+    {
+        if (cfg.param <= radio_addressing::MAX_CHANNEL)
+        {
+            const uint8_t new_ch = static_cast<uint8_t>(cfg.param);
+            ESP_LOGI(TAG, "Switching radio channel to %u.", new_ch);
+            state.set_radio_channel(new_ch);
+            if (m_radio != nullptr)
+                m_radio->set_channel(new_ch);
+            xSemaphoreTake(m_mutex, portMAX_DELAY);
+            m_channel_hunter.set_home_channel(new_ch, static_cast<uint64_t>(esp_timer_get_time()));
+            xSemaphoreGive(m_mutex);
+        }
+        else
+        {
+            ESP_LOGE(TAG,
+                     "CONFIG_FLAG_SET_CHANNEL: channel %u exceeds max (%u). Rejected.",
+                     cfg.param,
+                     radio_addressing::MAX_CHANNEL);
         }
     }
 
@@ -550,11 +603,23 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         OrientationHandler::get_instance().calibrate_mag(10);
     }
 
-    // RESET NVS — reset robot ID to 0 (legacy, superseded by FACTORY_RESET)
+    // RESET NVS — reset robot ID to 0 and channel to default
     if (cfg.config_flags & CONFIG_FLAG_RESET_NVS)
     {
-        ESP_LOGW(TAG, "CONFIG_FLAG_RESET_NVS: resetting robot ID to 0.");
+        ESP_LOGW(TAG, "CONFIG_FLAG_RESET_NVS: resetting robot ID to 0 and channel to %d.",
+                 CONFIG_RADIO_CHANNEL);
         state.set_id(0);
+        state.set_radio_channel(CONFIG_RADIO_CHANNEL);
+        if (m_radio != nullptr)
+        {
+            const std::array<uint8_t, 5> default_addr = radio_addressing::make_robot_address(0);
+            m_radio->set_rx_address(default_addr.data());
+            m_radio->set_channel(CONFIG_RADIO_CHANNEL);
+        }
+        xSemaphoreTake(m_mutex, portMAX_DELAY);
+        m_channel_hunter.set_home_channel(CONFIG_RADIO_CHANNEL,
+                                          static_cast<uint64_t>(esp_timer_get_time()));
+        xSemaphoreGive(m_mutex);
     }
 
     // FULL FACTORY RESET — erase all NVS namespaces and keys
