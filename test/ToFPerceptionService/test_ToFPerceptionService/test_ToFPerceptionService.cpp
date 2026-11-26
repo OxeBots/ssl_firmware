@@ -23,8 +23,10 @@ esp_err_t setup_service()
 void test_invalid_lifecycle_calls()
 {
     static ToFPerceptionService uninitialized;
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, uninitialized.init(GPIO_NUM_NC, 0));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, uninitialized.init(GPIO_NUM_NC, 16));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      uninitialized.init(shared_test_i2c_bus(), GPIO_NUM_NC, 0));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      uninitialized.init(shared_test_i2c_bus(), GPIO_NUM_NC, 16));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, uninitialized.start());
 }
 
@@ -73,7 +75,7 @@ void test_service_initialization()
 {
     TEST_ASSERT_EQUAL(ESP_OK, setup_service());
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK,
-                              s_service.init((gpio_num_t)CONFIG_TOF_INT_GPIO, 15),
+                              s_service.init(s_bus_handle, (gpio_num_t)CONFIG_TOF_INT_GPIO, 15),
                               "VL53L5CX was not detected at I2C address 0x29");
     s_service_initialized = true;
 }

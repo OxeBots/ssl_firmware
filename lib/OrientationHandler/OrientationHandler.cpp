@@ -16,9 +16,10 @@ OrientationHandler::OrientationHandler() : m_driver(IMUGY85::get_instance()), m_
 
 /**
  * @brief Initialize the IMU hardware driver and load calibration from NVS.
+ * @param i2c_bus Shared I2C master bus created during boot.
  * @return ESP_OK on success.
  */
-esp_err_t OrientationHandler::init()
+esp_err_t OrientationHandler::init(i2c_master_bus_handle_t i2c_bus)
 {
     // Create mutex
     m_mutex = xSemaphoreCreateMutex();
@@ -29,7 +30,7 @@ esp_err_t OrientationHandler::init()
     }
 
     // Initialize hardware driver
-    esp_err_t err = m_driver.init();
+    esp_err_t err = m_driver.init(i2c_bus);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to initialize IMU hardware driver.");

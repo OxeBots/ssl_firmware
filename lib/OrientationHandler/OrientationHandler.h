@@ -1,6 +1,7 @@
 #ifndef _ORIENTATION_HANDLER_H_
 #define _ORIENTATION_HANDLER_H_
 
+#include <driver/i2c_master.h>
 #include <esp_err.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -17,7 +18,7 @@ class OrientationHandler
     static OrientationHandler & get_instance();
 
     // Initialization and task management
-    esp_err_t init();
+    esp_err_t init(i2c_master_bus_handle_t i2c_bus);
     void start_task();
 
     // Calibration routines

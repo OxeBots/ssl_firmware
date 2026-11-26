@@ -105,13 +105,11 @@ void test_sensor_orientation_check(void)
 {
     // Initialize GY-85 Sensors
     ESP_LOGI(TAG, "Initializing Sensors...");
-    imu.init();
+    imu.init(bus_handle);
 
     // Clear Calibrations for Orientation Testing
     ESP_LOGI(TAG, "Clearing default calibrations for raw data inspection...");
     imu.get_accel().set_offset(0, 0, 0);
-    imu.get_accel().set_calibration_scales(1.0f, 1.0f, 1.0f);
-    imu.get_gyro().set_offsets(0, 0, 0);
     imu.get_mag().clear_calibration();
 
     printf("\n\n");

@@ -16,9 +16,9 @@
  *   2.: Robot state (depends on NVS)
  *   3.: GPIO ISR service (must precede any GPIO interrupt registration)
  *   4.: Shared SPI bus and shift register, with the encoder mux disabled
- *   5.: IMU hardware driver init (IMUGY85)
+ *   5.: Shared I2C bus and IMU hardware driver
  *   6.: IMU calibration load from NVS
- *   7.: Kicker and ToF perception (optional, share the IMU I2C bus)
+ *   7.: Kicker and ToF perception (optional, use the shared I2C bus)
  *   8.: Wheel encoders (ADC) and encoder calibration
  *   9.: Radio hardware
  *  10.: Motor driver + WheelController
@@ -83,7 +83,7 @@ extern "C" void app_main(void)
 
     // 4: Disable the encoder mux before checking the shared bus. The shift
     // register can retain a selected encoder across an ESP32 reset.
-    SPIdev::init();
+    ESP_ERROR_CHECK(SPIdev::init());
 
     static HC595 shift_register;
     HC595::Config output_config = {
@@ -103,8 +103,14 @@ extern "C" void app_main(void)
     };
     ESP_ERROR_CHECK(cd4052b.init(&shift_register, mux_config));
 
-    // 5: IMU hardware driver init (IMUGY85).
-    const bool imu_ready = OrientationHandler::get_instance().init() == ESP_OK;
+    // 5: Bring up the shared bus before probing any of its devices.
+    const esp_err_t i2c_result = I2Cdev::init();
+    if (i2c_result != ESP_OK)
+        ESP_LOGW(TAG, "Shared I2C bus unavailable: %s", esp_err_to_name(i2c_result));
+
+    const auto i2c_bus = I2Cdev::get_bus_handle();
+    const bool imu_ready =
+      i2c_bus != nullptr && OrientationHandler::get_instance().init(i2c_bus) == ESP_OK;
     if (imu_ready)
         ESP_LOGI(TAG, "IMU hardware initialized.");
     else
@@ -124,17 +130,15 @@ extern "C" void app_main(void)
 
     // 7: Kicker and ToF perception service (optional).
     auto & kicker = KickerController::get_instance();
-    const bool kicker_ready = kicker.init(I2Cdev::get_bus_handle()) == ESP_OK;
+    const bool kicker_ready = kicker.init(i2c_bus) == ESP_OK;
     if (!kicker_ready)
     {
         ESP_LOGW(TAG, "Kicker unavailable. Continuing without kicker.");
         RobotState::get_instance().set_error(ERROR_KICKER_NO_CHARGE);
     }
 
-    // The VL53L5CX shares the IMU I2C bus. ToF is an optional perception
-    // capability, so a missing sensor does not prevent safe wheel control.
     static ToFPerceptionService tof_service;
-    if (tof_service.init(static_cast<gpio_num_t>(CONFIG_TOF_INT_GPIO)) == ESP_OK)
+    if (tof_service.init(i2c_bus, static_cast<gpio_num_t>(CONFIG_TOF_INT_GPIO)) == ESP_OK)
     {
         if (tof_service.start() != ESP_OK)
         {

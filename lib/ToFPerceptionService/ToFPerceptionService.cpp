@@ -26,14 +26,18 @@ ToFPerceptionService::~ToFPerceptionService()
         vSemaphoreDelete(m_mutex);
 }
 
-esp_err_t ToFPerceptionService::init(gpio_num_t interrupt_gpio, uint8_t frequency_hz)
+esp_err_t ToFPerceptionService::init(i2c_master_bus_handle_t i2c_bus,
+                                     gpio_num_t interrupt_gpio,
+                                     uint8_t frequency_hz)
 {
     if (m_initialized)
         return ESP_ERR_INVALID_STATE;
+    if (i2c_bus == nullptr)
+        return ESP_ERR_INVALID_ARG;
     if (frequency_hz == 0 || frequency_hz > 15)
         return ESP_ERR_INVALID_ARG;
 
-    esp_err_t err = m_sensor.init();
+    esp_err_t err = m_sensor.init(i2c_bus);
     if (err != ESP_OK)
         return err;
     if (!m_sensor.test_connection())

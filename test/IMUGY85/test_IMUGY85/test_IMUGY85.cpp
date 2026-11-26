@@ -8,6 +8,7 @@
 #include <unity.h>
 
 #include "../shared_test_bus.h"
+#include "I2Cdev.h"
 #include "IMUGY85.h"
 
 // IMU Instance
@@ -27,7 +28,9 @@ void setUp(void)
 void test_initialization(void)
 {
     ESP_LOGI(TAG, "Initializing IMU sensors...");
-    esp_err_t err = imu.init();
+    const i2c_master_bus_handle_t bus = shared_test_i2c_bus();
+    I2Cdev::init(bus);
+    esp_err_t err = imu.init(bus);
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, err, "IMUGY85 initialization failed");
     TEST_ASSERT_TRUE(imu.is_initialized());
 
@@ -66,10 +69,10 @@ void test_raw_gyro(void)
 {
     ESP_LOGI(TAG, "Testing Gyro Read...");
 
-    int16_t gx, gy, gz;
-    imu.read_gyro(&gx, &gy, &gz);
+    int16_t gx, gy, gz, temp;
+    imu.read_gyro(&gx, &gy, &gz, &temp);
 
-    ESP_LOGI(TAG, "Gyro: X=%d, Y=%d, Z=%d", gx, gy, gz);
+    ESP_LOGI(TAG, "Gyro: X=%d, Y=%d, Z=%d, temp=%d", gx, gy, gz, temp);
 
     // Sanity: not all zeros
     bool all_zeros = (gx == 0 && gy == 0 && gz == 0);
@@ -104,11 +107,9 @@ void test_calibrated_readings(void)
     ESP_LOGI(TAG, "Testing Calibrated Readings...");
 
     Vector3f accel = imu.read_acceleration_calibrated();
-    Vector3f gyro = imu.read_gyro_calibrated();
     Vector3f mag = imu.read_magnetometer_calibrated();
 
     ESP_LOGI(TAG, "Accel calibrated: X=%.2f, Y=%.2f, Z=%.2f", accel.x, accel.y, accel.z);
-    ESP_LOGI(TAG, "Gyro calibrated: X=%.2f, Y=%.2f, Z=%.2f", gyro.x, gyro.y, gyro.z);
     ESP_LOGI(TAG, "Mag calibrated: X=%.2f, Y=%.2f, Z=%.2f", mag.x, mag.y, mag.z);
 
     // Without calibration, accel magnitude should still be near 1g.
@@ -130,9 +131,6 @@ extern "C" void app_main(void)
     UNITY_BEGIN();
 
     RUN_TEST(test_initialization);
-    // The IMUGY85 driver creates the shared I2C bus inside init(); hand it to
-    // the suites that follow in the merged test binary.
-    shared_test_i2c_adopt(imu.get_i2c_bus());
     RUN_TEST(test_raw_acceleration);
     RUN_TEST(test_raw_gyro);
     RUN_TEST(test_raw_magnetometer);

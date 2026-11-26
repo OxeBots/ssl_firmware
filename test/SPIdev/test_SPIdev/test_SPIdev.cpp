@@ -34,6 +34,8 @@ void test_spi_device_registration_and_write()
 
 void test_spi_device_read_and_shift()
 {
+    TEST_ASSERT_EQUAL(ESP_OK, SPIdev::init());
+
     uint8_t received = 0;
     const uint8_t command = 0;
 

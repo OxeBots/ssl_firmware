@@ -2,6 +2,7 @@
 #define _TOF_PERCEPTION_SERVICE_H_
 
 #include <driver/gpio.h>
+#include <driver/i2c_master.h>
 #include <esp_err.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -35,7 +36,9 @@ class ToFPerceptionService
     ToFPerceptionService() = default;
     ~ToFPerceptionService();
 
-    esp_err_t init(gpio_num_t interrupt_gpio, uint8_t frequency_hz = 15);
+    esp_err_t init(i2c_master_bus_handle_t i2c_bus,
+                   gpio_num_t interrupt_gpio,
+                   uint8_t frequency_hz = 15);
     esp_err_t start();
     void stop();
 

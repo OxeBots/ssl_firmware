@@ -5,17 +5,13 @@
 #ifndef _SHARED_TEST_SPI_H_
 #define _SHARED_TEST_SPI_H_
 
+#include <esp_err.h>
+
 #include "SPIdev.h"
 
 inline void shared_test_spi_bus()
 {
-    static bool initialized = false;
-    if (initialized)
-        return;
-
-    // SPIdev::init() tolerates a host already claimed by an earlier suite.
-    SPIdev::init();
-    initialized = true;
+    ESP_ERROR_CHECK(SPIdev::init());
 }
 
 #endif  // _SHARED_TEST_SPI_H_

@@ -1,19 +1,24 @@
-#include <cstdint>
-#include <cstdio>
-
 #include <esp_err.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <cstdint>
+#include <cstdio>
+
+#include "../../shared_test_bus.h"
+#include "I2Cdev.h"
 #include "IMUGY85.h"
 
 extern "C" void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(200));
 
+    const i2c_master_bus_handle_t i2c_bus = shared_test_i2c_bus();
+    I2Cdev::init(i2c_bus);
+
     IMUGY85 & imu = IMUGY85::get_instance();
-    if (imu.init() != ESP_OK)
+    if (imu.init(i2c_bus) != ESP_OK)
     {
         printf("ERR,imu_init_failed\n");
         while (true) vTaskDelay(pdMS_TO_TICKS(1000));
@@ -36,11 +41,6 @@ extern "C" void app_main(void)
         imu.read_gyro(&gx, &gy, &gz, &temp);
 
         const int64_t ts_us = esp_timer_get_time();
-        printf("GYRO,%lld,%d,%d,%d,%d\n",
-                static_cast<long long>(ts_us),
-                temp,
-                gx,
-                gy,
-                gz);
+        printf("GYRO,%lld,%d,%d,%d,%d\n", static_cast<long long>(ts_us), temp, gx, gy, gz);
     }
 }

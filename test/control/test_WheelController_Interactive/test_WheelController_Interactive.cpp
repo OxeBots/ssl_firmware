@@ -13,13 +13,13 @@
 #include <bitset>
 #include <cmath>
 
+#include "../../shared_test_spi.h"
 #include "74HC595.h"
 #include "AS5600.h"
 #include "BL48250.h"
 #include "CD4052B.h"
 #include "I2Cdev.h"
 #include "NVSManager.h"
-#include "SPIdev.h"
 #include "WheelController.h"
 #include "constants.h"
 #include "wheel_state_estimator.h"
@@ -2085,7 +2085,7 @@ void test_wheel_controller_interactive()
         NVSManager::start();
 
         // SPI for the 74HC595 direction and encoder selector outputs
-        SPIdev::init();
+        shared_test_spi_bus();
         HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
                                          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
                                          .clock_hz = 1000000};

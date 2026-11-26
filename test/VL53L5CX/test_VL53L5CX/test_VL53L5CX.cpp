@@ -110,7 +110,7 @@ extern "C" void app_main(void)
 {
     setup_i2c();
 
-    esp_err_t ret = sensor.init();
+    esp_err_t ret = sensor.init(bus_handle);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Sensor init failed: %s", esp_err_to_name(ret));

@@ -8,9 +8,9 @@
 
 #include <array>
 
+#include "../../shared_test_spi.h"
 #include "74HC595.h"
 #include "BL48250.h"
-#include "SPIdev.h"
 
 namespace config
 {
@@ -42,7 +42,7 @@ void setUp(void)
 {
     if (!s_shift_register_initialized)
     {
-        SPIdev::init();
+        shared_test_spi_bus();
         HC595::Config expander_config = {.latch_gpio = (gpio_num_t)CONFIG_SHIFT_REGISTER_LATCH_GPIO,
                                          .device_key = CONFIG_SHIFT_REGISTER_DEVICE_KEY,
                                          .clock_hz = 1000000};

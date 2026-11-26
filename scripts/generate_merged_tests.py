@@ -21,10 +21,8 @@ untouched so they keep merging across translation units.
 
 Suite order in the generated table:
   1. test_logic suites (no hardware).
-  2. NRF24L01 - its raw driver asserts when SPI2_HOST is already claimed, so
-     it runs before every other SPI suite.
-  3. IMUGY85 - its driver creates the shared I2C bus and adopts it for the
-     rest of the binary (see test/shared_test_bus.h).
+  2. NRF24L01 - brings up the shared SPI bus for the first radio suite.
+  3. IMUGY85 - uses the shared I2C bus from test/shared_test_bus.h.
   4. Remaining hardware suites, WheelController last (its tearDown stops the
      motors).
 """

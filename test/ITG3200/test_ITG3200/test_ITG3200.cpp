@@ -79,7 +79,8 @@ void test_sensor_data_read(void)
     gyro.get_rotation(&x, &y, &z);
 
     // ITG3200 also has a temperature sensor
-    int16_t raw_temp = gyro.get_temperature();
+    int16_t raw_temp = 0;
+    TEST_ASSERT_TRUE_MESSAGE(gyro.get_temperature(&raw_temp), "Temperature read failed");
     // Offset -13200, Scale 280 LSB/C, + 35C offset (Approx calculation from datasheet)
     float temp_c = 35.0 + ((raw_temp + 13200) / 280.0);
 

@@ -9,7 +9,7 @@
 
 #include "AS5600.h"
 #include "BL48250.h"
-#include "IMUGY85.h"
+#include "I2Cdev.h"
 #include "WheelController.h"
 #include "wheel_state_estimator.h"
 
@@ -1033,8 +1033,8 @@ void MotorCalibration::run_encoder_alignment()
 
     EncoderStatus status = get_encoder_status();
     EncoderError error = EncoderError::I2C;
-    // Retry if the shared bus was unavailable at startup.
-    if (IMUGY85::get_instance().init_i2c_bus() == ESP_OK)
+    // Alignment needs the shared bus that the boot sequence created.
+    if (I2Cdev::get_bus_handle() != nullptr)
     {
         ESP_LOGI(TAG, "Calibration started: open loop, one wheel at a time; the wheels spin.");
 
