@@ -1,6 +1,6 @@
 /**
  * @file SerialDebugCodec.cpp
- * @brief COBS + CRC8 wire codec for the serial debug dashboard protocol.
+ * @brief COBS + CRC8 wire codec for serial Bitproto messages.
  *
  * Frame layout on the wire:
  *
@@ -9,9 +9,7 @@
  * COBS (Consistent Overhead Byte Stuffing) guarantees the encoded frame
  * never contains 0x00, so the delimiter both frames and re-synchronizes the
  * stream: after any garbage burst the decoder simply skips bytes until the
- * next 0x00. The CRC-8 (poly 0x07) over the type byte, the message and the
- * trailing code byte rejects corrupted frames. Multi-byte integers are
- * little-endian and fields are bit-packed contiguously by bitproto.
+ * next 0x00. The CRC-8 (poly 0x07) covers the type byte and the message.
  */
 
 #include "SerialDebugCodec.h"
@@ -24,7 +22,7 @@ namespace
 {
 /**
  * @brief COBS-encode a payload without the trailing 0x00 delimiter.
- * @param in Payload bytes (must not contain 0x00 for exact framing).
+ * @param in Payload bytes.
  * @param len Payload length in bytes.
  * @param out Output buffer, needs len + ceil(len / 254) + 1 bytes.
  * @return Encoded length in bytes.

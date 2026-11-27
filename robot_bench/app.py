@@ -10,6 +10,7 @@ import dearpygui._dearpygui as dpg_core
 
 from . import calibration, config, console, health, motors, picker, radio, radio_panel, rendering, sensing
 from . import protocol as proto
+from .bench_panel import BenchPanel
 from .discovery import PortScanner
 from .serial_io import BenchReader
 
@@ -23,6 +24,7 @@ TAB_TAGS = (
     "tab_imu",
     "tab_console",
     "tab_radio",
+    "tab_bench",
 )
 HEADER_SPACER = "header_spacer"
 CONNECTION_STATUS = "connection_status"
@@ -47,8 +49,7 @@ _TEXT_WIDTHS = {}
 REPEAT_DELAY_S = 0.35
 REPEAT_PERIOD_S = 0.06
 
-# The nRF24L01 USB adapters are re-detected at this period while the picker is
-# open, so plugging the radio bridge in shows up without pressing "Buscar portas".
+# Recheck the gateway port while the picker is open.
 RADIO_SCAN_PERIOD_S = 2.0
 RADIO_DISCOVERY_RETRY_S = 4.0
 
@@ -60,6 +61,7 @@ KEY_ACTIONS = {
     dpg.mvKey_F5: ("tab", config.TAB_IMU),
     dpg.mvKey_F6: ("tab", config.TAB_CONSOLE),
     dpg.mvKey_F7: ("tab", config.TAB_RADIO),
+    dpg.mvKey_F8: ("tab", config.TAB_BENCH),
     dpg.mvKey_1: ("wheel", 0),
     dpg.mvKey_2: ("wheel", 1),
     dpg.mvKey_3: ("wheel", 2),
@@ -335,6 +337,8 @@ def usb_connection_status(state):
 
 def radio_connection_status(snapshot):
     """Radio link badge text and color for the header."""
+    if snapshot.get("benchmarking"):
+        return "Rádio em teste", config.ACCENT
     if snapshot["live"]:
         return "Rádio ao vivo", config.OK_COLOR
     if snapshot["connected"] and snapshot["rx_count"]:
@@ -417,7 +421,9 @@ class KeyRepeater:
 
 
 def tab_visible(index, radio_active, usb_active):
-    """True when a tab can be selected: the radio tab needs the radio link."""
+    """True when the current links make the tab available."""
+    if index == config.TAB_BENCH:
+        return radio_active or usb_active
     return radio_active if index == config.TAB_RADIO else usb_active
 
 
@@ -427,7 +433,7 @@ def select_tab(state, index):
         dpg.set_value(TAB_BAR, TAB_TAGS[index])
 
 
-def build_dashboard(state, on_open_connections, on_disconnect_radio):
+def build_dashboard(state, on_open_connections, on_disconnect_radio, bench_panel):
     """Create the primary dashboard window and its tab contents.
 
     The radio tab is created hidden and only shown while a radio session is
@@ -469,10 +475,12 @@ def build_dashboard(state, on_open_connections, on_disconnect_radio):
                 console.build(state)
             with dpg.tab(label="Rádio   F7", tag=TAB_TAGS[config.TAB_RADIO], show=False):
                 radio_panel.build(on_disconnect_radio, state.stop_motors)
+            with dpg.tab(label="Bench   F8", tag=TAB_TAGS[config.TAB_BENCH]):
+                bench_panel.build()
         rendering.add_text("", "tiny", config.TEXT_DIM, tag=STATUS_BAR)
 
 
-def refresh_dashboard(state, radio_session, layout, now, hz_state, hz_tof, fps):
+def refresh_dashboard(state, radio_session, layout, now, hz_state, hz_tof, fps, bench_panel=None):
     """Push the latest telemetry into the visible tab and window chrome."""
     radio_snapshot = radio_session.snapshot() if radio_session is not None else None
     status, color = connection_status(state, radio_snapshot)
@@ -517,6 +525,9 @@ def refresh_dashboard(state, radio_session, layout, now, hz_state, hz_tof, fps):
     elif state.active_tab == config.TAB_RADIO:
         state.stream_mask = 0
         radio_panel.update(radio_session, layout)
+    elif state.active_tab == config.TAB_BENCH:
+        state.stream_mask = 0
+        bench_panel.update(radio_session, radio_snapshot, layout)
 
 
 def run_gui(state, args):
@@ -538,7 +549,8 @@ def run_gui(state, args):
     scan_lock = threading.Lock()
     scan_active = threading.Event()
     wheel_delta = {"value": 0.0}
-    # nRF24L01 adapters, live radio session and robot discovery results.
+    bench_panel = BenchPanel()
+    # ESP-NOW gateway, live radio session and robot discovery results.
     radio_state = {
         "session": None,
         "devices": [],
@@ -671,7 +683,7 @@ def run_gui(state, args):
         session.start()
         # Show the new link right away; the radio tab becomes visible this frame.
         dpg.configure_item(TAB_TAGS[config.TAB_RADIO], show=True)
-        select_tab(state, config.TAB_RADIO)
+        select_tab(state, config.TAB_BENCH if args.tab == config.TAB_BENCH else config.TAB_RADIO)
         picking_port = False
 
     def on_connect_radio(device):
@@ -711,7 +723,7 @@ def run_gui(state, args):
         state.reader = BenchReader(state, args.port, args.baud)
         state.reader.start()
 
-    build_dashboard(state, open_connections, on_disconnect_radio)
+    build_dashboard(state, open_connections, on_disconnect_radio, bench_panel)
     picker.build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, on_back)
     with dpg.handler_registry():
         dpg.add_mouse_wheel_handler(callback=on_wheel)
@@ -770,7 +782,7 @@ def run_gui(state, args):
                     state.active_tab = TAB_TAGS.index(selected)
             actions = keys.poll(
                 now,
-                drive_shortcuts=not picking_port and state.active_tab != config.TAB_RADIO,
+                drive_shortcuts=not picking_port and state.active_tab not in (config.TAB_RADIO, config.TAB_BENCH),
                 editing_step=dpg.is_item_active(motors.ARROW_STEP_INPUT),
                 editing_tuning=state.active_tab == config.TAB_MOTORS and motors.editing_wheel_tuning(),
             )
@@ -802,15 +814,10 @@ def run_gui(state, args):
                 rescan_ports()
                 picking_port = True
 
-            # USB tabs need the debug link, the radio tab needs the radio
-            # session; both sets are visible when both links are connected.
-            for index in range(len(TAB_TAGS) - 1):
-                dpg.configure_item(TAB_TAGS[index], show=usb_active)
-            dpg.configure_item(TAB_TAGS[config.TAB_RADIO], show=radio_active)
-            if state.active_tab == config.TAB_RADIO and not radio_active:
-                state.active_tab = config.TAB_MOTORS
-            if radio_active and not usb_active and state.active_tab != config.TAB_RADIO:
-                state.active_tab = config.TAB_RADIO
+            for index, tag in enumerate(TAB_TAGS):
+                dpg.configure_item(tag, show=tab_visible(index, radio_active, usb_active))
+            if not tab_visible(state.active_tab, radio_active, usb_active):
+                state.active_tab = config.TAB_RADIO if radio_active else config.TAB_MOTORS
             current_tab = dpg.get_value(TAB_BAR)
             if isinstance(current_tab, int):
                 current_tab = dpg.get_item_alias(current_tab)
@@ -843,7 +850,7 @@ def run_gui(state, args):
             if not picking_port:
                 state.update_sweep(now)
                 layout = compute_layout(view_width, view_height)
-                refresh_dashboard(state, radio_state["session"], layout, now, hz_state, hz_tof, fps)
+                refresh_dashboard(state, session, layout, now, hz_state, hz_tof, fps, bench_panel)
                 mouse = dpg.get_mouse_pos(local=False)
                 left_clicked = dpg.is_mouse_button_clicked(dpg.mvMouseButton_Left)
                 left_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)

@@ -5,16 +5,16 @@
 #include <esp_log.h>
 #include <stdint.h>
 
-#include "NRF24L01.h"
+class ESP_NOW_Dev;
 
 class Telemetry
 {
    public:
     static Telemetry & get_instance();
 
-    void init(NRF24L01 * radio);
+    void init(ESP_NOW_Dev * radio);
 
-    void send(uint32_t echo_timestamp);
+    void send(uint32_t echo_timestamp, const uint8_t * destination);
 
    private:
     Telemetry() = default;
@@ -22,7 +22,7 @@ class Telemetry
     Telemetry(const Telemetry &) = delete;
     Telemetry & operator=(const Telemetry &) = delete;
 
-    NRF24L01 * m_radio = nullptr;
+    ESP_NOW_Dev * m_radio = nullptr;
 
     // TODO: Replace the battery stub when battery percentage sensing is available.
     static constexpr uint8_t STUB_BATTERY_PCT = 95;

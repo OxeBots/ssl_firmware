@@ -7,7 +7,7 @@ console as long as a dashboard client keeps the connection alive. The dashboard
 also serves a local JSON HTTP API, so scripts and LLM agents can read the same
 telemetry and send the same commands while the window stays open (see
 **Local API** below). The connection picker can also link the dashboard to the
-robot over the nRF24L01 radio bridge, simultaneously with the USB debug link
+robot over the ESP-NOW USB gateway, simultaneously with the USB debug link
 (see **Conexão por rádio** below).
 
 ## Run
@@ -16,12 +16,13 @@ From the repository root (host or devcontainer):
 
 ```bash
 python3 -m robot_bench                        # connection picker (USB or radio), then dashboard
-python3 -m robot_bench --port /dev/ttyUSB0    # skip the picker
+python3 -m robot_bench --port /dev/ttyUSB1    # skip the picker for USB debug
 python3 -m robot_bench --demo                 # synthetic data, no hardware
 python3 -m robot_bench --tab 1                # open on the Calibração tab
 python3 -m robot_bench --tab 3                # open on the ToF tab
 python3 -m robot_bench --tab 4                # open on the IMU tab
 python3 -m robot_bench --tab 5                # open on the Console tab
+python3 -m robot_bench --tab 7                # open on Bench after connecting
 python3 -m robot_bench --screenshot-dir tmp/gui   # save PNG frames
 python3 -m robot_bench --api-port 9000            # local API on another port
 python3 -m robot_bench --api-port 0 --api-socket ""   # local API disabled
@@ -34,8 +35,7 @@ renderer and forwards the host X11 socket, so it works without a GPU.
 
 ## GUI
 
-Resizable window (minimum 1024x640, maximizable to full screen) with six
-tabs:
+Resizable window (minimum 1024x640, maximizable to full screen).
 
 | Tab         | Content                                                                 |
 | ----------- | ----------------------------------------------------------------------- |
@@ -45,6 +45,8 @@ tabs:
 | ToF         | Full-size 8x8 distance heatmap with millimetre readings and colour scale |
 | IMU         | Orientation box and twelve orientation / sensor plots                   |
 | Console     | Full-size serial log with history scrolling and text selection          |
+| Rádio       | ESP-NOW control and telemetry through the USB gateway                  |
+| Bench       | ESP-NOW stress test with per-robot delivery and latency measurements    |
 
 Connection status stays at the top and stream details at the bottom. The
 serial console has a dedicated tab; messages continue to arrive while other
@@ -65,7 +67,7 @@ switches between **Controle** (wheel target and sweep), **Posição** (wheel
 position moves), and **Ajuste** (live velocity-controller settings). Keyboard shortcuts remain
 available: `[1-4]` select wheel, `[UP/DOWN]` adjust by the RPM step shown in Controle,
 `[LEFT/RIGHT]` +/-100 %, `[SPACE]` stop all motors, `[W]` square sweep between
-+/- the limit, `[F1-F7]` switch tabs (`F7` is Rádio while connected), `[Q/ESC]` quit.
++/- the limit, `[F1-F8]` switch tabs, `[Q/ESC]` quit.
 
 In **Ajuste**, select a wheel, enter a signed speed and press **Definir RPM**.
 The plots keep showing measured speed and target while you edit. The **Ativo**
@@ -129,19 +131,20 @@ its current reading, and an automatic vertical scale. All twelve plots fit on th
 IMU tab together. Traces break at gaps in telemetry; orientation traces also
 break at angle wraparound. Stale readings show a dash while recent history remains visible.
 
-## Conexão por rádio (nRF24L01)
+## Conexão por rádio (ESP-NOW)
 
 The connection picker offers two links: a robot on a USB debug port
-(**Conectar USB**) or the robot over the nRF24L01 radio bridge (**Conectar
+(**Conectar USB**) or the robot over the ESP-NOW gateway (**Conectar
 rádio**). Both can be connected **at the same time**: the radio link appears as
 a **Rádio** tab in the dashboard, so the USB tabs keep driving the robot while
 the radio tab follows its communication. The **Conexões** button in the
 dashboard header reopens the picker to add, change or disconnect a link; the
-picker's **Voltar** button returns to the dashboard. The bridge is the CH340 USB
-adapter (`1a86:7523`) that `scripts/nrf24_usb.py` uses, and the picker detects
-it automatically. Only one process can hold the adapter, so close other radio
-tools first. The adapter is never probed as a robot port: every byte written to
-it is transmitted over the air.
+picker's **Voltar** button returns to the dashboard. The picker reserves
+`/dev/ttyUSB0` for the gateway and can discover the robot's USB debug firmware
+on `/dev/ttyUSB1`. Set `ESP_LINK_PORT` before launching the dashboard if the
+gateway uses another device path. The gateway defaults to 921600 baud. Set
+`ESP_LINK_BAUD` if the gateway firmware uses a different rate. Only one process
+can hold the gateway port.
 
 While the picker is open the dashboard auto-discovers the active robots: it
 sends a telemetry request to every robot id 0..10 over the radio and lists every
@@ -155,11 +158,13 @@ An all-zero radio command (**Parar**) or an expired command zeroes the radio tar
 and releases control. With both links connected, the USB dashboard can then send
 new targets until the next radio motion command.
 
-The radio link uses `proto/ssl_robot_protocol.bitproto`, like `scripts/nrf24_usb.py`.
-The session alternates commands and unicast `RobotTelemetryRequest` packets
-with at least 50 ms between adapter writes, for about 10 Hz each when replies
-arrive promptly. The firmware replies with `RobotTelemetry` and stops the
-wheels if commands expire after 250 ms.
+The radio link uses `proto/ssl_robot_protocol.bitproto`. See the
+[gateway wire format](../README.md#esp-now-gateway) for the UART framing.
+The session probes the target at 1 Hz until it receives a telemetry reply. With
+fresh telemetry it schedules commands at 60 Hz and polls at up to 20 Hz, with
+one telemetry request outstanding. If replies stop for a second, the session
+clears movement and kick requests and returns to 1 Hz probing. The robot
+firmware stops the wheels if commands expire after 250 ms.
 
 The **Rádio** tab shows up in the dashboard while the link is up. Open
 **Teclado** and select **Ativar teclado**. Hold **W/A/S/D** or the arrow keys
@@ -186,6 +191,44 @@ Other radio controls:
 **Desconectar** stops the command stream; when only the radio is connected it
 returns to the connection picker, otherwise the dashboard stays open with the
 USB link. The robot stops on its own once the commands stop.
+
+## Bench (ESP-NOW)
+
+Connect the gateway through **Conexões → Conectar rádio** and open **Bench (F8)**.
+Choose **Só telemetria** or **Telemetria com comandos**, enter the robot IDs
+separated by commas, the rate per robot, and the duration, then select **Iniciar
+teste**. Commands use zero movement and kick. Starting the test clears the radio
+motion target and pauses regular radio control. **Parar** stops the test.
+
+**Opções avançadas** contains the command format, telemetry interval, reply
+timeout, and forced broadcast. Individual commands are the default. Team commands
+carry up to three robot IDs per frame. **Testar UART** runs a loopback measurement
+between the host and the gateway using the telemetry frame sizes. Compare runs
+with **Forçar broadcast** enabled and disabled to evaluate learned unicast routing
+under the same load. For an interference test, use the same settings with a
+dedicated, controlled co-channel Wi-Fi load and record the channel and load level
+alongside the results.
+
+The benchmark schedules requests independently of replies. The main results show
+the achieved cycle rate and, for each robot, the reply count, on-time percentage,
+p95 round-trip time, and longest gap. **Detalhes do resultado** shows skipped
+cycles, UART counters, gateway boot reports, timeouts, and more latency statistics.
+A reply is on time if it arrives within one control cycle. At 60 Hz that is
+16.67 ms. Round-trip time includes USB, UART, ESP-NOW, and robot processing.
+**Lacuna** shows the longest time without matching telemetry since the first
+request. Zero-motion command frames add traffic, and reply statistics measure
+telemetry.
+
+The same benchmark is available from the command line while the gateway port
+is free. Use `--baud` to match a gateway flashed for a different rate. Each run
+waits for a gateway echo before measuring to exclude USB-open resets and startup time.
+
+```bash
+python -m scripts.esp_now_benchmark --robots 0 --hz 60 --duration 10
+python -m scripts.esp_now_benchmark --robots 0,1,2 --mode team --hz 120 --telemetry-every 2 --timeout-ms 150
+python -m scripts.esp_now_benchmark --robots 0 --mode loopback --hz 60
+python -m scripts.esp_now_benchmark --robots 0 --hz 60 --broadcast
+```
 
 ## Local API (automation and LLM agents)
 
@@ -399,7 +442,7 @@ produce a 138 RPM limit.
 | `health.py`    | System, safety, power and sensor status                              |
 | `sensing.py`   | Distance heatmap, orientation and sensor measurements                 |
 | `console.py`   | Console drawlist, history scrolling, text selection and clear button  |
-| `radio.py`     | nRF24L01 USB adapter transport, robot radio codec, command session    |
+| `radio.py`     | ESP-NOW gateway transport, robot radio codec, command session        |
 | `radio_panel.py` | Radio link screen: telemetry, movement commands and robot configuration |
 | `picker.py`    | First-screen connection picker: USB debug ports and radio adapters    |
 | `app.py`       | Dear PyGui viewport, main loop, phases (picker/dashboard/radio), input |

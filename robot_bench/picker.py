@@ -1,4 +1,4 @@
-"""First-screen connection picker window: USB debug port or nRF24L01 radio adapter."""
+"""Connection picker for the USB debug port and ESP-NOW gateway."""
 
 import dearpygui.dearpygui as dpg
 
@@ -173,7 +173,7 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
             "tiny",
             config.TEXT_DIM,
         )
-        rendering.add_text("Rádio nRF24L01", "title", tag="picker_radio_title")
+        rendering.add_text("Rádio ESP-NOW", "title", tag="picker_radio_title")
         with dpg.group(horizontal=True):
             rendering.add_text("Robô alvo", "label")
             dpg.add_spacer(width=rendering.px(10))
@@ -212,14 +212,14 @@ def build(on_connect, on_rescan, on_quit, on_connect_radio, on_discover_radio, o
             show=False,
         )
         rendering.add_text(
-            "Adaptador nRF24L01 não encontrado (USB).",
+            "Ponte ESP-NOW não encontrada (USB).",
             "title",
             config.TEXT,
             tag="picker_radio_empty",
             show=False,
         )
         rendering.add_text(
-            "Conecte o adaptador USB do rádio (CH340).",
+            f"Conecte a ponte em {radio.ESP_LINK_PORT}.",
             "small",
             config.TEXT_DIM,
             tag="picker_radio_hint",
@@ -338,5 +338,5 @@ def update(
         dpg.configure_item("picker_radio_scan", show=False)
     dpg.configure_item(
         "picker_radio_none",
-        show=bool(devices) and discovered is not None and not found_rows and not discovering,
+        show=bool(devices) and discovered is not None and not found_rows and not discovering and not discovery_error,
     )

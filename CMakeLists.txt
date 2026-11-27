@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.16.0)
 
-# Vendor libraries live inside the embedded-drivers submodule; register them
-# as IDF components so their Kconfig options and include dirs stay available.
-set(EXTRA_COMPONENT_DIRS
-    "${CMAKE_CURRENT_LIST_DIR}/components/embedded-drivers/esp-idf-mirf"
-    "${CMAKE_CURRENT_LIST_DIR}/components/embedded-drivers/VL53L5CX-Library"
-    ${EXTRA_COMPONENT_DIRS})
+if(SSL_ESP_LINK)
+    set(EXCLUDE_COMPONENTS QuickPID sTune)
+else()
+    # Register the robot drivers as components for their Kconfig options.
+    list(APPEND EXTRA_COMPONENT_DIRS
+        "${CMAKE_CURRENT_LIST_DIR}/components/embedded-drivers/esp-idf-mirf"
+        "${CMAKE_CURRENT_LIST_DIR}/components/embedded-drivers/VL53L5CX-Library")
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # Coverage builds (env test_coverage) instrument project sources with gcov.
@@ -27,4 +29,6 @@ project(ssl_firmware)
 # pre-existing uninitialized-member warning inside the vendored sTune component.
 # components/sTune is a submodule and is left untouched, so keep that warning
 # visible but not fatal for the performance build.
-idf_build_set_property(COMPILE_OPTIONS "-Wno-error=uninitialized" APPEND)
+if(NOT SSL_ESP_LINK)
+    idf_build_set_property(COMPILE_OPTIONS "-Wno-error=uninitialized" APPEND)
+endif()

@@ -20,7 +20,8 @@ TAB_TOF = 3
 TAB_IMU = 4
 TAB_CONSOLE = 5
 TAB_RADIO = 6
-TAB_TITLES = ("Motores", "Calibração", "Saúde", "ToF", "IMU", "Console", "Rádio")
+TAB_BENCH = 7
+TAB_TITLES = ("Motores", "Calibração", "Saúde", "ToF", "IMU", "Console", "Rádio", "Bench")
 
 # Speed strip chart time span
 CHART_WINDOW_S = 12.0

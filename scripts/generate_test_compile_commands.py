@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Append test file entries to compile_commands.json.
 
-PlatformIO's compiledb skips test/ files. This clones the src/main.cpp
+PlatformIO's compiledb skips test/ files. This clones the src/robot/main.cpp
 compile command, adds all lib/ include dirs, and emits one entry per test .cpp.
 
 Dual-mode: CLI (via regenerate_compiledb.sh) or PlatformIO extra script
@@ -59,10 +59,10 @@ def append_test_entries(workspace):
     # Bake absolute xtensa driver paths into every entry.
     absolutize_drivers(entries)
 
-    # Find a C++ template entry (prefer src/main.cpp).
+    # Prefer the robot application entry point for its library dependencies.
     template = None
     for entry in entries:
-        if entry["file"] == "src/main.cpp":
+        if entry["file"] == "src/robot/main.cpp":
             template = entry
             break
     if template is None:

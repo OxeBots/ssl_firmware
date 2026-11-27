@@ -38,13 +38,14 @@
 #include "AS5600.h"
 #include "BL48250.h"
 #include "CD4052B.h"
+#include "ESP_NOW_Dev.h"
 #include "I2Cdev.h"
-#include "NRF24L01.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
 #include "ProtocolHandler.h"
 #include "RobotState.h"
 #include "SPIdev.h"
+#include "SslRadioProtocol.h"
 #include "Telemetry.h"
 #include "ToFPerceptionService.h"
 #include "WheelController.h"
@@ -52,7 +53,6 @@
 #include "omni_robot.h"
 #include "ssl_robot_protocol_bp.h"
 #include "wheel_state_estimator.h"
-
 // Unconditional so the PlatformIO library finder picks up lib/SerialDebug;
 // the service only starts (and only emits code) when CONFIG_SERIAL_DEBUG is set.
 #include "SerialDebug.h"
@@ -67,7 +67,7 @@ static constexpr uint32_t MOTOR_PWM_FREQ_HZ = CONFIG_MOTOR_PWM_FREQ_HZ;
 
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "--- Oxebots SSL Firmware starting ---");
+    ESP_LOGI(TAG, "--- Oxebots SSL robot firmware starting ---");
 
     // 1: NVS
     ESP_ERROR_CHECK(NVSManager::init());
@@ -78,7 +78,7 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Robot ID: %d", RobotState::get_instance().get_id());
 
     // 3: GPIO ISR service
-    // Must be installed before NRF24L01 init and any GPIO interrupt handlers.
+    // Must be installed before registering any GPIO interrupt handlers.
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
     // 4: Disable the encoder mux before checking the shared bus. The shift
@@ -174,18 +174,9 @@ extern "C" void app_main(void)
     if (wse.configure_encoder_output_stage(AS5600::OutputStage::ANALOG_REDUCED) != ESP_OK)
         ESP_LOGW(TAG, "Not all encoders are in the reduced output stage.");
 
-    // 9: Radio hardware. The radio driver writes the 74HC595 CE output through the
-    // generic CE pin callback, so it stays independent of the shift register.
-    static HC595::Pin radio_ce_pin{&shift_register,
-                                   static_cast<uint8_t>(1U << CONFIG_SHIFT_REGISTER_RF_CE_BIT)};
-    NRF24_CePin radio_ce = {};
-    radio_ce.gpio = GPIO_NUM_NC;
-    radio_ce.write = &HC595::Pin::write;
-    radio_ce.context = &radio_ce_pin;
-    static NRF24L01 radio(static_cast<gpio_num_t>(CONFIG_IRQ_GPIO), radio_ce);
-
-    radio.init_hw();
-    const bool radio_ready = radio.init(CONFIG_RADIO_CHANNEL, 32, "ADMIN", "ESP32") == ESP_OK;
+    // 9: ESP-NOW radio. The receiver starts after the control services are ready.
+    auto & radio = ESP_NOW_Dev::get_instance();
+    const bool radio_ready = radio.init(CONFIG_ESP_NOW_CHANNEL) == ESP_OK;
 
     // 10: Motor driver + WheelController
     config::driver::MotorDriverConfig motor_config;
@@ -240,14 +231,17 @@ extern "C" void app_main(void)
     {
         Telemetry::get_instance().init(&radio);
 
-        if (radio.start(
-              [](void * pvParameters) {
-                  auto * event = static_cast<DataReceivedEvent *>(pvParameters);
-                  ProtocolHandler::get_instance().on_packet(event->payload, event->length);
-              },
-              nullptr))
+        if (radio.start(true,
+                        [](const uint8_t * payload,
+                           uint8_t length,
+                           const uint8_t * source,
+                           uint64_t received_at_us) {
+                            if (ssl_radio::valid_downlink(payload, length))
+                                ProtocolHandler::get_instance().on_packet(
+                                  payload, length, source, received_at_us);
+                        }) == ESP_OK)
         {
-            ESP_LOGI(TAG, "Radio initialized on channel %d.", CONFIG_RADIO_CHANNEL);
+            ESP_LOGI(TAG, "ESP-NOW initialized on channel %d.", CONFIG_ESP_NOW_CHANNEL);
         }
         else
         {

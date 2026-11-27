@@ -15,7 +15,7 @@ static constexpr size_t MAX_MESSAGE_BYTES = BYTES_LENGTH_DEBUG_TOF + 2;
 static constexpr size_t MAX_FRAME_BYTES = MAX_MESSAGE_BYTES + MAX_MESSAGE_BYTES / 254 + 2;
 
 // Encode one wire frame: COBS(msg_type | message | crc8) followed by 0x00.
-// msg_type: one of the DBG_MSG_* message type constants.
+// msg_type: message type for the serial protocol using the frame.
 // message: serialized bitproto message bytes.
 // message_len: message length in bytes.
 // out: output buffer, receives the complete frame including delimiter.

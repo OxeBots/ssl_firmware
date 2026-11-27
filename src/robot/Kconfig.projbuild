@@ -13,6 +13,13 @@ menu "Oxebots Robot Configuration"
             or USB wheel commands. Report DISARMED when a radio command
             expires. Command timeouts and actuator prerequisites still apply.
 
+    config ESP_NOW_CHANNEL
+        int "ESP-NOW Wi-Fi channel"
+        range 1 13
+        default 6
+        help
+            Use the same channel as the ESP Link gateway.
+
     menu "Radio (nRF24L01)"
 
         config IRQ_GPIO

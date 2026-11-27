@@ -10,7 +10,6 @@
 
 #include "CommandInbox.h"
 #include "HealthMonitor.h"
-#include "NRF24L01.h"
 #include "RobotPositionController.h"
 #include "RobotVelocityController.h"
 #include "RuntimeTypes.h"
@@ -20,14 +19,19 @@
 #include "omni_robot.h"
 #include "ssl_robot_protocol_bp.h"
 
+class ESP_NOW_Dev;
+
 class ProtocolHandler
 {
    public:
     static ProtocolHandler & get_instance();
 
-    void init(NRF24L01 * radio, WheelController * wheel_ctrl, OmnidirectionalRobot * kinematics);
+    void init(ESP_NOW_Dev * radio, WheelController * wheel_ctrl, OmnidirectionalRobot * kinematics);
 
-    void on_packet(const uint8_t * payload, uint8_t len);
+    void on_packet(const uint8_t * payload,
+                   uint8_t len,
+                   const uint8_t * source,
+                   uint64_t received_at_us);
     void update();
 
     // Current safety lifecycle for status consumers (serial debug).
@@ -36,7 +40,7 @@ class ProtocolHandler
     // Copy of the latest health snapshot for status consumers (serial debug).
     HealthState get_health_state() const;
 
-    // True when the NRF24L01 module answered SPI during init.
+    // True when the ESP-NOW link initialized successfully.
     bool is_radio_ready() const;
 
     // True while a base station packet arrived within the link window.
@@ -57,23 +61,24 @@ class ProtocolHandler
     ProtocolHandler(const ProtocolHandler &) = delete;
     ProtocolHandler & operator=(const ProtocolHandler &) = delete;
 
-    void handle_command(const RobotCommand & cmd);
+    void handle_command(const RobotCommand & cmd, uint64_t received_at_us);
     void handle_config(const RobotConfig & cfg);
-    void handle_telemetry_req(const RobotTelemetryRequest & telreq);
-    void handle_TeamCommand(const SingleRobotVelCmd & r_comand, const Header & hdr);
+    void handle_telemetry_req(const RobotTelemetryRequest & telreq, const uint8_t * source);
+    void handle_TeamCommand(const SingleRobotVelCmd & r_comand,
+                            const Header & hdr,
+                            uint64_t received_at_us);
 
     // Serializes radio and bench commands and status reads.
     SemaphoreHandle_t m_mutex = nullptr;
 
-    NRF24L01 * m_radio = nullptr;
+    ESP_NOW_Dev * m_radio = nullptr;
     WheelController * m_wheel_ctrl = nullptr;
-    // Base station link: receive time of the latest COMMAND/CONFIG packet.
+    // Receive time of the latest downlink packet.
     // Atomic because on_packet runs in the radio receiver task while the
     // control loop and status consumers read it from other tasks.
     static constexpr uint64_t BASE_STATION_LINK_TIMEOUT_US = 2000000;
     std::atomic<uint64_t> m_last_base_station_rx_us = 0;
-    // Drop identical back-to-back downlink retransmissions from the base
-    // station within this short window when Pipe 1 acknowledgement is off.
+    // Drop identical back-to-back downlink retransmissions from the base station.
     static constexpr uint64_t RX_DEDUP_WINDOW_US = 50000;
     uint8_t m_last_rx_payload[31] = {};
     uint8_t m_last_rx_len = 0;

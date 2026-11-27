@@ -1,0 +1,10 @@
+menu "ESP Link Configuration"
+
+    config ESP_NOW_CHANNEL
+        int "ESP-NOW Wi-Fi channel"
+        range 1 13
+        default 6
+        help
+            Use the same channel as the robot firmware.
+
+endmenu

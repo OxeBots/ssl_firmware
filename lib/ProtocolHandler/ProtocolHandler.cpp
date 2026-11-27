@@ -6,6 +6,7 @@
 
 #include <cstring>
 
+#include "ESP_NOW_Dev.h"
 #include "MotorCalibration.h"
 #include "NVSManager.h"
 #include "OrientationHandler.h"
@@ -40,11 +41,11 @@ ProtocolHandler::ProtocolHandler() : m_mutex(xSemaphoreCreateMutex())
 /**
  * @brief Initialize the protocol handler with radio, wheel controller, and kinematics.
  *
- * @param radio Pointer to initialized NRF24L01 radio instance
+ * @param radio Pointer to initialized ESP-NOW link
  * @param wheel_ctrl Pointer to initialized WheelController instance
  * @param kinematics Pointer to initialized OmnidirectionalRobot kinematics instance
  */
-void ProtocolHandler::init(NRF24L01 * radio,
+void ProtocolHandler::init(ESP_NOW_Dev * radio,
                            WheelController * wheel_ctrl,
                            OmnidirectionalRobot * kinematics)
 {
@@ -76,16 +77,13 @@ HealthState ProtocolHandler::get_health_state() const
 }
 
 /**
- * @brief Report whether the NRF24L01 module is connected and healthy.
- *
- * init() only receives a radio whose SPI register read-back succeeded, so a
- * non-null radio pointer means the module answered on the bus at init.
+ * @brief Report whether ESP-NOW initialized successfully.
  *
  * @return true when the radio module is initialized.
  */
 bool ProtocolHandler::is_radio_ready() const
 {
-    return m_radio != nullptr;
+    return m_radio != nullptr && m_radio->is_receiving();
 }
 
 /**
@@ -100,7 +98,7 @@ bool ProtocolHandler::is_base_station_connected() const
 {
     const uint64_t last_rx_us = m_last_base_station_rx_us.load(std::memory_order_relaxed);
     const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
-    return m_radio != nullptr && last_rx_us != 0 &&
+    return is_radio_ready() && last_rx_us != 0 &&
            (now_us - last_rx_us) <= BASE_STATION_LINK_TIMEOUT_US;
 }
 
@@ -153,8 +151,13 @@ esp_err_t ProtocolHandler::start_bench_position_move(uint8_t wheel_mask,
  *
  * @param payload Raw packet bytes
  * @param len Packet length in bytes
+ * @param source Sender's MAC address for telemetry replies
+ * @param received_at_us Radio arrival time used for command freshness
  */
-void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
+void ProtocolHandler::on_packet(const uint8_t * payload,
+                                uint8_t len,
+                                const uint8_t * source,
+                                uint64_t received_at_us)
 {
     if (len < BYTES_LENGTH_HEADER)
     {
@@ -162,9 +165,8 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
         return;
     }
 
-    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
     if (len <= sizeof(m_last_rx_payload) && len == m_last_rx_len && m_last_rx_us != 0 &&
-        (now_us - m_last_rx_us) < RX_DEDUP_WINDOW_US &&
+        (received_at_us - m_last_rx_us) < RX_DEDUP_WINDOW_US &&
         memcmp(payload, m_last_rx_payload, len) == 0)
     {
         ESP_LOGD(TAG, "Duplicate packet ignored (%u bytes).", len);
@@ -174,7 +176,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
     {
         memcpy(m_last_rx_payload, payload, len);
         m_last_rx_len = len;
-        m_last_rx_us = now_us;
+        m_last_rx_us = received_at_us;
     }
 
     // IMPORTANT: bitproto decoders use bitwise OR — always decode into a
@@ -191,9 +193,9 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
     if (hdr.msg_type == MSG_TYPE_COMMAND || hdr.msg_type == MSG_TYPE_CONFIG ||
         hdr.msg_type == MSG_TYPE_TELEMETRY_REQ || hdr.msg_type == MSG_TYPE_TEAM_VEL_CMD)
     {
-        m_last_base_station_rx_us.store(static_cast<uint64_t>(esp_timer_get_time()),
-                                        std::memory_order_relaxed);
-        RobotState::get_instance().clear_error(ERROR_COMM_LOSS);
+        m_last_base_station_rx_us.store(received_at_us, std::memory_order_relaxed);
+        if (is_base_station_connected())
+            RobotState::get_instance().clear_error(ERROR_COMM_LOSS);
     }
 
     switch (hdr.msg_type)
@@ -220,7 +222,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             RobotCommand cmd;
             memset(&cmd, 0, sizeof(RobotCommand));
             DecodeRobotCommand(&cmd, const_cast<uint8_t *>(payload));
-            handle_command(cmd);
+            handle_command(cmd, received_at_us);
             update();
             break;
         }
@@ -273,7 +275,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
             RobotTelemetryRequest telreq;
             memset(&telreq, 0, sizeof(RobotTelemetryRequest));
             DecodeRobotTelemetryRequest(&telreq, const_cast<uint8_t *>(payload));
-            handle_telemetry_req(telreq);
+            handle_telemetry_req(telreq, source);
             break;
         }
 
@@ -307,7 +309,7 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
                     SingleRobotVelCmd t_comand;
                     memset(&t_comand, 0, sizeof(SingleRobotVelCmd));
                     DecodeSingleRobotVelCmd(&t_comand, const_cast<uint8_t *>(slot_atual));
-                    handle_TeamCommand(t_comand, hdr);
+                    handle_TeamCommand(t_comand, hdr, received_at_us);
                     update();
                     break;
                 }
@@ -328,8 +330,9 @@ void ProtocolHandler::on_packet(const uint8_t * payload, uint8_t len)
  * when an explicit RobotTelemetryRequest is received.
  *
  * @param cmd Decoded RobotCommand message
+ * @param received_at_us Radio arrival time
  */
-void ProtocolHandler::handle_command(const RobotCommand & cmd)
+void ProtocolHandler::handle_command(const RobotCommand & cmd, uint64_t received_at_us)
 {
     ESP_LOGD(TAG,
              "CMD robot=%d ts=%lu x=%d y=%d vx=%d vy=%d w=%d kick=%d",
@@ -342,13 +345,15 @@ void ProtocolHandler::handle_command(const RobotCommand & cmd)
              cmd.target_pose.angular_vel,
              cmd.kick_velocity);
 
-    if (!m_command_inbox.push(cmd, static_cast<uint64_t>(esp_timer_get_time())))
+    if (!m_command_inbox.push(cmd, received_at_us))
     {
         ESP_LOGW(TAG, "Command inbox full — command was not accepted.");
     }
 }
 
-void ProtocolHandler::handle_TeamCommand(const SingleRobotVelCmd & r_comand, const Header & hdr)
+void ProtocolHandler::handle_TeamCommand(const SingleRobotVelCmd & r_comand,
+                                         const Header & hdr,
+                                         uint64_t received_at_us)
 {
     ESP_LOGD(TAG,
              "r_command vx=%d vy=%d vw=%d kick=%d",
@@ -373,7 +378,7 @@ void ProtocolHandler::handle_TeamCommand(const SingleRobotVelCmd & r_comand, con
     cmd.target_pose.y = 0;
     cmd.target_pose.y_v = r_comand.vy;
 
-    if (!m_command_inbox.push(cmd, static_cast<uint64_t>(esp_timer_get_time())))
+    if (!m_command_inbox.push(cmd, received_at_us))
     {
         ESP_LOGW(TAG, "Command inbox full — command was not accepted.");
     }
@@ -573,10 +578,12 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
  * Echoes the request timestamp so the base station can measure round-trip time.
  *
  * @param telreq Decoded RobotTelemetryRequest message
+ * @param source Address of the gateway that requested telemetry
  */
-void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest & telreq)
+void ProtocolHandler::handle_telemetry_req(const RobotTelemetryRequest & telreq,
+                                           const uint8_t * source)
 {
     ESP_LOGD(TAG, "Answering telemetry request, robot: %d", telreq.header.robot_id);
 
-    Telemetry::get_instance().send(telreq.header.timestamp);
+    Telemetry::get_instance().send(telreq.header.timestamp, source);
 }

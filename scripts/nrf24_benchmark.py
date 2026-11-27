@@ -1,6 +1,8 @@
 """
 nrf24_benchmark.py — NRF24L01 multi-robot round-robin benchmark.
 
+For the ESP-NOW gateway, use `python scripts/esp_now_benchmark.py`.
+
 Sends fire-and-forget RobotCommand packets to configurable robots in a
 round-robin fashion, followed by explicit RobotTelemetryRequest packets every
 N commands (--tel-interval) to measure telemetry RTT and packet delivery rate.

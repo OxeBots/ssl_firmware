@@ -1,6 +1,7 @@
 """USB serial device discovery and debug-firmware detection."""
 
 import errno
+import os
 import re
 import threading
 import time
@@ -21,8 +22,8 @@ SCAN_RETRY_S = 4.0
 
 
 def is_radio_adapter(port):
-    """True when a serial port object belongs to the nRF24L01 USB radio adapter."""
-    return port.vid == radio.ADAPTER_VID and port.pid == radio.ADAPTER_PID
+    """True when a serial port is reserved for the ESP-NOW gateway."""
+    return os.path.realpath(port.device) == os.path.realpath(radio.ESP_LINK_PORT)
 
 
 def list_candidate_ports():
@@ -30,8 +31,7 @@ def list_candidate_ports():
     candidates = []
     for port in serial.tools.list_ports.comports():
         if is_radio_adapter(port):
-            # The radio bridge forwards every byte over the air, so probing it
-            # would transmit debug frames. It is opened by the radio link instead.
+            # Keep the gateway port available to radio discovery.
             continue
         device = port.device
         if re.search(r"ttyUSB\d+|ttyACM\d+|usbserial|usbmodem", device) or re.match(r"COM\d+$", device):

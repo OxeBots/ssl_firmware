@@ -822,9 +822,9 @@ class PositionCommandTests(unittest.TestCase):
 
 
 class TabLayoutTests(unittest.TestCase):
-    def test_usb_tabs_plus_the_radio_tab(self):
-        self.assertEqual(len(config.TAB_TITLES), 7)
-        self.assertEqual(config.TAB_TITLES[-1], "Rádio")
+    def test_usb_tabs_plus_the_radio_and_bench_tabs(self):
+        self.assertEqual(len(config.TAB_TITLES), 8)
+        self.assertEqual(config.TAB_TITLES[-2:], ("Rádio", "Bench"))
         self.assertEqual(
             app.TAB_TAGS,
             (
@@ -835,6 +835,7 @@ class TabLayoutTests(unittest.TestCase):
                 "tab_imu",
                 "tab_console",
                 "tab_radio",
+                "tab_bench",
             ),
         )
         self.assertEqual(len(app.TAB_TAGS), len(config.TAB_TITLES))
@@ -853,6 +854,8 @@ class DualConnectionTests(unittest.TestCase):
         self.assertFalse(app.tab_visible(config.TAB_RADIO, radio_active=False, usb_active=True))
         self.assertTrue(app.tab_visible(config.TAB_RADIO, radio_active=True, usb_active=False))
         self.assertTrue(app.tab_visible(config.TAB_RADIO, radio_active=True, usb_active=True))
+        self.assertTrue(app.tab_visible(config.TAB_BENCH, radio_active=True, usb_active=False))
+        self.assertTrue(app.tab_visible(config.TAB_BENCH, radio_active=False, usb_active=True))
 
     def test_radio_connection_status_covers_the_link_states(self):
         self.assertEqual(

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <algorithm>
 
+#include "ESP_NOW_Dev.h"
 #include "OrientationHandler.h"
 #include "RobotState.h"
 #include "ssl_robot_protocol_bp.h"
@@ -22,9 +23,9 @@ Telemetry & Telemetry::get_instance()
 /**
  * @brief Initialize telemetry service with radio instance.
  *
- * @param radio Pointer to initialized NRF24L01 radio instance
+ * @param radio Pointer to initialized ESP-NOW link
  */
-void Telemetry::init(NRF24L01 * radio)
+void Telemetry::init(ESP_NOW_Dev * radio)
 {
     configASSERT(radio != nullptr);
     m_radio = radio;
@@ -35,11 +36,12 @@ void Telemetry::init(NRF24L01 * radio)
  * @brief Send robot telemetry frame to base station.
  *
  * Encodes RobotTelemetry message with current robot ID, yaw from IMU,
- * battery and kicker voltage values, and error flags. Sends via NRF24L01 radio.
+ * battery and kicker voltage values, and error flags.
  *
- * @param echo_timestamp Timestamp from command to echo in telemetry reply
+ * @param echo_timestamp Timestamp from the telemetry request
+ * @param destination Address of the gateway that requested telemetry
  */
-void Telemetry::send(uint32_t echo_timestamp)
+void Telemetry::send(uint32_t echo_timestamp, const uint8_t * destination)
 {
     if (m_radio == nullptr)
     {
@@ -83,7 +85,7 @@ void Telemetry::send(uint32_t echo_timestamp)
     uint8_t buf[BYTES_LENGTH_ROBOT_TELEMETRY] = {0};
     EncodeRobotTelemetry(&tel, buf);
 
-    esp_err_t err = m_radio->send_raw(buf, BYTES_LENGTH_ROBOT_TELEMETRY);
+    const esp_err_t err = m_radio->send(destination, buf, sizeof(buf));
     if (err != ESP_OK)
-        ESP_LOGW(TAG, "send_raw failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "ESP-NOW send failed: %s", esp_err_to_name(err));
 }

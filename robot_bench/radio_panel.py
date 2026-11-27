@@ -1,4 +1,4 @@
-"""Radio tab: telemetry and commands over the nRF24L01 adapter."""
+"""Radio tab for telemetry and commands over the ESP-NOW gateway."""
 
 import ctypes
 import time
@@ -110,6 +110,8 @@ _focus_checked = False
 
 def status_text(snapshot):
     """Link state line and color for the header."""
+    if snapshot.get("benchmarking"):
+        return "Teste em andamento na aba Bench", config.ACCENT
     if snapshot["live"]:
         return f"Ao vivo · {snapshot['port']}", config.OK_COLOR
     if snapshot["connected"] and snapshot["rx_count"] > 0:
@@ -198,7 +200,7 @@ def _create_themes():
 
 def _build_header(on_disconnect):
     with dpg.group(horizontal=True):
-        rendering.add_text("Rádio nRF24L01", "title", config.TEXT, tag=RADIO_TITLE)
+        rendering.add_text("Rádio ESP-NOW", "title", config.TEXT, tag=RADIO_TITLE)
         dpg.add_spacer(tag=RADIO_HEADER_SPACER, width=rendering.px(8))
         rendering.add_text("", "small", config.TEXT_DIM, tag=RADIO_STATUS)
         dpg.add_button(
@@ -522,7 +524,7 @@ def _update_header(snapshot, body_w):
     rendering.set_text(RADIO_STATUS, status, color)
     gap = rendering.px(GAP)
     fixed = (
-        _text_width("Rádio nRF24L01", "title")
+        _text_width("Rádio ESP-NOW", "title")
         + _text_width(status, "small")
         + rendering.px(DISCONNECT_WIDTH)
         + 3 * gap
@@ -555,8 +557,9 @@ def _update_messages(snapshot):
     dpg.configure_item(RADIO_MESSAGES_EMPTY, show=not messages)
 
 
-def _update_buttons(active):
-    """Enable the radio commands only while a session is connected."""
+def _update_buttons(connected, benchmarking):
+    """Pause the command controls while the benchmark owns the serial port."""
+    active = connected and not benchmarking
     safety = active and bool(dpg.get_value(RADIO_SAFETY_CHECK))
     reset = active and bool(dpg.get_value(RADIO_RESET_CHECK))
     for tag in (
@@ -564,12 +567,14 @@ def _update_buttons(active):
         RADIO_STOP_BUTTON,
         RADIO_KICK_BUTTON,
         RADIO_MAG_CAL_BUTTON,
-        RADIO_DISCONNECT_BUTTON,
+        RADIO_TARGET_INPUT,
+        RADIO_KEYBOARD_ENABLE,
     ):
         dpg.configure_item(tag, enabled=active)
     dpg.configure_item(RADIO_CONTROL_CAL_BUTTON, enabled=safety)
     dpg.configure_item(RADIO_SET_ID_BUTTON, enabled=safety)
     dpg.configure_item(RADIO_RESET_BUTTON, enabled=reset)
+    dpg.configure_item(RADIO_DISCONNECT_BUTTON, enabled=connected)
 
 
 def set_target(robot_id):
@@ -610,6 +615,8 @@ def poll_keyboard(session, *, visible, stop_usb):
     if session is None:
         _keyboard_armed = _keyboard_neutral = False
         return
+    if visible and session.snapshot().get("benchmarking"):
+        visible = False
     if not visible and not _keyboard_armed:
         return
 
@@ -706,4 +713,4 @@ def update(session, layout):
     _update_header(snapshot, body_w)
     _update_telemetry(snapshot)
     _update_messages(snapshot)
-    _update_buttons(session is not None)
+    _update_buttons(session is not None, snapshot.get("benchmarking", False))
