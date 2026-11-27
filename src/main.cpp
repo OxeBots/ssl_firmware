@@ -188,12 +188,16 @@ extern "C" void app_main(void)
     radio.init_hw();
     const uint8_t robot_id = RobotState::get_instance().get_id();
     const uint8_t radio_channel = RobotState::get_instance().get_radio_channel();
+    const uint8_t radio_tx_channel = RobotState::get_instance().get_radio_tx_channel();
     const std::array<uint8_t, 5> base_addr = radio_addressing::make_base_address();
     const std::array<uint8_t, 5> robot_addr = radio_addressing::make_robot_address(robot_id);
     bool radio_ready =
       radio.init_bytes(radio_channel, 32, base_addr.data(), robot_addr.data()) == ESP_OK;
     if (radio_ready)
+    {
+        radio.set_tx_channel(radio_tx_channel);
         radio.enable_broadcast_pipe(radio_addressing::BROADCAST_ADDR_LSB);
+    }
 
     // 10: Motor driver + WheelController
     config::driver::MotorDriverConfig motor_config;

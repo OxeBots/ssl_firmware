@@ -45,11 +45,14 @@ def make_telemetry(robot_id=2, timestamp=0x01020304, **pose):
     return message.encode()
 
 
-def make_base_info(channel=76, data_rate=base_station.BS_RATE_2MBPS, reinits=0):
+def make_base_info(channel=76, rx_channel=90, data_rate=base_station.BS_RATE_2MBPS, reinits=0, mask=3):
     return {
         "protocol_version": base_station.PROTO_VERSION,
-        "radio_ready": True,
+        "radio_ready": bool(mask & 0x01),
+        "radio_ready_mask": mask,
+        "dual_radio": (mask & 0x03) == 0x03,
         "channel": channel,
+        "rx_channel": rx_channel,
         "data_rate": data_rate,
         "pa_level": 3,
         "retransmit_delay": 1,
@@ -128,7 +131,20 @@ class CommandEncodingTests(unittest.TestCase):
 class BaseStationCodecTests(unittest.TestCase):
     def test_base_info_and_scan_result_roundtrip_via_cobs(self):
         raw_info = base_station._INFO_STRUCT.pack(
-            1, 1, 114, 1, 3, 1, 3, 500, 3, 120, 2, base_station.DEFAULT_ADDR_SUFFIX, 0xB4
+            base_station.PROTO_VERSION,
+            3,
+            104,
+            1,
+            3,
+            1,
+            3,
+            500,
+            3,
+            120,
+            2,
+            base_station.DEFAULT_ADDR_SUFFIX,
+            0xB4,
+            118,
         )
         frame = proto.encode_frame(base_station.BS_MSG_INFO, raw_info)
         dec = proto.FrameDecoder()
@@ -136,17 +152,21 @@ class BaseStationCodecTests(unittest.TestCase):
         self.assertEqual(len(frames), 1)
         self.assertEqual(frames[0][0], base_station.BS_MSG_INFO)
         parsed = base_station.parse_info(frames[0][1])
-        self.assertEqual(parsed["channel"], 114)
+        self.assertEqual(parsed["channel"], 104)
+        self.assertEqual(parsed["rx_channel"], 118)
+        self.assertTrue(parsed["dual_radio"])
+        self.assertEqual(parsed["radio_ready_mask"], 3)
         self.assertEqual(parsed["tx_ok_count"], 500)
         self.assertEqual(parsed["radio_reinit_count"], 2)
 
         busy = bytes((i % 101 for i in range(126)))
-        raw_scan = base_station._SCAN_RES_STRUCT.pack(0, 126, 114, busy)
+        raw_scan = base_station._SCAN_RES_STRUCT.pack(0, 126, 104, busy, 118)
         scan_frame = proto.encode_frame(base_station.BS_MSG_SCAN_RESULT, raw_scan)
         scan_frames = dec.feed(scan_frame)
         self.assertEqual(len(scan_frames), 1)
         scan = base_station.parse_scan_result(scan_frames[0][1])
-        self.assertEqual(scan["best_channel"], 114)
+        self.assertEqual(scan["best_channel"], 104)
+        self.assertEqual(scan["best_rx_channel"], 118)
         self.assertEqual(len(scan["busy_pct"]), 126)
 
     def test_rf_tx_and_status_framing(self):
@@ -157,6 +177,16 @@ class BaseStationCodecTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0][0], base_station.BS_MSG_RF_TX)
 
+        frame_ch = base_station.encode_rf_tx_on_channel(10, 1, 76, cmd)
+        out_ch = dec.feed(frame_ch)
+        self.assertEqual(len(out_ch), 1)
+        self.assertEqual(out_ch[0][0], base_station.BS_MSG_RF_TX_CH)
+        self.assertEqual(out_ch[0][1][4], 76)
+
+        self.assertEqual(base_station.encode_channel_pair_param(104, 104), 104)
+        self.assertEqual(base_station.encode_channel_pair_param(104, 118), 0x8000 | (118 << 8) | 104)
+        self.assertEqual(base_station.encode_channel_pair_param(104, 0), 0x8000 | 104)
+
         raw_st = base_station._TX_STATUS_STRUCT.pack(9, 1, base_station.BS_TX_STATUS_OK, 1, 410)
         parsed = base_station.parse_tx_status(raw_st)
         self.assertEqual(parsed["seq"], 9)
@@ -165,7 +195,20 @@ class BaseStationCodecTests(unittest.TestCase):
 
     def test_base_station_link_open_handshake_and_close(self):
         raw_info = base_station._INFO_STRUCT.pack(
-            1, 1, 76, 1, 3, 1, 3, 10, 0, 5, 0, base_station.DEFAULT_ADDR_SUFFIX, 0xB4
+            base_station.PROTO_VERSION,
+            3,
+            76,
+            1,
+            3,
+            1,
+            3,
+            10,
+            0,
+            5,
+            0,
+            base_station.DEFAULT_ADDR_SUFFIX,
+            0xB4,
+            90,
         )
         reply = proto.encode_frame(base_station.BS_MSG_INFO, raw_info)
 

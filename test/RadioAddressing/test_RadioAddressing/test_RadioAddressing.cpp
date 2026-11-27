@@ -97,11 +97,75 @@ void test_channel_hunter_waits_for_trigger_and_locks_on_rx(void)
     TEST_ASSERT_FALSE(hunter.tick(9000000ULL, false, &next_ch));
 }
 
+void test_select_best_channel_pair_finds_optimal_distance_in_clean_band(void)
+{
+    uint8_t busy[126];
+    memset(busy, 0, sizeof(busy));
+    // Replicate real lab scan: heavy Wi-Fi on 0..64, spike at 101, clean 104..124.
+    for (size_t ch = 0; ch <= 64; ++ch) busy[ch] = 75;
+    busy[101] = 38;
+    busy[102] = 3;
+
+    const radio_addressing::ChannelPair pair =
+      radio_addressing::select_best_channel_pair(busy, 0, 126, 1, 10, 14);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT8(100, pair.tx_channel);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(124, pair.tx_channel);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT8(100, pair.rx_channel);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT8(124, pair.rx_channel);
+    TEST_ASSERT_EQUAL_UINT8(14, pair.separation);
+    TEST_ASSERT_EQUAL_UINT8(0, busy[pair.tx_channel]);
+    TEST_ASSERT_EQUAL_UINT8(0, busy[pair.rx_channel]);
+    TEST_ASSERT_NOT_EQUAL(100, pair.tx_channel);  // adjacent to busy ch 101
+    TEST_ASSERT_NOT_EQUAL(101, pair.tx_channel);
+
+    // When clean band only offers 11 MHz clean separation, cleanliness must beat exact 14 MHz.
+    memset(busy, 50, sizeof(busy));
+    for (size_t ch = 102; ch <= 106; ++ch) busy[ch] = 0;
+    for (size_t ch = 113; ch <= 117; ++ch) busy[ch] = 0;
+    const radio_addressing::ChannelPair clean_pair =
+      radio_addressing::select_best_channel_pair(busy, 0, 126, 1, 10, 14);
+    TEST_ASSERT_EQUAL_UINT8(0, busy[clean_pair.tx_channel]);
+    TEST_ASSERT_EQUAL_UINT8(0, busy[clean_pair.rx_channel]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT8(10, clean_pair.separation);
+}
+
+void test_channel_pair_param_encode_decode(void)
+{
+    uint8_t dl = 0;
+    uint8_t ul = 0;
+
+    // Legacy same-channel encoding (bit 15 == 0)
+    const uint16_t same = radio_addressing::encode_channel_pair_param(104, 104);
+    TEST_ASSERT_EQUAL_UINT16(104, same);
+    TEST_ASSERT_TRUE(radio_addressing::decode_channel_pair_param(same, &dl, &ul));
+    TEST_ASSERT_EQUAL_UINT8(104, dl);
+    TEST_ASSERT_EQUAL_UINT8(104, ul);
+
+    // Full-Duplex split-channel encoding (bit 15 == 1)
+    const uint16_t split = radio_addressing::encode_channel_pair_param(104, 118);
+    TEST_ASSERT_TRUE((split & 0x8000U) != 0U);
+    TEST_ASSERT_TRUE(radio_addressing::decode_channel_pair_param(split, &dl, &ul));
+    TEST_ASSERT_EQUAL_UINT8(104, dl);
+    TEST_ASSERT_EQUAL_UINT8(118, ul);
+
+    // Edge case: rx_ch == 0 must stay unambiguous
+    const uint16_t zero_rx = radio_addressing::encode_channel_pair_param(104, 0);
+    TEST_ASSERT_TRUE(radio_addressing::decode_channel_pair_param(zero_rx, &dl, &ul));
+    TEST_ASSERT_EQUAL_UINT8(104, dl);
+    TEST_ASSERT_EQUAL_UINT8(0, ul);
+
+    // Reject out-of-range channels (> 125)
+    TEST_ASSERT_FALSE(radio_addressing::decode_channel_pair_param(126, &dl, &ul));
+    TEST_ASSERT_FALSE(radio_addressing::decode_channel_pair_param(0x8000U | (126U << 8U) | 10U, &dl, &ul));
+}
+
 extern "C" void app_main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_addresses_are_unique_and_high_transition);
     RUN_TEST(test_select_best_channel_prefers_quiet_upper_band_and_2mhz_guard);
+    RUN_TEST(test_select_best_channel_pair_finds_optimal_distance_in_clean_band);
+    RUN_TEST(test_channel_pair_param_encode_decode);
     RUN_TEST(test_channel_hunter_waits_for_trigger_and_locks_on_rx);
     UNITY_END();
 }

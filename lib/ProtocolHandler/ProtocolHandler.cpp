@@ -562,26 +562,30 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         }
     }
 
-    // SET radio channel (persisted to NVS and applied live)
+    // SET radio channel(s) — persisted to NVS and applied live.
+    // Supports both legacy same-channel (bit 15 == 0) and Full-Duplex split-channel (bit 15 == 1).
     if (cfg.config_flags & CONFIG_FLAG_SET_CHANNEL)
     {
-        if (cfg.param <= radio_addressing::MAX_CHANNEL)
+        uint8_t downlink_ch = 0;
+        uint8_t uplink_ch = 0;
+        if (radio_addressing::decode_channel_pair_param(cfg.param, &downlink_ch, &uplink_ch))
         {
-            const uint8_t new_ch = static_cast<uint8_t>(cfg.param);
-            ESP_LOGI(TAG, "Switching radio channel to %u.", new_ch);
-            state.set_radio_channel(new_ch);
+            ESP_LOGI(TAG,
+                     "Switching radio channels to downlink(RX)=%u uplink(TX)=%u.",
+                     downlink_ch,
+                     uplink_ch);
+            state.set_radio_channels(downlink_ch, uplink_ch);
             if (m_radio != nullptr)
-                m_radio->set_channel(new_ch);
+                m_radio->set_channels(downlink_ch, uplink_ch);
             xSemaphoreTake(m_mutex, portMAX_DELAY);
-            m_channel_hunter.set_home_channel(new_ch, static_cast<uint64_t>(esp_timer_get_time()));
+            m_channel_hunter.set_home_channel(downlink_ch, static_cast<uint64_t>(esp_timer_get_time()));
             xSemaphoreGive(m_mutex);
         }
         else
         {
             ESP_LOGE(TAG,
-                     "CONFIG_FLAG_SET_CHANNEL: channel %u exceeds max (%u). Rejected.",
-                     cfg.param,
-                     radio_addressing::MAX_CHANNEL);
+                     "CONFIG_FLAG_SET_CHANNEL: invalid channel param 0x%04X. Rejected.",
+                     cfg.param);
         }
     }
 
@@ -603,18 +607,18 @@ void ProtocolHandler::handle_config(const RobotConfig & cfg)
         OrientationHandler::get_instance().calibrate_mag(10);
     }
 
-    // RESET NVS — reset robot ID to 0 and channel to default
+    // RESET NVS — reset robot ID to 0 and channels to default
     if (cfg.config_flags & CONFIG_FLAG_RESET_NVS)
     {
-        ESP_LOGW(TAG, "CONFIG_FLAG_RESET_NVS: resetting robot ID to 0 and channel to %d.",
+        ESP_LOGW(TAG, "CONFIG_FLAG_RESET_NVS: resetting robot ID to 0 and channels to %d.",
                  CONFIG_RADIO_CHANNEL);
         state.set_id(0);
-        state.set_radio_channel(CONFIG_RADIO_CHANNEL);
+        state.set_radio_channels(CONFIG_RADIO_CHANNEL, CONFIG_RADIO_CHANNEL);
         if (m_radio != nullptr)
         {
             const std::array<uint8_t, 5> default_addr = radio_addressing::make_robot_address(0);
             m_radio->set_rx_address(default_addr.data());
-            m_radio->set_channel(CONFIG_RADIO_CHANNEL);
+            m_radio->set_channels(CONFIG_RADIO_CHANNEL, CONFIG_RADIO_CHANNEL);
         }
         xSemaphoreTake(m_mutex, portMAX_DELAY);
         m_channel_hunter.set_home_channel(CONFIG_RADIO_CHANNEL,

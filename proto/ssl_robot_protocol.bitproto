@@ -77,7 +77,12 @@ const CONFIG_FLAG_RESET_NVS = 8;
 // Full NVS erase — all namespaces, all keys
 const CONFIG_FLAG_FACTORY_RESET = 16;
 
-// Switch robot RF channel (new channel 0..125 in RobotConfig.param, persisted to NVS)
+// Switch robot RF channel(s), persisted to NVS.
+// Encoding of RobotConfig.param (uint16):
+//   - Legacy same-channel (bit 15 == 0): downlink = uplink = (param & 0x7F)
+//   - Full-duplex split-channel (bit 15 == 1):
+//       downlink (robot RX / base TX) = (param & 0x7F)
+//       uplink   (robot TX / base RX) = ((param >> 8) & 0x7F)
 const CONFIG_FLAG_SET_CHANNEL = 32;
 
 // ---------------------------------------------------------------------------

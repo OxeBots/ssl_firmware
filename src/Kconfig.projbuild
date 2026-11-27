@@ -26,6 +26,51 @@ menu "Oxebots Robot Configuration"
         help
             Baud rate for binary COBS+CRC8 communication between PC and Base Station.
 
+    config BASE_DUAL_RADIO
+        bool "Enable dedicated second nRF24L01+ RX radio (Full-Duplex)"
+        depends on FIRMWARE_ROLE_BASE_STATION
+        default y
+        help
+            Use a second nRF24L01+ sharing SPI2_HOST (MOSI/MISO/SCLK) with its own
+            CSN/CE/IRQ pins for dedicated Full-Duplex RX and background RPD scans.
+            Automatically falls back to single-radio mode if the RX module is absent.
+
+    config BASE_RX_CSN_GPIO
+        int "Base Station RX radio CSN GPIO"
+        depends on FIRMWARE_ROLE_BASE_STATION && BASE_DUAL_RADIO
+        range 0 GPIO_MAX_INDEX
+        default 17
+
+    config BASE_RX_CE_GPIO
+        int "Base Station RX radio CE GPIO"
+        depends on FIRMWARE_ROLE_BASE_STATION && BASE_DUAL_RADIO
+        range 0 GPIO_MAX_INDEX
+        default 21
+
+    config BASE_RX_IRQ_GPIO
+        int "Base Station RX radio IRQ GPIO"
+        depends on FIRMWARE_ROLE_BASE_STATION && BASE_DUAL_RADIO
+        range 0 GPIO_MAX_INDEX
+        default 22
+
+    config BASE_RX_SPI_DEVICE_KEY
+        int "Base Station RX radio SPIdev key"
+        depends on FIRMWARE_ROLE_BASE_STATION && BASE_DUAL_RADIO
+        range 0 255
+        default 252
+
+    config BASE_DEFAULT_MIN_SEP
+        int "Minimum Full-Duplex TX/RX channel separation (MHz)"
+        depends on FIRMWARE_ROLE_BASE_STATION
+        range 2 40
+        default 10
+
+    config BASE_DEFAULT_OPTIMAL_SEP
+        int "Optimal Full-Duplex TX/RX channel separation (MHz)"
+        depends on FIRMWARE_ROLE_BASE_STATION
+        range 4 50
+        default 14
+
     config GPIO_MAX_INDEX
         int "Maximum GPIO number for the target board"
         default 39 if IDF_TARGET_ESP32
@@ -76,8 +121,8 @@ menu "Oxebots Robot Configuration"
 
         config RADIO_CHANNEL_HUNT_TRIGGER_MS
             int "Robot channel-hunt trigger after communication loss (ms)"
-            range 1000 60000
-            default 15000
+            range 1000 120000
+            default 30000
             help
                 Duration without base-station packets before the robot cycles
                 through rendezvous channels to rediscover the base station.

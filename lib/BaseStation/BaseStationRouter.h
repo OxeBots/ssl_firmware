@@ -19,7 +19,8 @@ static constexpr size_t MAX_FRAME_BYTES = serial_framing::max_frame_bytes_for(MA
 
 struct RadioConfigState
 {
-    uint8_t channel = radio_addressing::DEFAULT_CHANNEL;
+    uint8_t channel = radio_addressing::DEFAULT_CHANNEL;        // TX / downlink channel
+    uint8_t rx_channel = radio_addressing::DEFAULT_RX_CHANNEL;  // RX / uplink channel
     uint8_t data_rate = BS_RATE_2MBPS;
     uint8_t pa_level = 3;          // RF24_PA_MAX
     uint8_t retransmit_delay = 1;  // 500 us
@@ -41,6 +42,13 @@ class IBackend
    public:
     virtual ~IBackend() = default;
 
+    // Bitmask: bit 0 = TX radio ready, bit 1 = RX radio ready.
+    // 0x03 = Full-Duplex Dual-Radio, 0x01 = Single-Radio fallback.
+    virtual uint8_t radio_ready_mask() const
+    {
+        return is_radio_ready() ? 0x01U : 0x00U;
+    }
+
     virtual bool is_radio_ready() const = 0;
     virtual uint16_t get_radio_reinit_count() const = 0;
     virtual bool apply_config(const RadioConfigState & config, bool persist_nvs) = 0;
@@ -48,6 +56,24 @@ class IBackend
                                   const uint8_t * payload,
                                   uint8_t len,
                                   bool no_ack) = 0;
+    virtual TxOutcome transmit_rf_on_channel(const uint8_t tx_addr[5],
+                                             uint8_t rf_channel,
+                                             const uint8_t * payload,
+                                             uint8_t len,
+                                             bool no_ack)
+    {
+        (void)rf_channel;
+        return transmit_rf(tx_addr, payload, len, no_ack);
+    }
+    // Optional async scan hook (Dual-Radio RX task). When returning true, the backend
+    // will invoke Router::emit_scan_result() upon completion without blocking UART RX.
+    virtual bool start_async_scan(uint8_t start_ch, uint8_t end_ch, uint8_t samples_per_ch)
+    {
+        (void)start_ch;
+        (void)end_ch;
+        (void)samples_per_ch;
+        return false;
+    }
     virtual bool scan_spectrum(uint8_t start_ch,
                                uint8_t end_ch,
                                uint8_t samples_per_ch,
@@ -65,6 +91,14 @@ class Router
     void set_config_state(const RadioConfigState & config)
     {
         m_config = config;
+    }
+
+    void set_scan_separation_policy(uint8_t min_sep, uint8_t optimal_sep)
+    {
+        if (min_sep > 0)
+            m_min_sep = min_sep;
+        if (optimal_sep >= m_min_sep)
+            m_optimal_sep = optimal_sep;
     }
 
     const RadioConfigState & config() const
@@ -106,15 +140,57 @@ class Router
         send_message(BS_MSG_RF_RX, raw, sizeof(raw));
     }
 
+    void emit_scan_result(uint8_t start_ch, uint8_t count, const uint8_t * busy_pct, bool ok)
+    {
+        if (m_backend == nullptr)
+            return;
+
+        BaseScanResult res = {};
+        res.start_channel = start_ch;
+        const bool dual_radio = (m_backend->radio_ready_mask() & 0x03U) == 0x03U;
+
+        if (ok && busy_pct != nullptr && count > 0 && count <= 126)
+        {
+            res.count = count;
+            memcpy(res.busy_pct, busy_pct, count);
+            if (dual_radio)
+            {
+                const radio_addressing::ChannelPair pair =
+                  radio_addressing::select_best_channel_pair(
+                    res.busy_pct, start_ch, count, m_config.data_rate, m_min_sep, m_optimal_sep);
+                res.best_channel = pair.tx_channel;
+                res.best_rx_channel = pair.rx_channel;
+            }
+            else
+            {
+                res.best_channel = radio_addressing::select_best_channel(
+                  res.busy_pct, start_ch, count, m_config.data_rate);
+                res.best_rx_channel = res.best_channel;
+            }
+        }
+        else
+        {
+            res.count = 0;
+            res.best_channel = m_config.channel;
+            res.best_rx_channel = dual_radio ? m_config.rx_channel : m_config.channel;
+        }
+
+        uint8_t raw[BYTES_LENGTH_BASE_SCAN_RESULT] = {};
+        EncodeBaseScanResult(&res, raw);
+        send_message(BS_MSG_SCAN_RESULT, raw, sizeof(raw));
+    }
+
     void send_info()
     {
         if (m_backend == nullptr)
             return;
 
+        const uint8_t mask = m_backend->radio_ready_mask();
         BaseInfo info = {};
         info.protocol_version = BS_PROTO_VERSION;
-        info.radio_ready = m_backend->is_radio_ready() ? 1 : 0;
+        info.radio_ready = mask;
         info.channel = m_config.channel;
+        info.rx_channel = ((mask & 0x02U) != 0U) ? m_config.rx_channel : m_config.channel;
         info.data_rate = m_config.data_rate;
         info.pa_level = m_config.pa_level;
         info.retransmit_delay = m_config.retransmit_delay;
@@ -188,6 +264,11 @@ class Router
                     handle_rf_tx(payload);
                 break;
 
+            case BS_MSG_RF_TX_CH:
+                if (len == BYTES_LENGTH_BASE_RF_TX_ON_CHANNEL)
+                    handle_rf_tx_on_channel(payload);
+                break;
+
             default:
                 break;
         }
@@ -198,9 +279,24 @@ class Router
         BaseRadioConfig req = {};
         DecodeBaseRadioConfig(&req, const_cast<uint8_t *>(payload));
 
+        const bool dual_radio = (m_backend->radio_ready_mask() & 0x02U) != 0U;
         RadioConfigState next = m_config;
         if (radio_addressing::is_valid_channel(req.channel))
             next.channel = req.channel;
+
+        if (!dual_radio)
+        {
+            next.rx_channel = next.channel;
+        }
+        else if (req.rx_channel == radio_addressing::RX_CHANNEL_FOLLOW_TX)
+        {
+            next.rx_channel = next.channel;
+        }
+        else if (radio_addressing::is_valid_channel(req.rx_channel))
+        {
+            next.rx_channel = req.rx_channel;
+        }
+
         if (req.data_rate <= BS_RATE_250KBPS)
             next.data_rate = req.data_rate;
         if (req.pa_level <= 3)
@@ -241,50 +337,47 @@ class Router
         const uint8_t samples = (req.samples_per_channel > 0) ? req.samples_per_channel : 32;
         const uint8_t count = static_cast<uint8_t>(end_ch - start_ch + 1);
 
-        BaseScanResult res = {};
-        res.start_channel = start_ch;
-        res.count = count;
-        if (m_backend->scan_spectrum(start_ch, end_ch, samples, res.busy_pct))
-        {
-            res.best_channel = radio_addressing::select_best_channel(
-              res.busy_pct, start_ch, count, m_config.data_rate);
-        }
-        else
-        {
-            res.count = 0;
-            res.best_channel = m_config.channel;
-        }
+        if (m_backend->start_async_scan(start_ch, end_ch, samples))
+            return;
 
-        uint8_t raw[BYTES_LENGTH_BASE_SCAN_RESULT] = {};
-        EncodeBaseScanResult(&res, raw);
-        send_message(BS_MSG_SCAN_RESULT, raw, sizeof(raw));
+        uint8_t busy_pct[126] = {};
+        const bool ok = m_backend->scan_spectrum(start_ch, end_ch, samples, busy_pct);
+        emit_scan_result(start_ch, count, busy_pct, ok);
     }
 
-    void handle_rf_tx(const uint8_t * payload)
+    void dispatch_rf_tx(uint16_t seq,
+                        uint8_t target_robot_id,
+                        uint8_t tx_flags,
+                        bool use_temp_channel,
+                        uint8_t rf_channel,
+                        const uint8_t * rf_payload,
+                        uint8_t payload_len)
     {
-        BaseRfTx req = {};
-        DecodeBaseRfTx(&req, const_cast<uint8_t *>(payload));
-
         BaseRfTxStatus status_msg = {};
-        status_msg.seq = req.seq;
-        status_msg.target_robot_id = req.target_robot_id;
+        status_msg.seq = seq;
+        status_msg.target_robot_id = target_robot_id;
 
-        if (!m_backend->is_radio_ready() || req.payload_len == 0 || req.payload_len > 31)
+        const bool valid_channel =
+          !use_temp_channel || radio_addressing::is_valid_channel(rf_channel);
+        if (!m_backend->is_radio_ready() || payload_len == 0 || payload_len > 31 || !valid_channel)
         {
             status_msg.status = BS_TX_STATUS_RADIO_ERR;
             ++m_tx_fail_count;
         }
         else
         {
-            const bool is_broadcast = (req.target_robot_id == radio_addressing::BROADCAST_ROBOT_ID);
-            const bool no_ack = is_broadcast || ((req.tx_flags & BS_TX_FLAG_NO_ACK) != 0);
+            const bool is_broadcast = (target_robot_id == radio_addressing::BROADCAST_ROBOT_ID);
+            const bool no_ack = is_broadcast || ((tx_flags & BS_TX_FLAG_NO_ACK) != 0);
             const std::array<uint8_t, 5> dst_addr =
               is_broadcast ? radio_addressing::make_broadcast_address(m_config.addr_suffix)
-                           : radio_addressing::make_robot_address(req.target_robot_id,
+                           : radio_addressing::make_robot_address(target_robot_id,
                                                                   m_config.addr_suffix);
 
             const TxOutcome outcome =
-              m_backend->transmit_rf(dst_addr.data(), req.payload, req.payload_len, no_ack);
+              use_temp_channel
+                ? m_backend->transmit_rf_on_channel(
+                    dst_addr.data(), rf_channel, rf_payload, payload_len, no_ack)
+                : m_backend->transmit_rf(dst_addr.data(), rf_payload, payload_len, no_ack);
             status_msg.status = outcome.status;
             status_msg.retries = outcome.retries;
             status_msg.tx_time_us = outcome.tx_time_us;
@@ -300,8 +393,31 @@ class Router
         send_message(BS_MSG_RF_TX_STATUS, raw, sizeof(raw));
     }
 
+    void handle_rf_tx(const uint8_t * payload)
+    {
+        BaseRfTx req = {};
+        DecodeBaseRfTx(&req, const_cast<uint8_t *>(payload));
+        dispatch_rf_tx(
+          req.seq, req.target_robot_id, req.tx_flags, false, 0, req.payload, req.payload_len);
+    }
+
+    void handle_rf_tx_on_channel(const uint8_t * payload)
+    {
+        BaseRfTxOnChannel req = {};
+        DecodeBaseRfTxOnChannel(&req, const_cast<uint8_t *>(payload));
+        dispatch_rf_tx(req.seq,
+                       req.target_robot_id,
+                       req.tx_flags,
+                       true,
+                       req.rf_channel,
+                       req.payload,
+                       req.payload_len);
+    }
+
     IBackend * m_backend = nullptr;
     RadioConfigState m_config = {};
+    uint8_t m_min_sep = radio_addressing::DEFAULT_MIN_CHANNEL_SEP;
+    uint8_t m_optimal_sep = radio_addressing::DEFAULT_OPTIMAL_CHANNEL_SEP;
     serial_framing::Decoder<MAX_MESSAGE_BYTES> m_decoder;
     uint32_t m_tx_ok_count = 0;
     uint32_t m_tx_fail_count = 0;

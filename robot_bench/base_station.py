@@ -21,8 +21,9 @@ import serial.tools.list_ports
 
 from . import protocol as proto
 
-PROTO_VERSION = 1
+PROTO_VERSION = 2
 DEFAULT_BAUD = 921600
+RX_CHANNEL_FOLLOW_TX = 0xFF
 
 # Host PC -> Base Station message IDs (0x80..0x87)
 BS_MSG_PING = 0x80
@@ -30,6 +31,7 @@ BS_MSG_GET_INFO = 0x81
 BS_MSG_SET_CONFIG = 0x82
 BS_MSG_SCAN_REQ = 0x83
 BS_MSG_RF_TX = 0x84
+BS_MSG_RF_TX_CH = 0x85
 
 # Base Station -> Host PC message IDs (0x88..0x8F)
 BS_MSG_INFO = 0x88
@@ -62,15 +64,25 @@ DEFAULT_BASE_ADDR_LSB = 0xB4
 
 _PING_STRUCT = struct.Struct("<I")
 _EMPTY_STRUCT = struct.Struct("<B")
-_CONFIG_STRUCT = struct.Struct("<BBBBBB4sB")
+_CONFIG_STRUCT = struct.Struct("<BBBBBB4sBB")
 _SCAN_REQ_STRUCT = struct.Struct("<BBB")
 _RF_TX_STRUCT = struct.Struct("<HBBB31s")
+_RF_TX_CH_STRUCT = struct.Struct("<HBBBB31s")
 
-_INFO_STRUCT = struct.Struct("<BBBBBBBIIIH4sB")
+_INFO_STRUCT = struct.Struct("<BBBBBBBIIIH4sBB")
 _TX_STATUS_STRUCT = struct.Struct("<HBBBH")
 _RF_RX_STRUCT = struct.Struct("<IBB31s")
-_SCAN_RES_STRUCT = struct.Struct("<BBB126s")
+_SCAN_RES_STRUCT = struct.Struct("<BBB126sB")
 _LOG_STRUCT = struct.Struct("<BB96s")
+
+
+def encode_channel_pair_param(tx_channel, rx_channel=RX_CHANNEL_FOLLOW_TX):
+    """Encode (base_tx_ch, base_rx_ch) into RobotConfig.param (uint16)."""
+    tx_ch = int(tx_channel) & 0x7F
+    if rx_channel is None or rx_channel == RX_CHANNEL_FOLLOW_TX or int(rx_channel) == tx_ch:
+        return tx_ch
+    rx_ch = int(rx_channel) & 0x7F
+    return 0x8000 | (rx_ch << 8) | tx_ch
 
 
 class BaseStationError(Exception):
@@ -94,8 +106,10 @@ def encode_set_config(
     persist_nvs=True,
     addr_suffix=DEFAULT_ADDR_SUFFIX,
     base_addr_lsb=DEFAULT_BASE_ADDR_LSB,
+    rx_channel=RX_CHANNEL_FOLLOW_TX,
 ):
     suffix = bytes(addr_suffix)[:4].ljust(4, b"\x00")
+    rx_val = RX_CHANNEL_FOLLOW_TX if rx_channel is None else (int(rx_channel) & 0xFF)
     payload = _CONFIG_STRUCT.pack(
         int(channel) & 0xFF,
         int(data_rate) & 0xFF,
@@ -105,6 +119,7 @@ def encode_set_config(
         1 if persist_nvs else 0,
         suffix,
         int(base_addr_lsb) & 0xFF,
+        rx_val,
     )
     return proto.encode_frame(BS_MSG_SET_CONFIG, payload)
 
@@ -133,14 +148,34 @@ def encode_rf_tx(seq, target_robot_id, payload, tx_flags=0):
     return proto.encode_frame(BS_MSG_RF_TX, packed)
 
 
+def encode_rf_tx_on_channel(seq, target_robot_id, rf_channel, payload, tx_flags=0):
+    raw = bytes(payload)
+    if not 1 <= len(raw) <= 31:
+        raise ValueError(f"RF payload length out of range: {len(raw)}")
+    padded = raw.ljust(31, b"\x00")
+    packed = _RF_TX_CH_STRUCT.pack(
+        int(seq) & 0xFFFF,
+        int(target_robot_id) & 0xFF,
+        int(tx_flags) & 0xFF,
+        int(rf_channel) & 0xFF,
+        len(raw),
+        padded,
+    )
+    return proto.encode_frame(BS_MSG_RF_TX_CH, packed)
+
+
 def parse_info(payload):
     if len(payload) != _INFO_STRUCT.size:
         return None
     fields = _INFO_STRUCT.unpack(payload)
+    mask = fields[1]
     return {
         "protocol_version": fields[0],
-        "radio_ready": bool(fields[1]),
+        "radio_ready": bool(mask & 0x01),
+        "radio_ready_mask": mask,
+        "dual_radio": (mask & 0x03) == 0x03,
         "channel": fields[2],
+        "rx_channel": fields[13],
         "data_rate": fields[3],
         "pa_level": fields[4],
         "retransmit_delay": fields[5],
@@ -184,12 +219,13 @@ def parse_rf_rx(payload):
 def parse_scan_result(payload):
     if len(payload) != _SCAN_RES_STRUCT.size:
         return None
-    start_ch, count, best_ch, busy_raw = _SCAN_RES_STRUCT.unpack(payload)
+    start_ch, count, best_ch, busy_raw, best_rx_ch = _SCAN_RES_STRUCT.unpack(payload)
     count = min(count, 126)
     return {
         "start_channel": start_ch,
         "count": count,
         "best_channel": best_ch,
+        "best_rx_channel": best_rx_ch,
         "busy_pct": list(busy_raw[:count]),
     }
 
@@ -417,6 +453,23 @@ class BaseStationLink:
         if self._seq == 0:
             self._seq = 1
         self._write(encode_rf_tx(seq, target_robot_id, payload, tx_flags=tx_flags))
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            while self._tx_status_queue:
+                status = self._tx_status_queue.popleft()
+                if status["seq"] == seq:
+                    return status
+            self._poll()
+        return None
+
+    def send_rf_on_channel(self, target_robot_id, rf_channel, payload, tx_flags=0, timeout_s=0.05):
+        seq = self._seq
+        self._seq = (self._seq + 1) & 0xFFFF
+        if self._seq == 0:
+            self._seq = 1
+        self._write(
+            encode_rf_tx_on_channel(seq, target_robot_id, rf_channel, payload, tx_flags=tx_flags)
+        )
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             while self._tx_status_queue:

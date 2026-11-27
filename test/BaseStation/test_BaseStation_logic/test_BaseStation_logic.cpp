@@ -13,6 +13,7 @@ class MockBackend : public base_station::IBackend
 {
    public:
     bool radio_ready = true;
+    uint8_t ready_mask = 0x01;
     uint16_t reinit_count = 2;
     base_station::RadioConfigState last_config = {};
     bool last_persist = false;
@@ -21,14 +22,20 @@ class MockBackend : public base_station::IBackend
     uint8_t last_tx_addr[5] = {};
     uint8_t last_tx_payload[31] = {};
     uint8_t last_tx_len = 0;
+    uint8_t last_tx_channel = 0xFF;
     bool last_no_ack = false;
     base_station::TxOutcome next_outcome = {BS_TX_STATUS_OK, 1, 420};
 
     std::vector<uint8_t> uart_tx_bytes;
 
+    uint8_t radio_ready_mask() const override
+    {
+        return radio_ready ? ready_mask : 0x00U;
+    }
+
     bool is_radio_ready() const override
     {
-        return radio_ready;
+        return radio_ready && ((ready_mask & 0x01U) != 0U);
     }
 
     uint16_t get_radio_reinit_count() const override
@@ -51,6 +58,21 @@ class MockBackend : public base_station::IBackend
         memcpy(last_tx_addr, tx_addr, 5);
         memcpy(last_tx_payload, payload, len);
         last_tx_len = len;
+        last_tx_channel = 0xFF;
+        last_no_ack = no_ack;
+        return next_outcome;
+    }
+
+    base_station::TxOutcome transmit_rf_on_channel(const uint8_t tx_addr[5],
+                                                   uint8_t rf_channel,
+                                                   const uint8_t * payload,
+                                                   uint8_t len,
+                                                   bool no_ack) override
+    {
+        memcpy(last_tx_addr, tx_addr, 5);
+        memcpy(last_tx_payload, payload, len);
+        last_tx_len = len;
+        last_tx_channel = rf_channel;
         last_no_ack = no_ack;
         return next_outcome;
     }
@@ -204,11 +226,75 @@ void test_router_scan_returns_upper_band_best_channel(void)
     TEST_ASSERT_LESS_OR_EQUAL_UINT8(124, res.best_channel);
 }
 
+void test_router_dual_radio_scan_and_rf_tx_on_channel(void)
+{
+    MockBackend backend;
+    backend.ready_mask = 0x03;  // Full-Duplex Dual-Radio
+    base_station::Router router(&backend);
+
+    // 1) Set split-channel config (TX=104, RX=118)
+    BaseRadioConfig cfg = {};
+    cfg.channel = 104;
+    cfg.rx_channel = 118;
+    cfg.data_rate = BS_RATE_2MBPS;
+    cfg.pa_level = 3;
+    cfg.retransmit_delay = 1;
+    cfg.retransmit_count = 3;
+    cfg.persist_nvs = 1;
+    uint8_t cfg_raw[BYTES_LENGTH_BASE_RADIO_CONFIG] = {};
+    EncodeBaseRadioConfig(&cfg, cfg_raw);
+    feed_encoded(router, BS_MSG_SET_CONFIG, cfg_raw, sizeof(cfg_raw));
+
+    uint8_t type = 0;
+    std::vector<uint8_t> payload;
+    TEST_ASSERT_TRUE(decode_first(backend.uart_tx_bytes, &type, &payload));
+    TEST_ASSERT_EQUAL_UINT8(BS_MSG_INFO, type);
+    BaseInfo info = {};
+    DecodeBaseInfo(&info, payload.data());
+    TEST_ASSERT_EQUAL_UINT8(3, info.radio_ready);
+    TEST_ASSERT_EQUAL_UINT8(104, info.channel);
+    TEST_ASSERT_EQUAL_UINT8(118, info.rx_channel);
+
+    // 2) Scan in Dual-Radio returns clean pair separated by ~14 MHz (>= 10 MHz)
+    backend.uart_tx_bytes.clear();
+    BaseScanRequest req = {0, 125, 16};
+    uint8_t scan_raw[BYTES_LENGTH_BASE_SCAN_REQUEST] = {};
+    EncodeBaseScanRequest(&req, scan_raw);
+    feed_encoded(router, BS_MSG_SCAN_REQ, scan_raw, sizeof(scan_raw));
+
+    TEST_ASSERT_TRUE(decode_first(backend.uart_tx_bytes, &type, &payload));
+    TEST_ASSERT_EQUAL_UINT8(BS_MSG_SCAN_RESULT, type);
+    BaseScanResult res = {};
+    DecodeBaseScanResult(&res, payload.data());
+    const uint8_t sep = (res.best_rx_channel > res.best_channel)
+                          ? static_cast<uint8_t>(res.best_rx_channel - res.best_channel)
+                          : static_cast<uint8_t>(res.best_channel - res.best_rx_channel);
+    TEST_ASSERT_EQUAL_UINT8(14, sep);
+
+    // 3) BS_MSG_RF_TX_CH routes packet to temporary old channel without changing active config
+    backend.uart_tx_bytes.clear();
+    BaseRfTxOnChannel tx_ch = {};
+    tx_ch.seq = 42;
+    tx_ch.target_robot_id = 1;
+    tx_ch.tx_flags = 0;
+    tx_ch.rf_channel = 76;
+    tx_ch.payload_len = 8;
+    tx_ch.payload[0] = 0x11;
+    uint8_t tx_raw[BYTES_LENGTH_BASE_RF_TX_ON_CHANNEL] = {};
+    EncodeBaseRfTxOnChannel(&tx_ch, tx_raw);
+    feed_encoded(router, BS_MSG_RF_TX_CH, tx_raw, sizeof(tx_raw));
+
+    TEST_ASSERT_EQUAL_UINT8(76, backend.last_tx_channel);
+    TEST_ASSERT_EQUAL_UINT8(104, router.config().channel);
+    TEST_ASSERT_EQUAL_UINT8(118, router.config().rx_channel);
+}
+
 extern "C" void app_main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_router_ping_replies_with_base_info);
     RUN_TEST(test_router_unicast_and_broadcast_addressing);
     RUN_TEST(test_router_scan_returns_upper_band_best_channel);
+    RUN_TEST(test_router_dual_radio_scan_and_rf_tx_on_channel);
     UNITY_END();
 }

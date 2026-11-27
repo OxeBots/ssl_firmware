@@ -13,7 +13,7 @@ proto base_station_protocol;
 // Protocol version and message type constants
 // ---------------------------------------------------------------------------
 
-const BS_PROTO_VERSION = 1;
+const BS_PROTO_VERSION = 2;
 
 // Host PC -> Base Station (0x80..0x87)
 const BS_MSG_PING       = 128;  // 0x80: Handshake / auto-discovery probe
@@ -21,6 +21,7 @@ const BS_MSG_GET_INFO   = 129;  // 0x81: Request BaseInfo snapshot
 const BS_MSG_SET_CONFIG = 130;  // 0x82: Apply (and optionally persist) RF config
 const BS_MSG_SCAN_REQ   = 131;  // 0x83: Sweep RPD carrier detect across RF channels
 const BS_MSG_RF_TX      = 132;  // 0x84: Transmit one RF packet to robot_id or broadcast
+const BS_MSG_RF_TX_CH   = 133;  // 0x85: Transmit one RF packet on a temporary channel
 
 // Base Station -> Host PC (0x88..0x8F)
 const BS_MSG_INFO         = 136;  // 0x88: Current RF config and counters
@@ -71,9 +72,9 @@ message BaseEmpty {
     uint8 reserved = 1;
 }
 
-// Size: 11 bytes
+// Size: 12 bytes
 message BaseRadioConfig {
-    uint8    channel          = 1;  // 0..125 (2400 + channel MHz)
+    uint8    channel          = 1;  // TX/downlink channel 0..125 (2400 + channel MHz)
     uint8    data_rate        = 2;  // BS_RATE_*
     uint8    pa_level         = 3;  // 0=MIN, 1=LOW, 2=HIGH, 3=MAX
     uint8    retransmit_delay = 4;  // 0..15 ((val + 1) * 250 us)
@@ -81,6 +82,7 @@ message BaseRadioConfig {
     uint8    persist_nvs      = 6;  // 1 = save to NVS, 0 = RAM only
     uint8[4] addr_suffix      = 7;  // Shared 4 MSBytes ({0xC6, 0x9A, 0xD3, 0xE5})
     uint8    base_addr_lsb    = 8;  // Base station uplink LSByte (default 0xB4)
+    uint8    rx_channel       = 9;  // RX/uplink channel 0..125 (255 = follow channel)
 }
 
 // Size: 3 bytes
@@ -99,15 +101,25 @@ message BaseRfTx {
     uint8[31] payload         = 5;  // Raw ssl_robot_protocol frame bytes
 }
 
+// Size: 37 bytes
+message BaseRfTxOnChannel {
+    uint16    seq             = 1;  // Host sequence number echoed in BaseRfTxStatus
+    uint8     target_robot_id = 2;  // 0..10 unicast, 15 broadcast
+    uint8     tx_flags        = 3;  // Bitmask of BS_TX_FLAG_*
+    uint8     rf_channel      = 4;  // Temporary channel (0..125) for this packet only
+    uint8     payload_len     = 5;  // 1..31
+    uint8[31] payload         = 6;  // Raw ssl_robot_protocol frame bytes
+}
+
 // ---------------------------------------------------------------------------
 // Messages: Base Station -> Host PC
 // ---------------------------------------------------------------------------
 
-// Size: 26 bytes
+// Size: 27 bytes
 message BaseInfo {
     uint8    protocol_version   = 1;  // BS_PROTO_VERSION
-    uint8    radio_ready        = 2;  // 1 if nRF24L01+ initialized and healthy
-    uint8    channel            = 3;  // Active RF channel (0..125)
+    uint8    radio_ready        = 2;  // Bitmask: bit0=TX ready, bit1=RX ready (3=Dual Full-Duplex, 1=Single Fallback)
+    uint8    channel            = 3;  // Active TX/downlink RF channel (0..125)
     uint8    data_rate          = 4;  // Active BS_RATE_*
     uint8    pa_level           = 5;  // Active PA level (0..3)
     uint8    retransmit_delay   = 6;  // Active ARD (0..15)
@@ -115,9 +127,10 @@ message BaseInfo {
     uint32   tx_ok_count        = 8;  // Successful TX count (ACK or NO_ACK sent)
     uint32   tx_fail_count      = 9;  // Failed TX count (MAX_RT or radio error)
     uint32   rx_count           = 10; // Total RF packets received on uplink pipe
-    uint16   radio_reinit_count = 11; // Automatic watchdog recovery count
+    uint16   radio_reinit_count = 11; // Automatic watchdog recovery count (TX + RX)
     uint8[4] addr_suffix        = 12; // Shared 4 MSBytes
     uint8    base_addr_lsb      = 13; // Base station uplink LSByte
+    uint8    rx_channel         = 14; // Active RX/uplink RF channel (0..125)
 }
 
 // Size: 7 bytes
@@ -137,12 +150,13 @@ message BaseRfRx {
     uint8[31] payload         = 4;  // Raw ssl_robot_protocol payload bytes
 }
 
-// Size: 129 bytes
+// Size: 130 bytes
 message BaseScanResult {
-    uint8      start_channel = 1;  // First scanned channel (0..125)
-    uint8      count         = 2;  // Number of valid entries in busy_pct (1..126)
-    uint8      best_channel  = 3;  // Recommended quietest channel
-    uint8[126] busy_pct      = 4;  // 0..100% carrier detection rate per channel
+    uint8      start_channel   = 1;  // First scanned channel (0..125)
+    uint8      count           = 2;  // Number of valid entries in busy_pct (1..126)
+    uint8      best_channel    = 3;  // Recommended quietest TX/downlink channel
+    uint8[126] busy_pct        = 4;  // 0..100% carrier detection rate per channel
+    uint8      best_rx_channel = 5;  // Recommended paired RX/uplink channel (full-duplex)
 }
 
 // Size: 98 bytes
